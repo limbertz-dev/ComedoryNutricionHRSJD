@@ -1,0 +1,826 @@
+.vivo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+  height: 100%;
+  min-height: 0;
+}
+
+/* ---------- Flash de color a pantalla completa ---------- */
+/*
+ * Va fijo al viewport, no dentro de <main>: arranca en el borde del sidebar y
+ * llega hasta arriba del todo, de modo que el color tambien atraviesa el
+ * header (que es transparente). El sidebar queda fuera a proposito.
+ */
+.vivo__flash {
+  position: fixed;
+  inset: 0 0 0 var(--ancho-sidebar);
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  animation: vivo-flash 720ms ease-out forwards;
+}
+
+.vivo__flash--exito {
+  background: rgba(0, 143, 93, 0.34);
+  box-shadow: inset 0 0 0 10px rgba(0, 143, 93, 0.55);
+}
+
+.vivo__flash--error {
+  background: rgba(185, 28, 28, 0.34);
+  box-shadow: inset 0 0 0 10px rgba(185, 28, 28, 0.55);
+}
+
+@keyframes vivo-flash {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------- Rejilla principal ---------- */
+/*
+ * Dos columnas: la izquierda apila el lector y su barra de comidas del dia
+ * (misma altura entre ambos = mismo ancho de columna); la derecha es una
+ * sola tarjeta, la de marcaciones, que ocupa todo el alto disponible.
+ */
+.vivo__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 365px;
+  gap: var(--e-4);
+  flex: 1;
+  min-height: 0;
+}
+
+.vivo__columna-izquierda {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+  min-height: 0;
+}
+
+.vivo__lateral {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.vivo__tarjeta-historial {
+  flex: 1;
+  min-height: 0;
+}
+
+.vivo__tarjeta-historial .tarjeta__cuerpo {
+  padding: var(--e-3);
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / Edge */
+}
+
+.vivo__tarjeta-historial .tarjeta__cuerpo::-webkit-scrollbar {
+  display: none; /* Chrome / Safari */
+}
+
+/* ---------- Filtro por tiempo de comida ---------- */
+/*
+ * Las cuatro comidas del hospital, en fila: distribución flexible según el
+ * largo de cada nombre en vez de columnas iguales, para que ninguna se
+ * recorte. Separada de la lista por un borde inferior propio.
+ */
+/*
+ * Rejilla y no flex: con `flex: 1 1 auto` cada chip partía de su propio ancho
+ * de texto y «Té» quedaba tres veces más angosto que «Desayuno». Cuatro
+ * columnas iguales hacen que las cuatro comidas pesen lo mismo, que es lo que
+ * son: cuatro opciones del mismo rango.
+ */
+.filtro-comida {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 var(--e-3);
+  padding: 0 0 var(--e-3);
+  border-bottom: 1px solid var(--c-borde);
+}
+
+.filtro-comida__chip {
+  /* Poco aire a los lados: el ancho lo fija la columna, y «Desayuno» tiene
+     que entrar entero en ella. */
+  padding: 7px 4px;
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-full);
+  font-size: 12px;
+  font-weight: 750;
+  text-align: center;
+  white-space: nowrap;
+  /* Sin ellipsis ni overflow oculto: el nombre siempre se lee completo. */
+  overflow: visible;
+  text-overflow: clip;
+  cursor: pointer;
+  transition: all var(--trans-boton);
+}
+
+.filtro-comida__chip:hover {
+  color: var(--c-texto);
+  border-color: var(--c-acento-linea);
+}
+
+.filtro-comida__chip:focus-visible {
+  outline: 2px solid var(--c-acento-linea);
+  outline-offset: 1px;
+}
+
+.filtro-comida__chip--activo,
+.filtro-comida__chip--activo:hover {
+  color: #ffffff;
+  background: var(--gradiente-pildora-activa);
+  border-color: transparent;
+  box-shadow: var(--s-pildora-activa);
+}
+
+/* ---------- Buscador de la tarjeta de marcaciones ---------- */
+.marcaciones__buscador {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--e-3);
+}
+
+.marcaciones__buscador-icono {
+  position: absolute;
+  left: 11px;
+  display: flex;
+  align-items: center;
+  color: var(--c-texto-3);
+  pointer-events: none;
+}
+
+.marcaciones__buscador-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 32px 0 34px;
+  color: var(--c-texto);
+  background: var(--c-superficie-2);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-sm);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  transition: all var(--trans-boton);
+}
+
+.marcaciones__buscador-input:focus {
+  background: #ffffff;
+  border-color: #0ae584;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 229, 132, 0.18);
+}
+
+.marcaciones__buscador-input::placeholder {
+  color: var(--c-texto-3);
+  font-weight: 500;
+}
+
+/* Ocultar botón nativo de limpieza del navegador para evitar duplicados */
+.marcaciones__buscador-input::-webkit-search-cancel-button,
+.marcaciones__buscador-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.marcaciones__buscador-limpiar {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--c-texto-2);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.marcaciones__buscador-limpiar:hover {
+  color: var(--c-texto);
+  background: var(--c-borde);
+}
+
+/* ---------- Escenario (area grande de resultado) ---------- */
+.escenario {
+  display: flex;
+  flex-direction: column;
+  /* Ya no es un item de grid (ahora vive dentro de .vivo__columna-izquierda,
+     un flex column junto con .vivo__dia): sin flex:1 se encogería a su
+     contenido en vez de llenar el espacio que le sobra a la columna. */
+  flex: 1;
+  min-height: 0;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 8px 22px rgba(18, 35, 61, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+  /* Transición fluida idéntica a Tarjeta */
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.escenario:hover {
+  border-color: var(--c-borde-fuerte);
+  box-shadow: var(--s-2);
+  transform: translateY(-2px);
+}
+
+.escenario__barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+  padding: var(--e-3) var(--e-5);
+  border-bottom: 1px solid var(--c-borde);
+  background: var(--c-superficie-2);
+}
+
+.escenario__lector {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--c-texto-2);
+}
+
+.escenario__pulso {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-full);
+  background: var(--c-exito);
+  box-shadow: 0 0 0 0 rgba(0, 143, 93, 0.5);
+  animation: escenario-pulso 2.2s ease-out infinite;
+}
+
+@keyframes escenario-pulso {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 143, 93, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 9px rgba(0, 143, 93, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 143, 93, 0);
+  }
+}
+
+/*
+ * Fila: el gauge de raciones a la izquierda, el resultado de la marcacion
+ * centrado a la derecha. Las raciones quedan siempre visibles, sin importar
+ * si se esta esperando, leyendo o mostrando un resultado.
+ */
+.escenario__cuerpo {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+.escenario__gauge {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: var(--e-3);
+  flex: none;
+  width: 230px;
+  padding: var(--e-4);
+  border-right: 1px solid var(--c-borde);
+  background: var(--c-superficie-2);
+}
+
+/* <GaugeRaciones> es un bloque pensado para heredar el ancho de su
+   contenedor (así calcula `.gauge__grafico` al 100%); acá el contenedor es un
+   item de flex estirado, que por defecto lo encogería a su propio contenido. */
+.escenario__gauge .gauge {
+  width: 100%;
+}
+
+/* ---------- Modo manual ---------- */
+/*
+ * Autoriza una ración sin pasar por el lector: vive debajo del contador de
+ * raciones, separado por su propio borde, para que quede claro que es una
+ * acción aparte y no otro dato del gauge.
+ */
+.escenario__manual {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+  padding-top: var(--e-3);
+  border-top: 1px solid var(--c-borde);
+}
+
+.escenario__manual .boton {
+  transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.escenario__manual .boton:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--s-acento-alta);
+}
+
+.escenario__manual .boton:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.escenario__manual-etiqueta {
+  color: var(--c-texto-2);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.escenario__manual-nombre {
+  overflow: hidden;
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.escenario__principal {
+  display: flex;
+  align-items: safe center;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--e-5);
+  text-align: center;
+  overflow-y: auto;
+}
+
+/* Compacta el gauge en pantallas bajas para que la barra de comidas siga
+   visible sin scroll. */
+@media (max-height: 800px) {
+  .escenario__gauge {
+    width: 190px;
+    padding: var(--e-3);
+  }
+
+  .escenario__gauge .gauge__grafico {
+    max-width: 130px;
+  }
+}
+
+/* --- Estado en reposo / leyendo --- */
+.escenario__estado {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--e-3);
+  max-width: 30rem;
+}
+
+.escenario__huella {
+  color: var(--c-borde-fuerte);
+  transition: color var(--trans);
+}
+
+.escenario__huella--activa {
+  color: var(--c-acento);
+  animation: escenario-escaneo 1s ease-in-out infinite;
+}
+
+@keyframes escenario-escaneo {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.97);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+}
+
+.escenario__titulo-estado {
+  font-size: var(--t-lg);
+  font-weight: 650;
+  color: var(--c-texto);
+}
+
+.escenario__ayuda {
+  font-size: var(--t-base);
+  color: var(--c-texto-2);
+}
+
+.escenario__ayuda strong {
+  color: var(--c-acento-oscuro);
+}
+
+/* --- Resultado de la marcacion --- */
+.resultado {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--e-2);
+  max-width: 38rem;
+  animation: resultado-entrada 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes resultado-entrada {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.resultado__sello {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 148px;
+  height: 148px;
+  margin-bottom: var(--e-2);
+  border-radius: var(--r-full);
+  animation: resultado-sello 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes resultado-sello {
+  0% {
+    opacity: 0;
+    transform: scale(0.35);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.resultado--exito .resultado__sello {
+  background: var(--c-exito-tenue);
+  color: var(--c-exito);
+  box-shadow: 0 0 0 8px rgba(0, 143, 93, 0.1);
+}
+
+.resultado--error .resultado__sello {
+  background: var(--c-error-tenue);
+  color: var(--c-error);
+  box-shadow: 0 0 0 8px rgba(185, 28, 28, 0.1);
+}
+
+.resultado__titulo {
+  font-size: var(--t-sm);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.resultado--exito .resultado__titulo {
+  color: var(--c-exito);
+}
+
+.resultado--error .resultado__titulo {
+  color: var(--c-error);
+}
+
+.resultado__nombre {
+  font-size: var(--t-2xl);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--c-texto);
+}
+
+.resultado__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--e-3);
+  margin-top: var(--e-1);
+  font-size: var(--t-sm);
+  color: var(--c-texto-2);
+}
+
+.resultado__hora {
+  font-variant-numeric: tabular-nums;
+}
+
+.resultado__detalle {
+  margin-top: var(--e-2);
+  padding: var(--e-2) var(--e-4);
+  border-radius: var(--r-full);
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+.resultado--exito .resultado__detalle {
+  background: var(--c-exito-tenue);
+  color: var(--c-exito);
+}
+
+.resultado--error .resultado__detalle {
+  background: var(--c-error-tenue);
+  color: var(--c-error);
+}
+
+/* ---------- Historial ---------- */
+.historial {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.historial__vacio {
+  padding: var(--e-4) var(--e-3);
+  font-size: var(--t-sm);
+  color: var(--c-texto-3);
+  text-align: center;
+}
+
+/* Tarjeta rectangular con fondo teñido por completo según el resultado (como
+   las píldoras de comidas), pero con esquinas más contenidas y borde propio
+   en vez de una píldora totalmente redondeada. */
+.historial__fila {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: var(--e-3);
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  animation: historial-entrada 260ms ease-out backwards;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.historial__fila:hover {
+  transform: translateX(2px);
+  box-shadow: var(--s-1);
+}
+
+/* Fila cuya persona se está mostrando en el escenario y en la barra de
+   comidas: un contorno propio, además del color de éxito/rechazo que ya trae
+   el fondo. */
+.historial__fila--activa {
+  outline: 2px solid var(--c-acento-fuerte);
+  outline-offset: -1px;
+  box-shadow: var(--s-acento);
+}
+
+@keyframes historial-entrada {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.historial__fila--exito {
+  color: var(--c-acento-oscuro);
+  background: var(--c-exito-tenue);
+  border-color: var(--c-acento-linea);
+}
+
+.historial__fila--error {
+  color: var(--c-error);
+  background: var(--c-error-tenue);
+  border-color: #fecaca;
+}
+
+.historial__textos {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.historial__nombre {
+  color: inherit;
+  font-size: var(--t-sm);
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historial__sub {
+  color: inherit;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.historial__marca {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+/* ---------- Barra de acciones (siempre visible) ---------- */
+/* ---------- Día del comensal que acaba de marcar ---------- */
+/*
+ * Ocupa la franja donde antes estaban los botones (ahora en el header). Es la
+ * misma lectura del historial de comidas, pero en vivo: al marcar aparece el
+ * día entero de esa persona, comida por comida, a lo ancho de toda la tarjeta.
+ */
+.vivo__dia {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  /* Alto fijo: no debe cambiar de tamaño entre el aviso vacío y la grilla
+     de comidas, para que el layout no salte al marcar. */
+  min-height: 108px;
+  padding: var(--e-3) var(--e-5);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 8px 22px rgba(18, 35, 61, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  /* Transición fluida idéntica a Tarjeta */
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.vivo__dia:hover {
+  border-color: var(--c-borde-fuerte);
+  box-shadow: var(--s-2);
+  transform: translateY(-2px);
+}
+
+.vivo__dia-vacio {
+  width: 100%;
+  color: var(--c-texto-3);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  text-align: center;
+}
+
+.vivo__comidas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--e-3);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Cada comida entra un poco después que la anterior: el día se "escribe"
+   delante de quien mira, en vez de aparecer de golpe. Toda la píldora se tiñe
+   según el estado, en vez de solo la etiqueta interior. */
+.comida {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 10px 12px;
+  background: var(--c-superficie-2);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  animation: comida-entra 380ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: var(--retraso, 0ms);
+}
+
+.comida--recibida {
+  color: var(--c-acento-oscuro);
+  background: var(--c-exito-tenue);
+  border-color: var(--c-acento-linea);
+}
+
+.comida--no-recibida {
+  color: var(--c-error);
+  background: var(--c-error-tenue);
+  border-color: #fecaca;
+}
+
+.comida--pendiente {
+  color: var(--c-aviso);
+  background: var(--c-aviso-tenue);
+  border-color: #fde68a;
+}
+
+.comida--no-aplica {
+  color: var(--c-texto-3);
+  background: var(--c-superficie);
+  border-color: var(--c-borde);
+}
+
+.comida__nombre {
+  color: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.comida__estado {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.comida__estado svg {
+  flex: none;
+}
+
+.comida__punto {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: currentColor;
+}
+
+@keyframes comida-entra {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .comida {
+    animation: none;
+  }
+}
+
+/* ---------- Adaptacion a pantallas menores ---------- */
+@media (max-width: 1100px) {
+  .vivo__grid {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+
+  /* En la columna angosta, cuatro chips en fila dejarían «Desayuno» sin sitio:
+     mejor dos filas de dos, que siguen siendo del mismo tamaño entre sí. */
+  .filtro-comida {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .escenario__gauge {
+    width: 180px;
+  }
+
+  .comida {
+    padding: 7px 9px;
+  }
+
+  .resultado__nombre {
+    font-size: var(--t-xl);
+  }
+}
+
+@media (max-height: 720px) {
+  .resultado__sello {
+    width: 112px;
+    height: 112px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .historial__fila,
+  .historial__fila:hover {
+    animation: none;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .escenario:hover,
+  .vivo__dia:hover,
+  .escenario__manual .boton:hover {
+    transform: none;
+  }
+}

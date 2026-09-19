@@ -1,0 +1,203 @@
+/*
+ * Sidebar reciclado del panel de LA Aguilar Silva, con la gama verde.
+ * Medidas del original: columna de 250px, padding 24/18, blanco translúcido
+ * con blur y sombra lateral, ítems de 46px con radio 11 y peso 700, hover que
+ * se desplaza 2px. El ítem activo y el isotipo de la marca usan el mismo
+ * degradado esmeralda (`--gradiente-acento` / `--gradiente-pildora-activa`
+ * de tokens.css) que el resto de los elementos activos de la app.
+ */
+.sidebar {
+  grid-area: sidebar;
+  position: relative;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 24px 18px;
+  background: rgba(255, 255, 255, 0.94);
+  border-right: 1px solid var(--c-borde-suave);
+  box-shadow: 6px 0 24px rgba(18, 35, 61, 0.035);
+  backdrop-filter: blur(16px);
+  color: var(--c-texto);
+  overflow: visible;
+}
+
+@media (max-height: 520px) {
+  .sidebar {
+    overflow-y: auto;
+  }
+}
+
+/* ---------- Marca ---------- */
+.sidebar__marca {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 8px 26px;
+}
+
+.sidebar__marca-icono {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  place-items: center;
+  color: #ffffff;
+  background: var(--gradiente-pildora-activa);
+  border-radius: 13px;
+  box-shadow: 0 6px 16px rgba(0, 150, 94, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.sidebar__marca div {
+  display: grid;
+  min-width: 0;
+}
+
+.sidebar__marca strong {
+  color: var(--c-texto);
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.sidebar__marca small,
+.sidebar__pie small {
+  color: var(--c-texto-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---------- Módulos ---------- */
+.sidebar__nav {
+  display: grid;
+  gap: 7px;
+}
+
+.sidebar__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 13px;
+  color: var(--c-icono);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  text-align: left;
+  font-size: var(--t-sm);
+  font-weight: 700;
+  transition: color var(--trans), background-color var(--trans), border-color var(--trans),
+    box-shadow var(--trans), transform var(--trans);
+}
+
+.sidebar__item svg {
+  flex: none;
+}
+
+.sidebar__item:hover {
+  color: var(--c-acento-fuerte);
+  background: var(--c-acento-tenue);
+  transform: translateX(2px);
+}
+
+/* El único elemento saturado de toda la app. */
+.sidebar__item--activa,
+.sidebar__item--activa:hover {
+  color: #ffffff;
+  background: var(--gradiente-acento);
+  border-color: #0ae584;
+  box-shadow: 0 6px 18px rgba(0, 143, 93, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.30);
+  transform: none;
+}
+
+/* ---------- Sesión ---------- */
+/*
+ * La sesión es una ficha propia al pie: el nombre manda, el cargo se apaga
+ * contra el fondo y el botón queda encerrado y centrado dentro de la celda.
+ */
+.sidebar__pie {
+  margin-top: auto;
+  padding: 18px 0 2px;
+  border-top: 1px solid var(--c-borde-suave);
+}
+
+.sidebar__sesion {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 14px 12px 12px;
+  background: var(--c-superficie-2);
+  border: 1px solid var(--c-borde-suave);
+  border-radius: var(--r-lg);
+  text-align: center;
+}
+
+.sidebar__sesion-nombre {
+  color: var(--c-texto);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+/* Apagado a propósito: acompaña al nombre, no compite con él. */
+.sidebar__sesion-cargo {
+  color: var(--c-texto-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.sidebar__cerrar-sesion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 40px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  color: var(--c-texto-2);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-boton);
+  box-shadow: var(--s-1);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  transition: color var(--trans), background-color var(--trans), border-color var(--trans),
+    box-shadow var(--trans), transform var(--trans);
+}
+
+/* El icono ya es una puerta con la flecha saliendo: al pasar el cursor sale
+   un paso mas, que es de donde sale la vida del boton. */
+.sidebar__cerrar-sesion svg {
+  flex: none;
+  color: var(--c-acento-fuerte);
+  transition: transform var(--trans);
+}
+
+.sidebar__cerrar-sesion:hover {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border-color: var(--c-acento-linea);
+  box-shadow: var(--s-acento);
+  transform: translateY(-1px);
+}
+
+.sidebar__cerrar-sesion:hover svg {
+  transform: translateX(3px);
+}
+
+.sidebar__cerrar-sesion:active {
+  box-shadow: var(--s-1);
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__item,
+  .sidebar__item:hover,
+  .sidebar__cerrar-sesion:hover,
+  .sidebar__cerrar-sesion:hover svg {
+    transform: none;
+  }
+}

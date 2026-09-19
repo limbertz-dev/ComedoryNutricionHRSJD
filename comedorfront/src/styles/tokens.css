@@ -1,0 +1,113 @@
+/*
+ * Tokens de diseño del sistema.
+ * Toda la app (sidebar, header, secciones, gráficos) consume estas variables.
+ * No introducir colores fuera de esta lista.
+ */
+:root {
+  /* --- Marca (sidebar y bloque del logo: superficies claras) --- */
+  --c-sidebar: #fbfcfc;
+  --c-borde-suave: #e4e9e7;
+  --c-icono: #243b53;
+
+  /*
+   * --- Acento (acciones primarias, datos, foco) ---
+   * El verde brillante y su borde son la gama saturada del sistema: el ítem
+   * activo del sidebar y el botón primario, que comparten el mismo degradado.
+   * El resto sigue siendo blanco + azul muy oscuro para que esos dos destaquen.
+   */
+  --c-acento: #00b473;
+  --c-acento-fuerte: #008f5d;
+  /* Verde profundo: texto verde sobre fondo claro.
+     Es la única extensión de la gama, y existe por legibilidad: blanco sobre
+     #00b473 da 2.7:1 y #008f5d sobre verde pálido 3.5:1, ambos por debajo del
+     4.5:1 que necesita el texto pequeño. */
+  --c-acento-oscuro: #00663f;
+  --c-acento-brillante: #08d979;
+  --c-acento-borde: #0ae584;
+  --c-acento-claro: #dff7ea;
+  --c-acento-tenue: #effbf5;
+  /* Único paso intermedio: bordes visibles sobre los dos verdes pálidos. */
+  --c-acento-linea: #c9f2de;
+  /* Bordes de tarjeta, en reposo y al pasar el cursor. */
+  --c-borde-tarjeta: #d8ebe1;
+  --c-borde-tarjeta-activo: #a9e3c6;
+
+  /* --- Degradados Luminosos Esmeralda (Luz a 135°) ---
+     Botón primario, ítem activo del sidebar, píldoras activas (chips,
+     días/meses del calendario, pestañas de reportes): todos comparten
+     exactamente el mismo degradado, para que "esto está seleccionado / esto
+     es la acción principal" se lea igual en toda la app. */
+  --gradiente-acento: linear-gradient(135deg, #008f5d 0%, #00b473 55%, #0ae584 100%);
+  --gradiente-acento-hover: linear-gradient(135deg, #007a4f 0%, #009e65 55%, #09cc76 100%);
+  --gradiente-pildora-activa: linear-gradient(135deg, #00965e 0%, #0ae584 100%);
+  --gradiente-pildora-hover: linear-gradient(135deg, #008754 0%, #08d478 100%);
+
+  /* --- Estado --- */
+  /* Válido = el verde del sistema: en esta app «verde» significa ración habilitada. */
+  --c-exito: #008f5d;
+  --c-exito-tenue: #dff7ea;
+  --c-error: #b91c1c;
+  --c-error-tenue: #fee2e2;
+  --c-aviso: #b45309;
+  --c-aviso-tenue: #fef3c7;
+
+  /* --- Neutros (derivados de #e4e9e7 y de la escala slate del texto) --- */
+  --c-fondo: #f3faf6;
+  --c-superficie: #ffffff;
+  --c-superficie-2: #f7faf9;
+  --c-borde: #e4e9e7;
+  --c-borde-fuerte: #cfd8d5;
+  /* Lienzo del header y del contenido: equivalente verde del celeste suave
+     usado por LA Aguilar Silva, sin afectar las superficies del sidebar. */
+  --c-main-superficie-suave: #fafdfb;
+  --c-main-borde: #d8e8df;
+  --c-header-superficie: rgba(255, 255, 255, 0.92);
+  --c-texto: #12233d;
+  --c-texto-2: #64748b;
+  --c-texto-3: #94a3b8;
+
+  /* --- Tipografía (tamaños generosos: usuaria no técnica) ---
+     Nunito, como el sistema visual del que se recicla el panel: redonda y de
+     pesos altos (700 / 800), que es lo que le da el aire de app de gestión. */
+  --fuente: "Nunito", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --t-xs: 0.8125rem;
+  --t-sm: 0.9375rem;
+  --t-base: 1.0625rem;
+  --t-md: 1.1875rem;
+  --t-lg: 1.4375rem;
+  --t-xl: 1.875rem;
+  --t-2xl: 2.5rem;
+  --t-3xl: 3.25rem;
+
+  /* --- Espaciado --- */
+  --e-1: 0.25rem;
+  --e-2: 0.5rem;
+  --e-3: 0.75rem;
+  --e-4: 1rem;
+  --e-5: 1.5rem;
+  --e-6: 2rem;
+  --e-7: 2.75rem;
+
+  /* --- Radios / sombras / transiciones ---
+     Escala de radios del sistema original: 8 campos, 9 botones, 11 ítems del
+     sidebar, 13 tarjetas, 16 tejas de icono. */
+  --r-sm: 8px;
+  --r-boton: 9px;
+  --r-md: 11px;
+  --r-lg: 13px;
+  --r-teja: 16px;
+  --r-full: 999px;
+  /* Sombras difusas y de poca opacidad, tintadas con el azul del texto. */
+  --s-1: 0 4px 11px rgba(18, 35, 61, 0.06);
+  --s-2: 0 7px 24px rgba(18, 35, 61, 0.055);
+  --s-3: 0 5px 16px rgba(18, 35, 61, 0.05);
+  --s-acento: 0 4px 14px rgba(0, 143, 93, 0.30);
+  --s-acento-alta: 0 6px 18px rgba(0, 143, 93, 0.42);
+  --s-pildora-activa: 0 4px 12px rgba(0, 150, 94, 0.32);
+  --trans: 160ms ease;
+  --trans-boton: 140ms ease;
+  --trans-lenta: 900ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* --- Medidas del layout --- */
+  --ancho-sidebar: 250px;
+}

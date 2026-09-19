@@ -1,0 +1,337 @@
+/* Calendario desplegable del selector de período (diario y mensual).
+ * Lo usan Historial de comidas y Control Biométrico: mismas clases, mismo aspecto.
+ * No cambiar nombres de clase sin actualizar SelectorCalendario.jsx. */
+/* Selector propio: mantiene visible el significado del filtro y evita que el
+   calendario se vea como un control nativo ajeno al resto del sistema. */
+.historial__periodo {
+  position: relative;
+  z-index: 10;
+  margin-left: auto;
+}
+
+.historial__periodo-disparador {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 270px;
+  min-height: 54px;
+  padding: 8px 12px;
+  color: var(--c-texto);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  box-shadow: var(--s-1);
+  text-align: left;
+  transition-property: border-color, box-shadow, transform;
+  transition-duration: var(--trans-boton);
+}
+
+.historial__periodo-disparador:hover,
+.historial__periodo-disparador--abierto {
+  border-color: var(--c-borde-tarjeta-activo);
+  box-shadow: var(--s-2);
+}
+
+.historial__periodo-disparador:active {
+  transform: scale(0.96);
+}
+
+.historial__periodo-icono {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--c-acento-fuerte);
+  background: var(--c-acento-tenue);
+  border: 1px solid var(--c-acento-linea);
+  border-radius: var(--r-sm);
+}
+
+.historial__periodo-texto {
+  display: grid;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.historial__periodo-texto small {
+  color: var(--c-texto-2);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.historial__periodo-texto strong {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--c-texto);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.historial__periodo-chevron {
+  color: var(--c-texto-2);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  transform: translateY(-2px);
+  transition-property: transform, color;
+  transition-duration: var(--trans-boton);
+}
+
+.historial__periodo-disparador--abierto .historial__periodo-chevron {
+  color: var(--c-acento-fuerte);
+  transform: translateY(2px) rotate(180deg);
+}
+
+.historial__calendario {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(326px, calc(100vw - 48px));
+  padding: 12px;
+  color: var(--c-texto);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 18px 42px rgba(18, 35, 61, 0.15), 0 3px 10px rgba(18, 35, 61, 0.06);
+  animation: calendario-entra 140ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes calendario-entra {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.historial__calendario-atajos {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--c-borde);
+}
+
+.historial__calendario-atajos button {
+  min-height: 34px;
+  padding: 5px 7px;
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border: 1px solid var(--c-acento-linea);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  font-weight: 800;
+  transition-property: background-color, border-color, transform;
+  transition-duration: var(--trans-boton);
+}
+
+.historial__calendario-atajos button:hover {
+  background: var(--c-acento-claro);
+  border-color: var(--c-borde-tarjeta-activo);
+}
+
+.historial__calendario-atajos button:active {
+  transform: scale(0.96);
+}
+
+.historial__calendario-navegacion {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 8px;
+}
+
+.historial__calendario-navegacion strong {
+  font-size: var(--t-xs);
+  text-align: center;
+  text-transform: capitalize;
+}
+
+/* El mes es un botón: abre la cuadrícula de meses y vuelve de ella. */
+.historial__calendario-titulo {
+  padding: 7px 10px;
+  color: var(--c-texto);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  text-align: center;
+  text-transform: capitalize;
+  transition-property: color, background-color, border-color;
+  transition-duration: var(--trans-boton);
+}
+
+.historial__calendario-titulo:hover,
+.historial__calendario-titulo[aria-expanded='true'] {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border-color: var(--c-acento-linea);
+}
+
+.historial__calendario-navegacion button:not(.historial__calendario-titulo) {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-sm);
+  font-size: 22px;
+  line-height: 1;
+  transition-property: color, background-color, border-color, transform;
+  transition-duration: var(--trans-boton);
+}
+
+.historial__calendario-navegacion button:not(.historial__calendario-titulo):hover:not(:disabled) {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border-color: var(--c-acento-linea);
+}
+
+.historial__calendario-navegacion button:not(.historial__calendario-titulo):active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.historial__calendario-navegacion button:disabled,
+.historial__calendario-dias button:disabled,
+.historial__calendario-meses button:disabled {
+  color: var(--c-borde-fuerte);
+  cursor: not-allowed;
+}
+
+.historial__calendario-semana,
+.historial__calendario-dias {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.historial__calendario-semana span {
+  padding: 3px 0 5px;
+  color: var(--c-texto-3);
+  font-size: 9px;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.historial__calendario-dias button {
+  min-width: 0;
+  height: 34px;
+  color: var(--c-texto-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  font-weight: 800;
+  transition-property: color, background-color, border-color, transform;
+  transition-duration: var(--trans-boton);
+}
+
+.historial__calendario-dias button:hover:not(:disabled) {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+}
+
+.historial__calendario-dias button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.historial__calendario-dias .historial__calendario-dia--externo {
+  color: var(--c-borde-fuerte);
+}
+
+.historial__calendario-dias .historial__calendario-dia--hoy {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+}
+
+.historial__calendario-dias .historial__calendario-dia--seleccionado,
+.historial__calendario-dias .historial__calendario-dia--seleccionado:hover {
+  color: #ffffff;
+  background: var(--gradiente-pildora-activa);
+  border-color: transparent;
+  box-shadow: 0 4px 10px rgba(0, 150, 94, 0.35);
+}
+
+.historial__calendario-meses {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.historial__calendario-meses button {
+  min-height: 38px;
+  color: var(--c-texto-2);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: capitalize;
+  transition-property: color, background-color, border-color, transform;
+  transition-duration: var(--trans-boton);
+}
+
+.historial__calendario-meses button:hover:not(:disabled) {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border-color: var(--c-acento-linea);
+}
+
+.historial__calendario-meses button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.historial__calendario-meses .historial__calendario-mes--seleccionado,
+.historial__calendario-meses .historial__calendario-mes--seleccionado:hover {
+  color: #ffffff;
+  background: var(--gradiente-pildora-activa);
+  border-color: transparent;
+  box-shadow: 0 4px 10px rgba(0, 150, 94, 0.35);
+}
+
+@media (max-width: 720px) {
+  .historial__periodo,
+  .historial__periodo-disparador {
+    width: 100%;
+  }
+
+  .historial__periodo-disparador {
+    min-width: 0;
+  }
+
+  .historial__calendario {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .historial__periodo-disparador,
+  .historial__periodo-disparador:active,
+  .historial__calendario-atajos button,
+  .historial__calendario-atajos button:active,
+  .historial__calendario-navegacion button,
+  .historial__calendario-navegacion button:active,
+  .historial__calendario-dias button,
+  .historial__calendario-dias button:active,
+  .historial__calendario-meses button,
+  .historial__calendario-meses button:active {
+    transform: none;
+  }
+
+  .historial__calendario {
+    animation: none;
+  }
+}

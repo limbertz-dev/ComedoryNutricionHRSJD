@@ -1,0 +1,103 @@
+/*
+ * Barra superior transparente, sin borde y con aire generoso: en el sistema
+ * original el header no es una franja, es parte del lienzo. El único elemento
+ * con superficie propia es la píldora de contexto.
+ */
+.header {
+  grid-area: header;
+  --c-superficie-2: var(--c-main-superficie-suave);
+  --c-borde: var(--c-main-borde);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 25px 32px 18px;
+  background: transparent;
+  border: 0;
+}
+
+.header__titulos {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+/*
+ * Herramientas de la sección activa (hoy, el simulador de Control Biométrico):
+ * una tercera pieza en la misma fila del header, entre el título y las
+ * pastillas de turno/fecha. No agrega alto ni franjas propias.
+ */
+.header__herramientas {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.header__titulo {
+  color: var(--c-texto);
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.header__descripcion {
+  margin-top: 4px;
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.header__contexto {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  /* El contexto se ajusta al espacio disponible sin desplazar el título. */
+  flex-wrap: wrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.header__pastilla {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  color: var(--c-texto);
+  background: var(--c-header-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: 10px;
+  box-shadow: var(--s-3);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.header__pastilla svg {
+  color: var(--c-acento-fuerte);
+}
+
+/* El turno es el dato que la jefatura mira primero: va en verde pálido. */
+.header__pastilla--turno {
+  color: var(--c-acento-oscuro);
+  background: var(--c-header-superficie);
+  border-color: var(--c-acento-linea);
+}
+
+.header__pastilla--turno svg {
+  color: var(--c-acento-oscuro);
+}
+
+/* En pantallas angostas se recorta el contexto, nunca el título. */
+@media (max-width: 1180px) {
+  .header {
+    padding: 20px 22px 14px;
+  }
+}
+
+@media (max-width: 980px) {
+  .header__pastilla:not(.header__pastilla--turno) {
+    display: none;
+  }
+}

@@ -1,0 +1,28 @@
+.historial-vista {
+  min-height: 0;
+  padding: 16px 20px;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 8px 22px rgba(18, 35, 61, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  /* Transición fluida idéntica a Tarjeta */
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.historial-vista:hover {
+  border-color: var(--c-borde-fuerte);
+  box-shadow: var(--s-2);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .historial-vista:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .historial-vista {
+    padding: var(--e-4);
+  }
+}
