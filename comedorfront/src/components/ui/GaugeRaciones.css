@@ -1,0 +1,76 @@
+.gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--e-3);
+  margin: 0;
+}
+
+.gauge__grafico {
+  position: relative;
+  width: 100%;
+  max-width: 210px;
+  aspect-ratio: 1;
+}
+
+.gauge__svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg); /* el arco arranca arriba */
+}
+
+.gauge__pista {
+  fill: none;
+  stroke: var(--c-superficie-2);
+  stroke-width: 17;
+}
+
+.gauge__arco {
+  fill: none;
+  stroke-width: 17;
+  stroke-linecap: round;
+  /* Descenso suave del arco, sincronizado con la cifra (useValorAnimado). */
+  transition: stroke-dashoffset var(--trans-lenta), stroke var(--trans);
+}
+
+.gauge__centro {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+}
+
+.gauge__cifra {
+  font-size: var(--t-3xl);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  transition: color var(--trans);
+}
+
+.gauge__total {
+  font-size: var(--t-sm);
+  color: var(--c-texto-3);
+}
+
+.gauge__pie {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  text-align: center;
+}
+
+.gauge__rotulo {
+  font-size: var(--t-base);
+  font-weight: 650;
+  color: var(--c-texto);
+}
+
+.gauge__detalle {
+  font-size: var(--t-xs);
+  color: var(--c-texto-2);
+}

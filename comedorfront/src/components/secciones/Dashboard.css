@@ -1,0 +1,214 @@
+/* Estilos exclusivos de la seccion Dashboard. */
+.dashboard {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: var(--e-4);
+  align-items: stretch;
+}
+
+.dashboard__columna {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+  min-width: 0;
+}
+
+/* La tarjeta del turno estira para igualar el alto de la tarjeta del grafico. */
+.dashboard__columna > .tarjeta:first-child {
+  flex: 1;
+}
+
+.dashboard__columna > .tarjeta:first-child .tarjeta__cuerpo {
+  justify-content: center;
+}
+
+/* ---------- Tarjeta del turno actual ---------- */
+.turno__rotulo {
+  font-size: var(--t-sm);
+  color: var(--c-texto-2);
+}
+
+.turno__cifra {
+  margin-top: var(--e-1);
+  font-size: var(--t-3xl);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--c-acento-fuerte);
+}
+
+.turno__previstas {
+  font-size: var(--t-md);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--c-texto-2);
+}
+
+/* Medidor: relleno de acento sobre pista del mismo tono, un paso mas claro. */
+.turno__medidor {
+  height: 12px;
+  margin-top: var(--e-4);
+  border-radius: var(--r-full);
+  background: var(--c-acento-tenue);
+  border: 1px solid var(--c-acento-linea);
+  overflow: hidden;
+}
+
+.turno__medidor-relleno {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--c-acento);
+  transition: width var(--trans-lenta);
+}
+
+.turno__pie {
+  margin-top: var(--e-3);
+  font-size: var(--t-sm);
+  color: var(--c-texto-2);
+}
+
+.turno__pie strong {
+  color: var(--c-texto);
+}
+
+/* ---------- Tiles de apoyo ---------- */
+.dashboard__tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--e-4);
+}
+
+/* Forma de KPI del sistema original: teja de icono a la izquierda y el dato
+   a la derecha, en dos líneas. */
+.tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 104px;
+  padding: 18px 20px;
+  background: rgba(255, 255, 255, 0.93);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 8px 22px rgba(18, 35, 61, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.tile:hover {
+  border-color: var(--c-borde-fuerte);
+  box-shadow: var(--s-2);
+  transform: translateY(-2px);
+}
+
+.tile > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tile__icono {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  flex: none;
+  place-items: center;
+  color: var(--c-acento-fuerte);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(223, 247, 234, 0.95));
+  border: 1px solid var(--c-acento-linea);
+  border-radius: var(--r-teja);
+  box-shadow: 0 5px 14px rgba(0, 180, 115, 0.1), inset 0 1px 0 #ffffff;
+}
+
+.tile__icono--error {
+  color: var(--c-error);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(254, 226, 226, 0.95));
+  border-color: #fecaca;
+  box-shadow: 0 5px 14px rgba(185, 28, 28, 0.1), inset 0 1px 0 #ffffff;
+}
+
+.tile__rotulo {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-texto-2);
+  overflow-wrap: anywhere;
+}
+
+.tile__valor {
+  font-size: 23px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--c-texto);
+  font-variant-numeric: tabular-nums;
+}
+
+.tile__valor--exito {
+  color: var(--c-exito);
+}
+
+.tile__valor--error {
+  color: var(--c-error);
+}
+
+/* ---------- Grafico ---------- */
+.dashboard__grafico .tarjeta__cuerpo {
+  padding: var(--e-5) var(--e-4) var(--e-4);
+}
+
+.grafico__lienzo {
+  width: 100%;
+  height: 380px;
+}
+
+/* Recharts inyecta un foco por defecto en el contenedor; lo neutralizamos. */
+.grafico__lienzo .recharts-wrapper:focus,
+.grafico__lienzo .recharts-surface:focus {
+  outline: none;
+}
+
+.grafico__tooltip {
+  padding: var(--e-2) var(--e-3);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  box-shadow: var(--s-2);
+}
+
+.grafico__tooltip-titulo {
+  font-size: var(--t-xs);
+  font-weight: 650;
+  color: var(--c-texto-2);
+}
+
+.grafico__tooltip-valor {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  font-size: var(--t-sm);
+  font-weight: 650;
+  color: var(--c-texto);
+  font-variant-numeric: tabular-nums;
+}
+
+.grafico__tooltip-punto {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-full);
+  background: var(--c-acento);
+}
+
+@media (max-width: 1180px) {
+  .dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .grafico__lienzo {
+    height: 300px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile:hover {
+    transform: none;
+  }
+}

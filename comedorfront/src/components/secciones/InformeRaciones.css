@@ -1,0 +1,363 @@
+/*
+ * Informe de raciones: una sola hoja blanca, como el formulario del que sale.
+ * La tabla manda; el filtro de fechas, la cabecera y los coeficientes la
+ * acompañan con el mismo lenguaje del resto de la app.
+ */
+.informe {
+  display: grid;
+  gap: var(--e-5);
+  padding: var(--e-5) var(--e-5) var(--e-4);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 8px 22px rgba(18, 35, 61, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  /* Transición fluida idéntica a Tarjeta */
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.informe:hover {
+  border-color: var(--c-borde-fuerte);
+  box-shadow: var(--s-2);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .informe:hover {
+    transform: none;
+  }
+}
+
+/* ---------- Cabecera ---------- */
+.informe__cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--e-4);
+  flex-wrap: wrap;
+}
+
+.informe__encabezado {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Conmutador día / mes: dos pastillas dentro de una misma caja verde tenue. */
+.informe__nota {
+  max-width: 62ch;
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.informe__titulo {
+  color: var(--c-texto);
+  font-size: var(--t-lg);
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+.informe__acciones {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+}
+
+.informe__acciones .boton {
+  min-height: 46px;
+}
+
+.informe__periodo {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  padding: 9px 18px;
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border: 1px solid var(--c-acento-linea);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+
+.informe__periodo-mes {
+  font-size: var(--t-md);
+  font-weight: 800;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.informe__periodo-gestion {
+  color: var(--c-texto-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Período sin registro: se dice, en vez de dejar una tabla de guiones muda. */
+.informe__vacio {
+  padding: 10px 16px;
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+/* Confirmación de la descarga: aparece bajo la cabecera, sin tapar nada. */
+.informe__descarga {
+  padding: 10px 16px;
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border: 1px solid var(--c-acento-linea);
+  border-radius: var(--r-md);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.informe__descarga strong {
+  font-weight: 800;
+}
+
+/* Rango de días de FiltroRangoFechas, aplicado a "Registro diario": mismo
+   tratamiento que la confirmación de descarga, con su propio botón para
+   volver a ver el mes completo. */
+.informe__avisos {
+  padding: 12px 16px;
+  color: var(--c-texto);
+  background: var(--c-aviso-tenue);
+  border: 1px solid var(--c-aviso);
+  border-radius: var(--r-md);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.informe__avisos > strong {
+  color: var(--c-aviso);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.informe__avisos ul {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+}/* La caja permite desplazar la tabla en pantallas angostas sin que la hoja
+   entera se mueva. */
+.informe__tabla-caja {
+  overflow-x: auto;
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / Edge */
+}
+
+.informe__tabla-caja::-webkit-scrollbar {
+  display: none; /* Chrome / Safari */
+}
+
+.informe__tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+/* Encabezados: versalitas espaciadas sobre superficie tenue. */
+.informe__tabla thead th {
+  padding: 13px 16px;
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  border-bottom: 1px solid var(--c-borde);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-align: right;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.informe__tabla thead th.informe__col-tiempo {
+  text-align: left;
+}
+
+/* «P E R S O N A L» del formulario en papel. */
+.informe__tabla thead th.informe__col-grupo {
+  border-left: 1px solid var(--c-borde);
+  letter-spacing: 0.28em;
+  text-align: center;
+}
+
+.informe__tabla thead tr:last-child th {
+  padding-top: 9px;
+  padding-bottom: 11px;
+  color: var(--c-texto-3);
+  letter-spacing: 0.05em;
+}
+
+.informe__tabla tbody th,
+.informe__tabla tbody td,
+.informe__tabla tfoot th,
+.informe__tabla tfoot td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--c-borde);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.informe__tabla tbody tr:last-child th,
+.informe__tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Primera columna: es la etiqueta de la fila, no un dato. */
+.informe__tabla th.informe__col-tiempo {
+  color: var(--c-texto);
+  border-right: 1px solid var(--c-borde);
+  font-weight: 700;
+  text-align: left;
+}
+
+/* Su rótulo va centrado en la celda: pegado al margen quedaba lejos de los
+   datos y se leía como parte de la fila de categorías. */
+.informe__tabla thead th.informe__col-tiempo {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.informe__tabla tbody td {
+  color: var(--c-texto);
+  font-weight: 600;
+}
+
+/* Guion del papel: presente, pero sin peso visual. */
+.informe__tabla td.informe__celda--vacia {
+  color: var(--c-texto-3);
+  font-weight: 600;
+}
+
+/* Columna y fila de totales: el cierre de cada eje. Va en verde para que se
+   despegue de la banda de personal, y con su propia línea de separación. */
+.informe__tabla .informe__col-total {
+  color: var(--c-acento-oscuro);
+  /* Un paso por encima del verde de hover: si la columna usara el mismo tono,
+     al pasar el cursor se fundiría con la fila. */
+  background: var(--c-acento-claro);
+  border-left: 1px solid var(--c-acento-linea);
+  font-weight: 800;
+}
+
+.informe__tabla thead th.informe__col-total {
+  color: var(--c-acento-fuerte);
+  vertical-align: middle;
+}
+
+.informe__tabla tfoot th,
+.informe__tabla tfoot td {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border-bottom: 0;
+  border-top: 2px solid var(--c-acento-linea);
+  font-weight: 800;
+}
+
+/* Cruce de la fila y la columna de totales: el tono más fuerte de la tabla. */
+.informe__tabla tfoot td.informe__col-total {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-linea);
+}
+
+/* ---------- Gestión y meses ---------- */
+/* La gestión es una pastilla de ancho fijo — así 10 años cargados nunca
+   desbordan la fila ni le quitan ancho a los meses, que van al lado y
+   reparten todo el espacio que sobra. */
+.informe__cierre {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: var(--e-4);
+  align-items: start;
+}
+
+.informe__subtitulo {
+  margin-bottom: var(--e-3);
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.informe__tabla--coeficientes {
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.informe__tabla td.informe__celda--coeficiente {
+  color: var(--c-texto-2);
+  font-weight: 700;
+}
+
+.informe__totales {
+  display: grid;
+  gap: var(--e-3);
+  /* Alinea las dos cifras con la tabla de coeficientes, no con su rótulo. */
+  margin-top: calc(var(--t-xs) * 1.55 + var(--e-3));
+}
+
+.informe__total {
+  display: grid;
+  gap: 2px;
+  padding: 14px 18px;
+  background: var(--c-superficie-2);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+}
+
+.informe__total span {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.informe__total strong {
+  color: var(--c-texto);
+  font-size: var(--t-xl);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.informe__total small {
+  color: var(--c-texto-3);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+/* Cifra que se reporta al hospital: va en verde. */
+.informe__total--reportado {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border-color: var(--c-acento-linea);
+}
+
+.informe__total--reportado strong {
+  color: var(--c-acento-oscuro);
+}
+
+@media (max-width: 1080px) {
+  .informe__cierre {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .informe__totales {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 0;
+  }
+}

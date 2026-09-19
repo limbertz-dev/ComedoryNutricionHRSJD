@@ -1,0 +1,56 @@
+# ---------------------------------------------------------------
+# Sistema de Comedor y Nutricion Hospitalaria
+#
+# comedorback/ y comedorfront/ tienen su propio .gitignore. Este es
+# el de la raiz: cubre lo que vale para todo el repositorio y repite
+# a proposito lo critico, para que un .gitignore borrado por error no
+# deje pasar credenciales ni datos del hospital.
+# ---------------------------------------------------------------
+
+# Datos reales del hospital. NUNCA al repositorio: los volcados traen
+# nombres, carnets, telefonos y hashes de contrasena del personal, y
+# lo que se sube una vez queda en el historial para siempre.
+*.sql
+*.xlsx
+*.xls
+*.csv
+backups/
+archivados/
+
+# Credenciales y configuracion de cada maquina. Solo se versiona
+# comedorback/.env.example, que no lleva valores reales.
+.env
+.env.*
+!.env.example
+
+# Entornos y dependencias: se reconstruyen con requirements.txt y
+# package.json, no se versionan.
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Salidas de build
+dist/
+dist-ssr/
+build/
+.vite/
+
+# Registros y temporales
+*.log
+npm-debug.log*
+yarn-error.log*
+*.tmp
+*.bak
+
+# Editor y sistema operativo
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

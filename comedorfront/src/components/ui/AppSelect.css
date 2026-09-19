@@ -1,0 +1,141 @@
+.app-select {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.app-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 12px;
+  color: var(--c-texto);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--trans-boton), box-shadow var(--trans-boton), background-color var(--trans-boton);
+}
+
+.app-select-trigger:hover:not(:disabled),
+.app-select.open .app-select-trigger {
+  border-color: var(--c-borde-tarjeta-activo);
+  background: #fbfdfc;
+  box-shadow: 0 4px 12px rgba(0, 143, 93, 0.08);
+}
+
+.app-select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--c-borde-tarjeta-activo);
+  box-shadow: 0 0 0 2px var(--c-acento-claro);
+}
+
+.app-select-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.app-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.app-select-chevron {
+  flex: none;
+  color: var(--c-texto-2);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  transition: transform 150ms ease, color 150ms ease;
+}
+
+.app-select.open .app-select-chevron {
+  transform: rotate(180deg);
+  color: var(--c-acento-oscuro);
+}
+
+.app-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  min-width: 100%;
+  z-index: 1300;
+  max-height: 250px;
+  margin: 0;
+  padding: 5px;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde-tarjeta);
+  border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(18, 35, 61, 0.12), 0 4px 12px rgba(0, 143, 93, 0.06);
+  animation: app-select-enter 150ms ease both;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-acento-linea) transparent;
+}
+
+.app-select-menu--arriba {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+@keyframes app-select-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.app-select-menu li {
+  margin: 0;
+  padding: 0;
+}
+
+.app-select-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  color: var(--c-texto);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.app-select-menu button:hover:not(:disabled) {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+}
+
+.app-select-menu button.selected {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  font-weight: 800;
+}
+
+.app-select-check {
+  color: var(--c-acento-fuerte);
+  font-weight: 800;
+  font-size: 13px;
+}

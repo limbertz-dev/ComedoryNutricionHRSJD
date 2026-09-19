@@ -1,0 +1,108 @@
+/* Vista completa: el selector arriba y el informe debajo. */
+.reportes {
+  display: grid;
+  gap: var(--e-4);
+  align-content: start;
+}
+
+/* Selector de vistas retomado del patrón de caja/reportes de laaguilarsilva. */
+.reportes__selector {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 6px;
+  background: var(--c-acento-tenue);
+  border: 1px solid var(--c-acento-linea);
+  border-radius: var(--r-lg);
+  box-shadow: var(--s-1), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.reportes__selector-opcion {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  min-height: 68px;
+  padding: 12px 16px;
+  color: var(--c-texto-2);
+  background: transparent;
+  border: 1px solid var(--c-borde-tarjeta);
+  border-radius: var(--r-sm);
+  text-align: left;
+  transition: color var(--trans-boton), background-color var(--trans-boton),
+    border-color var(--trans-boton), box-shadow var(--trans-boton), transform var(--trans-boton);
+}
+
+.reportes__selector-opcion:hover {
+  color: var(--c-acento-oscuro);
+  background: rgba(255, 255, 255, 0.58);
+  border-color: var(--c-borde-suave);
+  box-shadow: var(--s-1);
+  transform: translateY(-1px);
+}
+
+.reportes__selector-opcion:active {
+  box-shadow: none;
+  transform: translateY(0) scale(0.96);
+}
+
+.reportes__selector-opcion strong {
+  align-self: end;
+  font-size: var(--t-sm);
+  font-weight: 800;
+}
+
+.reportes__selector-opcion span {
+  align-self: start;
+  color: var(--c-texto-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reportes__selector-opcion--activa,
+.reportes__selector-opcion--activa:hover {
+  z-index: 1;
+  color: var(--c-acento-fuerte);
+  background: var(--c-superficie);
+  border-color: var(--c-borde-suave);
+  box-shadow: 0 5px 15px rgba(18, 35, 61, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.reportes__selector-opcion--activa:hover {
+  border-color: var(--c-borde-tarjeta-activo);
+  box-shadow: 0 8px 18px rgba(18, 35, 61, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transform: translateY(-1px);
+}
+
+.reportes__selector-opcion--activa:active {
+  box-shadow: var(--s-1);
+  transform: translateY(0) scale(0.96);
+}
+
+/* Marcador de la vista todavía sin datos: mismo tono que el resto de avisos. */
+.reportes__pendiente {
+  padding: var(--e-6) var(--e-5);
+  color: var(--c-texto-2);
+  background: var(--c-superficie);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-lg);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reportes__selector-opcion,
+  .reportes__selector-opcion:hover,
+  .reportes__selector-opcion:active,
+  .reportes__selector-opcion--activa:hover,
+  .reportes__selector-opcion--activa:active {
+    transform: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .reportes__selector {
+    grid-template-columns: 1fr;
+  }
+}

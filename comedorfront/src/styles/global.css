@@ -1,0 +1,299 @@
+@import './tokens.css';
+
+/* ---------- Reset acotado ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--fuente);
+  font-size: var(--t-base);
+  line-height: 1.55;
+  color: var(--c-texto);
+  /* Lienzo verde muy claro: mantiene la relación fondo/tarjeta del sistema de
+     referencia sin llevar su celeste a esta identidad visual. */
+  background:
+    radial-gradient(circle at 80% 0%, rgba(0, 180, 115, 0.08), transparent 30%),
+    var(--c-fondo);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4, p, figure {
+  margin: 0;
+}
+
+/* Pesos altos en títulos y cifras: es media firma del estilo. */
+h1, h2, h3, strong {
+  font-weight: 800;
+}
+
+/*
+ * Calidad visual: ningún control nativo puede quedar con el estilo del navegador.
+ * Estas reglas neutralizan la apariencia por defecto en toda la app; cada
+ * cada componente propio construye su aspecto encima.
+ */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: 3px solid var(--c-acento-fuerte);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* ---------- Barras de scroll: finas, como en el sistema original ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-texto-3) var(--c-acento-tenue);
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--c-acento-tenue);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--c-texto-3);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--c-acento-fuerte);
+}
+
+/* ---------- Filas de tabla: hover del sistema original ---------- */
+tbody tr {
+  transition: background var(--trans-boton);
+}
+
+tbody tr:hover {
+  background: var(--c-acento-tenue);
+}
+
+/* ---------- Utilidad ---------- */
+.solo-lectores {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- Estructura de la app ---------- */
+.app {
+  display: grid;
+  grid-template-columns: var(--ancho-sidebar) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'sidebar header'
+    'sidebar main';
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+.app__main {
+  display: flex;
+  flex-direction: column;
+  grid-area: main;
+  position: relative;
+  --c-superficie-2: var(--c-main-superficie-suave);
+  --c-borde: var(--c-main-borde);
+  min-height: 0;
+  min-width: 0;
+  background: transparent;
+  overflow-y: auto;
+  padding: var(--e-2) var(--e-6) 34px;
+}
+
+/* La pantalla en vivo no debe requerir scroll: ocupa exactamente el alto. */
+.app__main--sin-scroll {
+  overflow: hidden;
+  padding: var(--e-2) var(--e-6) var(--e-5);
+}
+
+/* Entrada suave al cambiar de sección, igual que el sistema original. */
+.transicion {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  animation: seccion-entra 240ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transform-origin: top center;
+}
+
+.app__estado-api {
+  flex: none;
+  margin-bottom: var(--e-2);
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+}
+
+.app__estado-api [role='alert'] {
+  color: var(--c-error);
+  font-weight: 700;
+}
+
+@keyframes seccion-entra {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transicion {
+    animation: none;
+  }
+}
+
+.seccion__cabecera {
+  margin-bottom: var(--e-5);
+}
+
+.seccion__titulo {
+  font-size: var(--t-xl);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.seccion__descripcion {
+  margin-top: var(--e-1);
+  font-size: var(--t-sm);
+  color: var(--c-texto-2);
+}
+
+/* ==========================================================================
+   TOOLTIPS PERSONALIZADOS (Estilo Blanco + Verde Esmeralda)
+   ========================================================================== */
+[data-tooltip] {
+  position: relative;
+}
+
+/* Estado base: al salir el cursor, desaparece inmediatamente (0s delay) */
+[data-tooltip]::before,
+[data-tooltip]::after {
+  position: absolute;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  transition-delay: 0s;
+  z-index: 9999;
+}
+
+/* Al pasar el cursor: espera 2.2s antes de mostrarse, para que solo aparezca si el cursor se detiene de verdad */
+[data-tooltip]:hover::before,
+[data-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 2.2s;
+}
+
+/* Tarjeta flotante con fondo blanco y sombra esmeralda */
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  padding: 6px 12px;
+  background: #ffffff;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: normal;
+  width: max-content;
+  max-width: 250px;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 143, 93, 0.18), 0 2px 8px rgba(18, 35, 61, 0.08);
+}
+
+/* Flecha indicadora */
+[data-tooltip]::before {
+  content: '';
+  border: 5px solid transparent;
+}
+
+/* --- Posición por defecto: Arriba centrada sobre el botón --- */
+[data-tooltip]:not([data-tooltip-pos])::after,
+[data-tooltip][data-tooltip-pos="top"]::after {
+  bottom: calc(100% + 6px);
+  top: auto;
+  left: 50%;
+  transform: translateX(-50%) translateY(3px);
+}
+
+[data-tooltip]:not([data-tooltip-pos])::before,
+[data-tooltip][data-tooltip-pos="top"]::before {
+  bottom: calc(100% + 1px);
+  top: auto;
+  left: 50%;
+  border-top-color: #a7f3d0;
+  transform: translateX(-50%) translateY(3px);
+}
+
+[data-tooltip]:not([data-tooltip-pos]):hover::after,
+[data-tooltip]:not([data-tooltip-pos]):hover::before,
+[data-tooltip][data-tooltip-pos="top"]:hover::after,
+[data-tooltip][data-tooltip-pos="top"]:hover::before {
+  transform: translateX(-50%) translateY(0);
+}
+
+/* --- Posición Abajo centrada --- */
+[data-tooltip][data-tooltip-pos="bottom"]::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: 50%;
+  transform: translateX(-50%) translateY(-3px);
+}
+
+[data-tooltip][data-tooltip-pos="bottom"]::before {
+  top: calc(100% + 1px);
+  bottom: auto;
+  left: 50%;
+  border-bottom-color: #a7f3d0;
+  transform: translateX(-50%) translateY(-3px);
+}
+
+[data-tooltip][data-tooltip-pos="bottom"]:hover::after,
+[data-tooltip][data-tooltip-pos="bottom"]:hover::before {
+  transform: translateX(-50%) translateY(0);
+}

@@ -1,0 +1,53 @@
+/* Superficie neutra compartida por todos los recuadros del sistema. */
+.tarjeta {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 8px 22px rgba(18, 35, 61, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.tarjeta:hover {
+  border-color: var(--c-borde-fuerte);
+  box-shadow: var(--s-2);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tarjeta:hover {
+    transform: none;
+  }
+}
+
+.tarjeta__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+  padding: var(--e-4) var(--e-5);
+  border-bottom: 1px solid var(--c-borde);
+}
+
+.tarjeta__titulo {
+  font-size: var(--t-base);
+  font-weight: 800;
+  color: var(--c-texto);
+}
+
+.tarjeta__accesorio {
+  font-size: var(--t-xs);
+  font-weight: 700;
+  color: var(--c-texto-2);
+}
+
+.tarjeta__cuerpo {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  padding: var(--e-5);
+}

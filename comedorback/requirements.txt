@@ -1,0 +1,9 @@
+# Backen del Sistema de Comedor y Nutricion Hospitalaria
+# Python 3.13 · instalar con:  .venv/Scripts/pip install -r requirements.txt
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlalchemy==2.0.52
+alembic==1.19.2
+pymysql==1.2.0
+cryptography==50.0.1
+pydantic-settings==2.15.0
