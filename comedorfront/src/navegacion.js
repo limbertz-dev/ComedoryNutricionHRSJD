@@ -4,6 +4,7 @@ import {
   IconoHuella,
   IconoReportes,
 } from './components/ui/Iconos.jsx';
+import { resolverSeccionGuardada, seccionInicialDeRol, seccionesPermitidas } from './permisos.js';
 
 /**
  * Definición única del menú lateral.
@@ -50,18 +51,31 @@ export function buscarSeccion(id) {
   return SECCIONES.find((seccion) => seccion.id === id) ?? SECCIONES[0];
 }
 
+/** Lo que la barra superior muestra en lugar de una sección vedada. */
+export const SECCION_SIN_PERMISO = {
+  id: 'sin-permiso',
+  titulo: 'Sin permiso',
+  descripcion: 'Esta sección no está habilitada para su usuario',
+};
+
+/** Secciones del sidebar para el rol, en el orden del menú. */
+export function seccionesDeRol(rol) {
+  const permitidas = seccionesPermitidas(rol);
+  return SECCIONES.filter(({ id }) => permitidas.includes(id));
+}
+
 const CLAVE_SECCION_ACTIVA = 'comedor_seccion_activa';
 
 /**
  * Sección con la que abrir la app: la de la última visita si sigue siendo
- * válida, para que un F5 no devuelva siempre a Control Biométrico.
+ * válida para este rol, para que un F5 no devuelva siempre a Control
+ * Biométrico.
  */
-export function leerSeccionGuardada() {
+export function leerSeccionGuardada(rol) {
   try {
-    const guardada = localStorage.getItem(CLAVE_SECCION_ACTIVA);
-    return SECCIONES.some((seccion) => seccion.id === guardada) ? guardada : SECCION_INICIAL;
+    return resolverSeccionGuardada(rol, localStorage.getItem(CLAVE_SECCION_ACTIVA));
   } catch {
-    return SECCION_INICIAL;
+    return seccionInicialDeRol(rol);
   }
 }
 

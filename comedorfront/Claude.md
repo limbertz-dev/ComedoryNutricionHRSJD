@@ -38,7 +38,12 @@ Secciones del sidebar (`src/navegacion.js`):
    con exportación a Excel y PDF. «Reportes de pacientes» queda como pendiente hasta que
    exista ese módulo.
 
-La pantalla de inicio de sesión es solo visual: todavía no hay endpoint de autenticación.
+El acceso es real (`POST /auth/login`, `GET /auth/yo`, `POST /auth/cambio-password`): la
+sesión vive en `src/sesion.js` + `src/hooks/useSesion.js`, `api.js` firma cada petición con
+`Authorization: Bearer` y convierte 401 en «Sesión expirada», 403 en «Sin permiso» y 428 en
+cambio obligatorio de contraseña. Qué ve cada rol está solo en `src/permisos.js`: la
+cocinera ve Control Biométrico sin el «Modo manual»; jefa y sistemas, todo; un rol
+desconocido, nada. Ninguna sección se monta sin pasar por esa guardia.
 
 ## Calidad visual (obligatorio, no negociable)
 
