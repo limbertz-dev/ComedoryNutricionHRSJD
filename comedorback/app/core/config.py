@@ -18,7 +18,30 @@ class Configuracion(BaseSettings):
     db_port: int = 3306
     db_user: str = "root"
     db_password: str = ""
-    db_name: str = "bd_comedor_dev"
+    db_name: str = "bd_nutricion"
+
+    # Base del modulo de turnos, del otro ingeniero. Este sistema solo la
+    # LEE, y el usuario de la aplicacion solo tiene SELECT sobre ella.
+    # No se cablea: en la maquina de desarrollo y en el servidor del
+    # hospital puede llamarse distinto.
+    db_name_turnos: str = "bd_proyecto_backend"
+
+    # --- SIH del hospital: SQL Server, base `bdestadistica` ---
+    #
+    # SOLO LECTURA, sin excepciones. El usuario con el que se conecta solo
+    # tiene SELECT: el SIH es el sistema del que depende el hospital entero.
+    #
+    # Si queda vacio, el modulo de pacientes NO se cae: arranca en modo
+    # manual. Es deliberado — la red del hospital se corta y la licenciada
+    # no puede quedarse sin poder trabajar.
+    #
+    # El puerto por defecto es el 1433 de SQL Server, pero la instancia del
+    # hospital escucha en uno propio: va en .env, no cableado.
+    sih_host: str = ""
+    sih_port: int = 1433
+    sih_database: str = "bdestadistica"
+    sih_user: str = ""
+    sih_password: str = ""
 
     # Desde qué direcciones puede el navegador llamar a esta API, separadas por
     # comas. Por defecto, el servidor de desarrollo de Vite.

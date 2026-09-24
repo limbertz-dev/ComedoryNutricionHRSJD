@@ -7,3 +7,10 @@ alembic==1.19.2
 pymysql==1.2.0
 cryptography==50.0.1
 pydantic-settings==2.15.0
+# Driver de SQL Server para leer el SIH (bdestadistica), SOLO LECTURA.
+# pymssql y no pyodbc: no requiere instalar un driver ODBC en el servidor.
+pymssql==2.3.2
+# Tests del backend. Se corren con:  .venv/Scripts/python.exe -m pytest
+# httpx lo necesita el TestClient de FastAPI.
+pytest==9.1.1
+httpx==0.28.1
