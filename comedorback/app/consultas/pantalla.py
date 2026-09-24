@@ -24,7 +24,7 @@ from app.modelos.comedor import (
     HorarioComida,
     LecturaBiometrica,
 )
-from app.modelos.heredados import Categoria, Comida, Persona, Usuario
+from app.modelos.heredados import Comensal, Comida
 
 
 @dataclass
@@ -168,9 +168,8 @@ def estado(
 
     padron = sesion.execute(
         select(func.count())
-        .select_from(Usuario)
-        .join(Categoria, Categoria.id == Usuario.categoria_id)
-        .where(no_es_enfermeria())
+        .select_from(Comensal)
+        .where(no_es_enfermeria(Comensal.categoria))
     ).scalar_one()
 
     return Estado(
@@ -199,14 +198,6 @@ def ultimas_marcaciones(
     jefatura en una sola secuencia cronológica.
     """
     dia = fecha or datetime.now().date()
-    ficha = (
-        select(
-            Persona.user_id.label("user_id"),
-            func.min(Persona.id).label("persona_id"),
-        )
-        .group_by(Persona.user_id)
-        .subquery("ficha")
-    )
     comida_asistencia = aliased(Comida, name="comida_asistencia")
     comida_horario = aliased(Comida, name="comida_horario")
     hora_lectura = func.time(LecturaBiometrica.fecha_hora)
@@ -236,13 +227,11 @@ def ultimas_marcaciones(
                     LecturaBiometrica.usuario_id.is_(None),
                     literal("Huella no reconocida"),
                 ),
-                else_=func.regexp_replace(
-                    func.trim(Persona.nombre_completo), "[[:space:]]+", " "
-                ),
+                else_=Comensal.nombre_completo,
             ).label("nombre"),
             case(
                 (LecturaBiometrica.usuario_id.is_(None), literal("Sin identificar")),
-                else_=Categoria.nombre,
+                else_=Comensal.categoria,
             ).label("categoria"),
             comida_resuelta_id.label("comida_id"),
             func.coalesce(comida_asistencia.nombre, comida_horario.nombre).label(
@@ -260,10 +249,7 @@ def ultimas_marcaciones(
             LecturaBiometrica.dispositivo,
         )
         .select_from(LecturaBiometrica)
-        .outerjoin(ficha, ficha.c.user_id == LecturaBiometrica.usuario_id)
-        .outerjoin(Persona, Persona.id == ficha.c.persona_id)
-        .outerjoin(Usuario, Usuario.id == LecturaBiometrica.usuario_id)
-        .outerjoin(Categoria, Categoria.id == Usuario.categoria_id)
+        .outerjoin(Comensal, Comensal.usuario_id == LecturaBiometrica.usuario_id)
         .outerjoin(Asistencia, Asistencia.lectura_id == LecturaBiometrica.id)
         .outerjoin(comida_asistencia, comida_asistencia.id == Asistencia.comida_id)
         .outerjoin(
@@ -288,10 +274,8 @@ def ultimas_marcaciones(
             Asistencia.id.label("id"),
             Asistencia.usuario_id,
             Asistencia.fecha_hora,
-            func.regexp_replace(
-                func.trim(Persona.nombre_completo), "[[:space:]]+", " "
-            ).label("nombre"),
-            Categoria.nombre.label("categoria"),
+            Comensal.nombre_completo.label("nombre"),
+            Comensal.categoria.label("categoria"),
             Asistencia.comida_id,
             Comida.nombre.label("comida"),
             literal("aceptada").label("resultado"),
@@ -300,10 +284,7 @@ def ultimas_marcaciones(
             literal("registro-manual").label("dispositivo"),
         )
         .select_from(Asistencia)
-        .outerjoin(ficha, ficha.c.user_id == Asistencia.usuario_id)
-        .outerjoin(Persona, Persona.id == ficha.c.persona_id)
-        .outerjoin(Usuario, Usuario.id == Asistencia.usuario_id)
-        .outerjoin(Categoria, Categoria.id == Usuario.categoria_id)
+        .outerjoin(Comensal, Comensal.usuario_id == Asistencia.usuario_id)
         .outerjoin(Comida, Comida.id == Asistencia.comida_id)
         .where(
             Asistencia.metodo == "manual",

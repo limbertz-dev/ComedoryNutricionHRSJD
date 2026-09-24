@@ -17,7 +17,7 @@ tiene que haber con qué responderle.
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -29,7 +29,7 @@ from app.modelos.comedor import (
     HorarioComida,
     LecturaBiometrica,
 )
-from app.modelos.heredados import Comida, Persona, Usuario
+from app.modelos.heredados import Comensal, Comida
 
 CODIGO_SIN_CLASIFICAR = "sin_clasificar"
 
@@ -112,11 +112,8 @@ def resolver_comida_en_curso(sesion: Session, momento: datetime) -> ComidaEnCurs
 
 
 def _nombre_de(sesion: Session, usuario_id: int) -> str | None:
-    consulta = (
-        select(func.regexp_replace(func.trim(Persona.nombre_completo), "[[:space:]]+", " "))
-        .where(Persona.user_id == usuario_id)
-        .order_by(Persona.id)
-        .limit(1)
+    consulta = select(Comensal.nombre_completo).where(
+        Comensal.usuario_id == usuario_id
     )
     return sesion.execute(consulta).scalar_one_or_none()
 
@@ -130,8 +127,8 @@ def _categoria_reporte_de(sesion: Session, usuario_id: int) -> int:
     """
     consulta = (
         select(CategoriaReporteMap.categoria_reporte_id)
-        .join(Usuario, Usuario.categoria_id == CategoriaReporteMap.categoria_id)
-        .where(Usuario.id == usuario_id)
+        .join(Comensal, Comensal.categoria_id == CategoriaReporteMap.categoria_id)
+        .where(Comensal.usuario_id == usuario_id)
         .limit(1)
     )
     mapeada = sesion.execute(consulta).scalar_one_or_none()

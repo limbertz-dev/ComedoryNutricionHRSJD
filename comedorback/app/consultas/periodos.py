@@ -1,8 +1,13 @@
 """Qué períodos puede consultar la pantalla de informes.
 
-Las gestiones salen de la tabla `gestiones` del módulo heredado, que es el
-calendario propio del hospital: si mañana habilitan 2027, aparece sola aquí sin
-tocar código. Se ofrecen solo las marcadas como activas.
+Las gestiones salen de los propios datos del comedor: el año en curso más
+todo año que tenga al menos una ración registrada. No se lee la tabla
+`gestiones` del módulo de turnos: no forma parte del contrato de vistas v_*.
+Con los datos actuales el resultado es el mismo que daba el filtro viejo
+(gestiones activas, descartando las pasadas sin raciones): las futuras
+figuran inactivas. La única diferencia es que un año que el hospital
+habilite por adelantado ya no aparece antes de empezar: aparece solo el 1 de
+enero, sin tocar código.
 
 Los meses son los doce del calendario, siempre. No se leen de la tabla `meses`
 a propósito: un informe se puede consultar aunque nadie haya creado la fila
@@ -19,7 +24,6 @@ from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
 from app.modelos.comedor import Asistencia
-from app.modelos.heredados import Gestion
 
 MESES = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -80,24 +84,15 @@ def periodos_disponibles(
     hoy = hoy or date.today()
     raciones = _raciones_por_mes(sesion)
 
-    gestiones = sesion.execute(
-        select(Gestion.anio, Gestion.activo)
-        .where(Gestion.activo == 1)
-        .order_by(Gestion.anio)
-    ).all()
+    # Años sin ninguna ración anteriores al actual no se ofrecen: solo
+    # llenarían el selector de años vacíos.
+    gestiones = sorted({anio for anio, _mes in raciones} | {hoy.year})
 
     disponibles = []
-    for anio, activo in gestiones:
-        anio = int(anio)
+    for anio in gestiones:
         total_gestion = sum(
             v for (a, _m), v in raciones.items() if a == anio
         )
-        # La tabla del hospital marca como activas gestiones anteriores a este
-        # sistema (2023, 2024, 2025), que nunca van a tener una sola ración.
-        # Ofrecerlas solo llena el selector de años vacíos. Se muestran las que
-        # tienen registro y las que todavía pueden tenerlo.
-        if total_gestion == 0 and anio < hoy.year:
-            continue
 
         meses = [
             MesDisponible(
@@ -112,7 +107,7 @@ def periodos_disponibles(
         disponibles.append(
             GestionDisponible(
                 gestion=anio,
-                activo=bool(activo),
+                activo=True,
                 situacion=_situacion(anio, None, hoy),
                 raciones=total_gestion,
                 meses=meses,
