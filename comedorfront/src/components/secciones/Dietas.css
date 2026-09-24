@@ -1,0 +1,187 @@
+/*
+ * Dietas — catálogo en tabla plana de dos columnas, con edición en línea.
+ * Solo tokens de tokens.css; la jerarquía la da la tipografía, no adornos.
+ */
+
+.dietas {
+  display: grid;
+  gap: var(--e-5);
+}
+
+/* ---------- Cabecera ---------- */
+.dietas__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--e-3);
+}
+
+.dietas__titulo {
+  margin: 0;
+  font-size: var(--t-lg);
+  font-weight: 800;
+  color: var(--c-texto);
+}
+
+/* ---------- Estados y errores ---------- */
+.dietas__estado {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--c-texto-2);
+}
+
+.dietas__error {
+  margin: var(--e-2) 0 0;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--c-error);
+}
+
+/* ---------- Tabla ---------- */
+.dietas__tabla-caja {
+  overflow-x: auto;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+}
+
+.dietas__tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+.dietas__tabla th,
+.dietas__tabla td {
+  padding: var(--e-3) var(--e-4);
+  border-bottom: 1px solid var(--c-borde);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.dietas__tabla thead th {
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dietas__tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.dietas__tabla .dietas__col-activa {
+  width: 7rem;
+  text-align: center;
+}
+
+.dietas__fila {
+  transition: background-color var(--trans);
+}
+
+.dietas__fila:hover,
+.dietas__fila--edicion {
+  background: var(--c-superficie-2);
+}
+
+.dietas__fila--inactiva .dietas__dieta-nombre {
+  color: var(--c-texto-3);
+}
+
+.dietas__dieta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+}
+
+.dietas__dieta-nombre {
+  font-size: var(--t-base);
+  font-weight: 700;
+  color: var(--c-texto);
+}
+
+/* Editar y Eliminar (o Sí/No al confirmar) van al final de la celda, lejos del nombre. */
+.dietas__acciones {
+  display: flex;
+  align-items: center;
+  gap: var(--e-1);
+  margin-left: auto;
+}
+
+.dietas__confirmar {
+  font-size: var(--t-sm);
+  font-weight: 700;
+  color: var(--c-error);
+}
+
+/* ---------- Edición en línea ---------- */
+.dietas__form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+}
+
+.dietas__campo {
+  flex: 1 1 14rem;
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--e-3);
+  font-size: var(--t-sm);
+  color: var(--c-texto);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-boton);
+  transition: border-color var(--trans);
+}
+
+.dietas__campo:focus {
+  border-color: var(--c-acento);
+}
+
+.dietas__campo::placeholder {
+  color: var(--c-texto-3);
+}
+
+.dietas__select {
+  flex: 0 1 14rem;
+  min-width: 11rem;
+}
+
+/* ---------- Interruptor Activa ---------- */
+.dietas__switch {
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 24px;
+  padding: 2px;
+  background: var(--c-borde-fuerte);
+  border-radius: var(--r-full);
+  transition: background var(--trans);
+}
+
+.dietas__switch--activo {
+  background: var(--gradiente-acento);
+}
+
+.dietas__switch:disabled {
+  opacity: 0.6;
+}
+
+.dietas__switch-puntero {
+  width: 20px;
+  height: 20px;
+  background: var(--c-superficie);
+  border-radius: var(--r-full);
+  box-shadow: var(--s-1);
+  transition: transform var(--trans);
+}
+
+.dietas__switch--activo .dietas__switch-puntero {
+  transform: translateX(20px);
+}

@@ -1,0 +1,71 @@
+/*
+ * Control de Dietas — planilla diaria de raciones por servicio y tipo de dieta.
+ * Misma estructura y estilo que la tabla de Reportes de pacientes. Solo tokens.
+ */
+
+.control-dietas {
+  display: grid;
+  gap: var(--e-4);
+}
+
+/* ---------- Barra de controles ---------- */
+.control-dietas__cabecera {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--e-4);
+}
+
+.control-dietas__filtro {
+  display: grid;
+  gap: 6px;
+  min-width: 210px;
+}
+
+.control-dietas__filtro-rotulo {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.control-dietas__acciones {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+}
+
+.control-dietas__acciones .boton {
+  min-height: 42px;
+}
+
+/* ---------- Estados ---------- */
+.control-dietas__estado {
+  margin: 0;
+  font-size: var(--t-sm);
+  color: var(--c-texto-2);
+}
+
+.control-dietas__error-carga {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2) var(--e-3);
+  color: var(--c-error);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.control-dietas__error {
+  margin: 0;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--c-error);
+}
+
+.control-dietas__error-carga .control-dietas__error {
+  flex: 1 1 24rem;
+}

@@ -1,4 +1,4 @@
-import { SECCIONES } from '../../navegacion';
+import { GRUPOS } from '../../navegacion';
 import { IconoCerrarSesion, IconoLogo } from '../ui/Iconos.jsx';
 import './Sidebar.css';
 
@@ -20,23 +20,33 @@ export default function Sidebar({ seccionActiva, onCambiarSeccion, onCerrarSesio
       </div>
 
       <nav className="sidebar__nav" aria-label="Módulos del sistema">
-        {SECCIONES.map(({ id, etiqueta, descripcion, Icono }) => {
-          const activa = id === seccionActiva;
+        {GRUPOS.map((grupo) => (
+          <div className="sidebar__grupo" key={grupo.id}>
+            <p className="sidebar__grupo-titulo" id={`grupo-${grupo.id}`}>
+              {grupo.etiqueta}
+            </p>
 
-          return (
-            <button
-              key={id}
-              type="button"
-              className={`sidebar__item${activa ? ' sidebar__item--activa' : ''}`}
-              onClick={() => onCambiarSeccion(id)}
-              aria-current={activa ? 'page' : undefined}
-              data-tooltip={descripcion}
-            >
-              <Icono tamano={21} />
-              <span>{etiqueta}</span>
-            </button>
-          );
-        })}
+            <div className="sidebar__grupo-items" role="group" aria-labelledby={`grupo-${grupo.id}`}>
+              {grupo.secciones.map(({ id, etiqueta, descripcion, Icono }) => {
+                const activa = id === seccionActiva;
+
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`sidebar__item${activa ? ' sidebar__item--activa' : ''}`}
+                    onClick={() => onCambiarSeccion(id)}
+                    aria-current={activa ? 'page' : undefined}
+                    data-tooltip={descripcion}
+                  >
+                    <Icono tamano={21} />
+                    <span>{etiqueta}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="sidebar__pie">

@@ -1,0 +1,100 @@
+/*
+ * Reportes de pacientes — la planilla del hospital en pantalla: encabezado
+ * de dos filas, servicios, TOTAL y secciones. Mismo lenguaje visual que el
+ * reporte del personal. Solo tokens.
+ */
+
+.reportes-pacientes {
+  display: grid;
+  gap: var(--e-4);
+}
+
+/* ---------- Cabecera ---------- */
+.reportes-pacientes__cabecera {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--e-4);
+}
+
+.reportes-pacientes__titulo {
+  color: var(--c-texto);
+  font-size: var(--t-lg);
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+.reportes-pacientes__nota {
+  margin-top: 2px;
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.reportes-pacientes__acciones {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+}
+
+.reportes-pacientes__acciones .boton {
+  min-height: 46px;
+}
+
+/* ---------- Estados ---------- */
+.reportes-pacientes__estado {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+}
+
+.reportes-pacientes__error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-2) var(--e-3);
+  color: var(--c-error);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.reportes-pacientes__error p {
+  flex: 1 1 24rem;
+}
+
+.reportes-pacientes__vacio {
+  padding: 10px 16px;
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.reportes-pacientes__descarga {
+  padding: 10px 16px;
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border: 1px solid var(--c-acento-linea);
+  border-radius: var(--r-md);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.reportes-pacientes__descarga strong {
+  font-weight: 800;
+}
+
+
+
+.reportes-pacientes__notas {
+  display: grid;
+  gap: var(--e-1);
+  margin: 0;
+  padding-left: var(--e-5);
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+}

@@ -70,6 +70,27 @@
 /* ---------- Módulos ---------- */
 .sidebar__nav {
   display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+/*
+ * Rótulo del grupo: no es un ítem, es el letrero que separa el comedor del
+ * personal del de los pacientes. Por eso va chico, en mayúsculas y apagado —
+ * tiene que leerse como una división, nunca como algo cliqueable.
+ */
+.sidebar__grupo-titulo {
+  margin: 0 0 8px;
+  padding: 0 13px;
+  color: var(--c-texto-3);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar__grupo-items {
+  display: grid;
   gap: 7px;
 }
 

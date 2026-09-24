@@ -79,18 +79,6 @@
   transform: translateY(0) scale(0.96);
 }
 
-/* Marcador de la vista todavía sin datos: mismo tono que el resto de avisos. */
-.reportes__pendiente {
-  padding: var(--e-6) var(--e-5);
-  color: var(--c-texto-2);
-  background: var(--c-superficie);
-  border: 1px dashed var(--c-borde-fuerte);
-  border-radius: var(--r-lg);
-  font-size: var(--t-sm);
-  font-weight: 600;
-  text-align: center;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .reportes__selector-opcion,
   .reportes__selector-opcion:hover,

@@ -1,0 +1,131 @@
+/*
+ * TablaPlanilla — la planilla del hospital en pantalla: encabezado
+ * de dos filas, servicios, TOTAL y secciones. Utilizada tanto en
+ * Reportes de Pacientes (solo lectura) como en Control de Dietas
+ * (editable). Solo tokens de tokens.css.
+ */
+
+.tabla-planilla-caja {
+  overflow-x: auto;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+}
+
+.tabla-planilla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabla-planilla th,
+.tabla-planilla td {
+  padding: 7px 8px;
+  border: 1px solid var(--c-borde);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.tabla-planilla thead th {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.tabla-planilla tbody th {
+  color: var(--c-texto);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tabla-planilla .tabla-planilla__col-servicio {
+  min-width: 11.5rem;
+  text-align: left;
+}
+
+.tabla-planilla__cifra--cero {
+  color: var(--c-texto-3);
+}
+
+.tabla-planilla__cifra--sin-fuente {
+  color: var(--c-texto-3);
+  font-size: var(--t-xs);
+  font-style: italic;
+}
+
+.tabla-planilla__cifra--total {
+  font-weight: 800;
+  background: var(--c-superficie-2);
+}
+
+.tabla-planilla__total th,
+.tabla-planilla__total td {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-claro);
+  font-weight: 800;
+}
+
+/* Secciones debajo del TOTAL (EMERGENCIAS, OTROS SERVICIOS). */
+.tabla-planilla__seccion th[scope='colgroup'] {
+  padding-top: var(--e-4);
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+/* ---------- Celdas editables (Control de Dietas) ---------- */
+.tabla-planilla__celda--editable {
+  padding: 2px 3px;
+}
+
+.tabla-planilla__input {
+  width: 100%;
+  min-width: 3.5rem;
+  height: 32px;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: center;
+  color: var(--c-texto);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-sm);
+  transition: border-color var(--trans), background-color var(--trans), box-shadow var(--trans);
+  -moz-appearance: textfield;
+}
+
+.tabla-planilla__input::-webkit-outer-spin-button,
+.tabla-planilla__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.tabla-planilla__input:hover {
+  border-color: var(--c-borde-fuerte);
+}
+
+.tabla-planilla__input:focus {
+  outline: none;
+  border-color: var(--c-acento);
+  box-shadow: 0 0 0 2px var(--c-acento-tenue);
+  background: var(--c-superficie);
+}
+
+.tabla-planilla__input--modificado {
+  background: var(--c-acento-tenue);
+  border-color: var(--c-acento-linea);
+  font-weight: 700;
+  color: var(--c-acento-oscuro);
+}

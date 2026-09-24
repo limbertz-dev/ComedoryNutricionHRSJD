@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import InformeRaciones from './InformeRaciones.jsx';
+import ReportesPacientes from './ReportesPacientes.jsx';
 import './Reportes.css';
 
 /**
- * Selector entre los reportes del personal y de pacientes. El del personal ya
- * muestra el formulario digitalizado (día y mes); el de pacientes llega con su
- * módulo.
+ * Selector entre los reportes del personal y de pacientes. El del personal
+ * muestra el formulario digitalizado; el de pacientes, la planilla de
+ * nutrición (distribución).
  */
 export default function Reportes() {
   const [vistaActiva, setVistaActiva] = useState('personal');
@@ -40,13 +41,7 @@ export default function Reportes() {
         </button>
       </div>
 
-      {vistaActiva === 'personal' ? (
-        <InformeRaciones />
-      ) : (
-        <p className="reportes__pendiente">
-          Los reportes de pacientes se habilitarán junto con el módulo de Pacientes.
-        </p>
-      )}
+      {vistaActiva === 'personal' ? <InformeRaciones /> : <ReportesPacientes />}
     </div>
   );
 }

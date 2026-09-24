@@ -7,8 +7,10 @@ import SimuladorLector from './components/secciones/SimuladorLector.jsx';
 import Dashboard from './components/secciones/Dashboard.jsx';
 import Reportes from './components/secciones/Reportes.jsx';
 import Historial from './components/secciones/Historial.jsx';
+import ControlDeDietas from './components/secciones/ControlDeDietas.jsx';
+import Dietas from './components/secciones/Dietas.jsx';
 import Login from './components/secciones/Login.jsx';
-import { SECCION_INICIAL, buscarSeccion, guardarSeccionActiva, leerSeccionGuardada } from './navegacion.js';
+import { SECCION_INICIAL, buscarSeccion, grupoDeSeccion, guardarSeccionActiva, leerSeccionGuardada } from './navegacion.js';
 import {
   marcarAsistencia,
   obtenerEstadoPantalla,
@@ -169,6 +171,9 @@ export default function App() {
   }
 
   const esPantallaEnVivo = seccionActiva === 'vivo';
+  /* El padrón y el cupo del turno son del comedor del personal: sobre las
+     pantallas de pacientes ese aviso no dice nada de lo que se está viendo. */
+  const esModuloPersonal = grupoDeSeccion(seccionActiva) === 'personal';
   const seccion = buscarSeccion(seccionActiva);
 
   function manejarCambiarSeccion(id) {
@@ -200,7 +205,7 @@ export default function App() {
         onCerrarSesion={manejarCerrarSesion}
       />
 
-      <Header seccion={seccion} turno={turno}>
+      <Header seccion={seccion} turno={esModuloPersonal ? turno : null}>
         {esPantallaEnVivo ? (
           <SimuladorLector
             personal={estado.personal}
@@ -221,7 +226,7 @@ export default function App() {
           repetirlo solo le resta a un layout sin scroll. Los errores sí se
           quedan: son los únicos que necesitan atención y acción (reintentar).
         */}
-        {!esPantallaEnVivo || errorApi || errorEstado ? (
+        {esModuloPersonal && (!esPantallaEnVivo || errorApi || errorEstado) ? (
           <div className="app__estado-api">
             {!esPantallaEnVivo ? (
               <p id="estado-api" role="status">
@@ -254,6 +259,10 @@ export default function App() {
           ) : null}
 
           {seccionActiva === 'historial' ? <Historial personal={estado.personal} /> : null}
+
+          {seccionActiva === 'control-dietas' ? <ControlDeDietas /> : null}
+
+          {seccionActiva === 'dietas' ? <Dietas /> : null}
 
           {seccionActiva === 'reportes' ? <Reportes /> : null}
         </div>

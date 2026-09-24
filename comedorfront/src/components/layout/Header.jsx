@@ -32,10 +32,12 @@ export default function Header({ seccion, turno, children }) {
       {children ? <div className="header__herramientas">{children}</div> : null}
 
       <div className="header__contexto">
-        <span className="header__pastilla header__pastilla--turno">
-          <IconoReloj tamano={18} />
-          Turno {turno}
-        </span>
+        {turno ? (
+          <span className="header__pastilla header__pastilla--turno">
+            <IconoReloj tamano={18} />
+            Turno {turno}
+          </span>
+        ) : null}
 
         <span className="header__pastilla">
           <IconoCalendario tamano={18} />

@@ -238,3 +238,22 @@ export function IconoDocumentoPdf(props) {
     </Svg>
   );
 }
+
+export function IconoCama(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3 20V8.6M3 14h13.4a4.6 4.6 0 0 1 4.6 4.6V20M2.2 20h19.6" />
+      <circle cx="7.6" cy="10.8" r="2.1" />
+    </Svg>
+  );
+}
+
+export function IconoDieta(props) {
+  return (
+    <Svg {...props}>
+      <path d="M9.4 4.4H7.4a2 2 0 0 0-2 2V19a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V6.4a2 2 0 0 0-2-2h-2" />
+      <rect x="9.2" y="2.8" width="5.6" height="3.2" rx="1.1" />
+      <path d="M8.8 11.4h6.4M8.8 15.4h4.2" />
+    </Svg>
+  );
+}
