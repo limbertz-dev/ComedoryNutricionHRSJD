@@ -44,7 +44,7 @@ def sembrar() -> None:
                 select(Comida.id).where(Comida.codigo == codigo)
             ).scalar_one_or_none()
             if comida_id is None:
-                print(f"  falta la comida '{codigo}' en la tabla comidas — se omite")
+                print(f"  falta la comida '{codigo}' en v_comidas — se omite")
                 continue
 
             ya_existe = sesion.execute(

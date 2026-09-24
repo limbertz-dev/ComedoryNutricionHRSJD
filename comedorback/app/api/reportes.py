@@ -30,8 +30,8 @@ def _hoy() -> date:
 def periodos(sesion: SesionDep) -> list[GestionDisponible]:
     """Lo que necesita el selector de período de la pantalla de informes.
 
-    Las gestiones salen del calendario propio del hospital (`gestiones`), así
-    que habilitar un año nuevo no requiere tocar el código. Cada mes trae su
+    Las gestiones son el año en curso más los años con raciones registradas,
+    así que un año nuevo aparece solo sin tocar el código. Cada mes trae su
     conteo de raciones para poder mostrar en blanco los que no tienen registro.
     """
     return [
