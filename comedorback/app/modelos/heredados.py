@@ -1,193 +1,151 @@
-"""Modelos de las tablas que ya existen en el módulo de turnos.
+"""Lo que este sistema lee del módulo de turnos, mapeado sobre las vistas v_*.
 
-SOLO LECTURA. Este sistema las consulta pero no las administra: no se crean,
-no se alteran y no se borran desde aquí. Están marcadas con
-`info={"heredada": True}` para que alembic/env.py las excluya del autogenerate.
+SOLO LECTURA. Ninguna clase de este archivo apunta a una tabla: todas apuntan
+a una vista de `bd_nutricion` que a su vez lee `bd_proyecto_backend` (ver
+alembic/versions/0c294cd98c3a_vistas_contrato_turnos.py). Si el otro
+ingeniero renombra una columna, se corrige la vista y este archivo no cambia.
 
-Se declaran porque las claves foráneas de las tablas del comedor necesitan
-resolver su destino, y porque el padrón de comensales se lee de `users` y
-`personas`. Los tipos reproducen exactamente el DDL de bd_turnos.
+Heredan de `BaseContrato`, no de `Base`: viven en otra metadata para que
+alembic no las confunda con tablas por crear.
+
+Las vistas no tienen clave primaria real. La que se declara acá es la clave
+lógica de cada fila y solo le sirve al ORM para identificarla; nunca se
+escribe nada a través de estas clases.
 """
 
-from datetime import date, datetime, time
+from datetime import date, time
 
-from sqlalchemy import Date, DateTime, Integer, String, Text, Time
+from sqlalchemy import Date, Integer, String, Text, Time
 from sqlalchemy.dialects.mysql import BIGINT, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.db import Base
+from app.core.db import BaseContrato
 
-# Las claves de bd_turnos son BIGINT UNSIGNED. Cualquier FK que las apunte
-# debe usar el mismo tipo o MySQL rechaza la restricción.
+# Las claves de bd_proyecto_backend son BIGINT UNSIGNED.
 ID = BIGINT(unsigned=True)
 
-HEREDADA = {"info": {"heredada": True}}
+
+class Comensal(BaseContrato):
+    """`v_comensales`: el padrón. Una fila por `users.id`, siempre.
+
+    Reemplaza el viejo `users JOIN personas`: el eje es users.id, el JOIN a
+    personas y categorias es LEFT (un usuario sin ficha aparece con
+    `tiene_ficha = 0` en vez de desaparecer), se toma una sola ficha por
+    usuario (la de menor id) y el nombre llega con los espacios ya limpiados.
+    El nombre sale de personas.nombre_completo, nunca de users.name.
+    """
+
+    __tablename__ = "v_comensales"
+
+    usuario_id: Mapped[int] = mapped_column(ID, primary_key=True)
+    nombre_completo: Mapped[str | None] = mapped_column(String(100))
+    carnet_identidad: Mapped[str | None] = mapped_column(String(100))
+    tipo_trabajador: Mapped[str | None] = mapped_column(String(30))
+    numero_item: Mapped[str | None] = mapped_column(
+        String(30), comment="personas.numero_tipo_salario: el ítem de planilla."
+    )
+    categoria_id: Mapped[int | None] = mapped_column(ID)
+    categoria: Mapped[str | None] = mapped_column(String(255))
+    categoria_nivel: Mapped[int | None] = mapped_column(Integer)
+    tiene_ficha: Mapped[bool] = mapped_column(TINYINT(1))
 
 
-class Categoria(Base):
-    __tablename__ = "categorias"
-    __table_args__ = HEREDADA
+class Categoria(BaseContrato):
+    """`v_categorias`: las 15 categorías reales del hospital."""
+
+    __tablename__ = "v_categorias"
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(255))
     nivel: Mapped[int] = mapped_column(Integer)
     descripcion: Mapped[str | None] = mapped_column(String(255))
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class Servicio(Base):
-    __tablename__ = "servicios"
-    __table_args__ = HEREDADA
+class Servicio(BaseContrato):
+    """`v_servicios`. Ojo: `servicios` es la SALA del hospital (Pediatría,
+    Emergencias), NO la categoría "Servicio" del formulario de Estadística."""
+
+    __tablename__ = "v_servicios"
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(255))
     descripcion: Mapped[str | None] = mapped_column(Text)
     cantidad_pacientes: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class Usuario(Base):
-    """Tabla `users`. Su `name` es un nombre de acceso, no sirve para reportes:
-    el nombre real del comensal está en `Persona.nombre_completo`."""
+class Comida(BaseContrato):
+    """`v_comidas`: los tiempos de comida tal como los define el módulo de turnos.
 
-    __tablename__ = "users"
-    __table_args__ = HEREDADA
-
-    id: Mapped[int] = mapped_column(ID, primary_key=True)
-    name: Mapped[str] = mapped_column(String(255))
-    email: Mapped[str] = mapped_column(String(255), unique=True)
-    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime)
-    password: Mapped[str] = mapped_column(String(255))
-    categoria_id: Mapped[int] = mapped_column(ID)
-    remember_token: Mapped[str | None] = mapped_column(String(100))
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
-    must_change_password: Mapped[bool] = mapped_column(TINYINT(1))
-
-
-class Persona(Base):
-    """Ficha real del comensal: de aquí salen nombre y carnet para los informes."""
-
-    __tablename__ = "personas"
-    __table_args__ = HEREDADA
-
-    id: Mapped[int] = mapped_column(ID, primary_key=True)
-    nombre_completo: Mapped[str] = mapped_column(String(100))
-    carnet_identidad: Mapped[str] = mapped_column(String(100), unique=True)
-    fecha_nacimiento: Mapped[date | None] = mapped_column(Date)
-    genero: Mapped[str] = mapped_column(String(20))
-    telefono: Mapped[str] = mapped_column(String(22))
-    direccion: Mapped[str] = mapped_column(String(150))
-    tipo_trabajador: Mapped[str | None] = mapped_column(String(30))
-    nacionalidad: Mapped[str] = mapped_column(String(150))
-    tipo_salario: Mapped[str] = mapped_column(String(20))
-    numero_tipo_salario: Mapped[str] = mapped_column(String(30))
-    fecha_ingreso_institucion: Mapped[date | None] = mapped_column(Date)
-    user_id: Mapped[int] = mapped_column(ID)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
-
-
-class Comida(Base):
-    """Los cuatro tiempos de comida, tal como los define el módulo de turnos.
-
-    Tabla heredada de solo lectura: este sistema no le agrega columnas. El
-    orden cronológico sale del propio `id` (1 Desayuno, 2 Almuerzo, 3 Té,
-    4 Cena) y el coeficiente vive en `coeficientes_racion.comida_id`.
+    No se le agrega nada: el orden cronológico sale del propio `id`
+    (1 Desayuno, 2 Almuerzo, 3 Té, 4 Cena), el coeficiente vive en
+    `coeficientes_racion.comida_id` y el horario en `horarios_comida`.
     """
 
-    __tablename__ = "comidas"
-    __table_args__ = HEREDADA
+    __tablename__ = "v_comidas"
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     nombre: Mapped[str] = mapped_column(String(255))
-    codigo: Mapped[str] = mapped_column(String(255), unique=True)
+    codigo: Mapped[str] = mapped_column(String(255))
     estado: Mapped[bool] = mapped_column(TINYINT(1))
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class UsuarioServicio(Base):
-    """A qué sala del hospital está asignada cada persona.
+class UsuarioServicio(BaseContrato):
+    """`v_usuario_servicios`: a qué sala está asignada cada persona."""
 
-    Ojo con el vocabulario: `servicios` aquí es la sala (Pediatría, Emergencias),
-    NO la categoría "Servicio" del formulario de Estadística.
-    """
-
-    __tablename__ = "usuario_servicios"
-    __table_args__ = HEREDADA
+    __tablename__ = "v_usuario_servicios"
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     usuario_id: Mapped[int] = mapped_column(ID)
     servicio_id: Mapped[int] = mapped_column(ID)
-    descripcion_usuario_servicio: Mapped[str | None] = mapped_column(Text)
     estado: Mapped[bool] = mapped_column(TINYINT(1))
     fecha_ingreso: Mapped[date] = mapped_column(Date)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class Turno(Base):
-    __tablename__ = "turnos"
-    __table_args__ = HEREDADA
+class TurnoAsignado(BaseContrato):
+    """`v_turnos_asignados`: la asignación con su turno ya resuelto.
 
-    id: Mapped[int] = mapped_column(ID, primary_key=True)
-    nombre_turno: Mapped[str] = mapped_column(String(255))
+    `duracion_horas` es el dato que declara el hospital; no se calcula de
+    hora_inicio/hora_fin porque en los turnos largos no coinciden.
+    """
+
+    __tablename__ = "v_turnos_asignados"
+
+    id: Mapped[int] = mapped_column("turno_asignado_id", ID, primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ID)
+    servicio_id: Mapped[int] = mapped_column(ID)
+    area_id: Mapped[int | None] = mapped_column(ID)
+    fecha: Mapped[date] = mapped_column(Date)
+    estado: Mapped[str] = mapped_column(String(50))
+    es_intercambio: Mapped[bool] = mapped_column(TINYINT(1))
+    turno_id: Mapped[int] = mapped_column(ID)
+    turno: Mapped[str] = mapped_column(String(255))
     hora_inicio: Mapped[time] = mapped_column(Time)
     hora_fin: Mapped[time] = mapped_column(Time)
     duracion_horas: Mapped[int] = mapped_column(Integer)
-    categoria_id: Mapped[int] = mapped_column(ID)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    turno_categoria_id: Mapped[int] = mapped_column(ID)
 
 
-class TurnoComida(Base):
-    """De aquí sale el derecho a comer. `dia_relativo` resuelve las guardias
-    largas: 0 = comida del mismo día, 1 = del día siguiente."""
+class TurnoComida(BaseContrato):
+    """`v_turno_comida`. `dia_relativo`: 0 = comida del mismo día del turno,
+    1 = del día siguiente (guardias largas)."""
 
-    __tablename__ = "turno_comida"
-    __table_args__ = HEREDADA
+    __tablename__ = "v_turno_comida"
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     turno_id: Mapped[int] = mapped_column(ID)
     comida_id: Mapped[int] = mapped_column(ID)
     dia_relativo: Mapped[int] = mapped_column(TINYINT(unsigned=True))
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class TurnoAsignado(Base):
-    __tablename__ = "turnos_asignados"
-    __table_args__ = HEREDADA
-
-    id: Mapped[int] = mapped_column(ID, primary_key=True)
-    usuario_id: Mapped[int] = mapped_column(ID)
-    servicio_id: Mapped[int] = mapped_column(ID)
-    area_id: Mapped[int | None] = mapped_column(ID)
-    turno_id: Mapped[int] = mapped_column(ID)
-    semana_id: Mapped[int] = mapped_column(ID)
-    mes_id: Mapped[int] = mapped_column(ID)
-    gestion_id: Mapped[int] = mapped_column(ID)
-    fecha: Mapped[date] = mapped_column(Date)
-    estado: Mapped[str] = mapped_column(String(50))
-    es_intercambio: Mapped[bool] = mapped_column(TINYINT(1))
-    observacion: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
-
-
-class NovedadLaboral(Base):
-    """Permisos, bajas y cambios de turno. Se consulta, nunca se escribe.
+class NovedadLaboral(BaseContrato):
+    """`v_novedades_laborales`: permisos, bajas y cambios de turno.
 
     Un permiso, una baja médica, una vacación o una licencia anulan el derecho
-    a comer de esa asignación. `devolucion_turno` es otra cosa —un cambio entre
-    compañeros— y no anula nada por sí sola.
+    a comer de esa asignación. `devolucion_turno` es un cambio entre
+    compañeros y no anula nada por sí sola. La regla vive en derecho.py.
     """
 
-    __tablename__ = "novedades_laborales"
-    __table_args__ = HEREDADA
+    __tablename__ = "v_novedades_laborales"
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     asignacion_id: Mapped[int] = mapped_column(ID)
@@ -197,32 +155,30 @@ class NovedadLaboral(Base):
     fecha_original: Mapped[date] = mapped_column(Date)
     fecha_nueva: Mapped[date | None] = mapped_column(Date)
     con_devolucion: Mapped[bool] = mapped_column(TINYINT(1))
-    documento_respaldo: Mapped[str | None] = mapped_column(String(255))
-    observacion_detalle: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class Mes(Base):
-    __tablename__ = "meses"
-    __table_args__ = HEREDADA
+class ComidaPorTurno(BaseContrato):
+    """`v_comidas_por_turno`: el cruce que da origen al derecho, SIN reglas.
 
-    id: Mapped[int] = mapped_column(ID, primary_key=True)
-    nombre: Mapped[str] = mapped_column(String(255))
-    numero_mes: Mapped[int] = mapped_column(Integer)
-    gestion_id: Mapped[int] = mapped_column(ID)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+        fecha_comida = turnos_asignados.fecha + turno_comida.dia_relativo
 
+    Una fila por (asignación, comida). La vista no filtra por duración ni por
+    novedades: eso lo decide `aplicar_reglas()` en app/consultas/derecho.py,
+    que es el punto único de la política.
+    """
 
-class Gestion(Base):
-    __tablename__ = "gestiones"
-    __table_args__ = HEREDADA
+    __tablename__ = "v_comidas_por_turno"
 
-    id: Mapped[int] = mapped_column(ID, primary_key=True)
-    # La columna en la base se llama "año", con eñe. El atributo de Python no
-    # puede llevarla, así que se mapea explícitamente.
-    anio: Mapped[int] = mapped_column("año", Integer)
-    activo: Mapped[bool] = mapped_column(TINYINT(1))
-    created_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    turno_asignado_id: Mapped[int] = mapped_column(ID, primary_key=True)
+    comida_id: Mapped[int] = mapped_column(ID, primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ID)
+    servicio_id: Mapped[int] = mapped_column(ID)
+    fecha_turno: Mapped[date] = mapped_column(Date)
+    dia_relativo: Mapped[int] = mapped_column(TINYINT(unsigned=True))
+    fecha_comida: Mapped[date] = mapped_column(Date)
+    comida: Mapped[str] = mapped_column(String(255))
+    turno_id: Mapped[int] = mapped_column(ID)
+    turno: Mapped[str] = mapped_column(String(255))
+    duracion_horas: Mapped[int] = mapped_column(Integer)
+    categoria_id: Mapped[int | None] = mapped_column(ID)
+    categoria: Mapped[str | None] = mapped_column(String(255))

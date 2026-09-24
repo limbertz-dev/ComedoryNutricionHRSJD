@@ -2,11 +2,14 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+import app.modelos  # noqa: F401  registra las tablas propias en Base.metadata
 from app.api import asistencias, historial, pantalla, personal, reportes
 from app.core.config import config
-from app.core.db import SesionDep
+from app.core.db import Base, SesionDep
+from app.core.tablas_heredadas import VISTAS_CONTRATO
 
 app = FastAPI(title=config.nombre_app, version="0.1.0")
 
@@ -33,15 +36,43 @@ app.include_router(reportes.router)
 
 
 @app.get("/salud", tags=["diagnóstico"])
-def salud(sesion: SesionDep) -> dict:
-    """Confirma que la API responde y que la base de datos contesta."""
+def salud(sesion: SesionDep):
+    """Confirma que la API responde y que `bd_nutricion` está completa.
+
+    Solo mira objetos de `bd_nutricion`: su catálogo y `alembic_version`. No
+    lee ninguna vista v_* ni la base de turnos: un problema allá no tiene que
+    tumbar el diagnóstico de acá, y en una base recién recreada tiene que
+    responder igual. Responde 503 si falta alguna tabla o vista.
+    """
     version = sesion.execute(text("SELECT VERSION()")).scalar_one()
-    comensales = sesion.execute(text("SELECT COUNT(*) FROM personas")).scalar_one()
-    return {
-        "estado": "ok",
+    objetos = sesion.execute(
+        text(
+            "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = DATABASE()"
+        )
+    ).all()
+    tablas = {nombre for nombre, tipo in objetos if tipo == "BASE TABLE"}
+    vistas = {nombre for nombre, tipo in objetos if tipo == "VIEW"}
+
+    revision = None
+    if "alembic_version" in tablas:
+        revision = sesion.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).scalar_one_or_none()
+
+    faltan = sorted(
+        (set(Base.metadata.tables) - tablas) | (set(VISTAS_CONTRATO) - vistas)
+    )
+    cuerpo = {
+        "estado": "incompleta" if faltan else "ok",
         "base_de_datos": "conectada",
         "entorno": config.entorno,
         "base_datos": config.db_name,
+        "base_turnos": config.db_name_turnos,
         "motor": f"MySQL {version}",
-        "comensales_en_padron": comensales,
+        "revision_alembic": revision,
+        "tablas_propias": len(set(Base.metadata.tables) & tablas),
+        "vistas_contrato": len(set(VISTAS_CONTRATO) & vistas),
+        "faltan": faltan,
     }
+    return JSONResponse(cuerpo, status_code=503 if faltan else 200)

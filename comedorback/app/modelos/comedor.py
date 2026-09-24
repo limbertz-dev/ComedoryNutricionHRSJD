@@ -1,11 +1,20 @@
-"""Las 6 tablas nuevas del Módulo Personal / Comensales.
+"""Las 6 tablas propias del Módulo Personal / Comensales, en `bd_nutricion`.
 
 Reglas del modelo que el esquema hace cumplir por sí mismo:
 
   · Una ración por persona, comida y día  ->  UNIQUE en asistencias.
-  · Una ración servida es un hecho histórico  ->  RESTRICT al borrar el usuario.
   · Reclasificar o trasladar no altera informes de fechas anteriores  ->  copias congeladas
     de categoria_reporte_id y servicio_id dentro de la ración.
+
+Sin FK hacia la base de turnos. Las columnas que guardan un id de
+`bd_proyecto_backend` (usuario_id, comida_id, categoria_id, servicio_id,
+turno_asignado_id, registrado_por) son referencias LÓGICAS, validadas por la
+aplicación contra las vistas v_*: una FK entre bases le impediría al otro
+ingeniero borrar un usuario o migrar su propio esquema, y eso es tocar su
+base aunque no se le emita un ALTER. Por eso ya no hay RESTRICT al borrar un
+usuario: una ración servida sigue siendo un hecho histórico, pero se protege
+no borrando asistencias, no bloqueando la base ajena. Las FK internas
+(asistencias -> categorias_reporte, lecturas_biometricas) se mantienen.
 
 Los COMMENT no son decorativos: viajan con el esquema, salen en SHOW CREATE
 TABLE y son lo que impide que alguien "normalice" las copias congeladas sin
@@ -100,9 +109,11 @@ class CategoriaReporteMap(Base):
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     categoria_id: Mapped[int] = mapped_column(
         ID,
-        ForeignKey("categorias.id", ondelete="CASCADE"),
         unique=True,
-        comment="Una categoria mapea a una sola columna del informe.",
+        comment=(
+            "categorias.id de la base de turnos (v_categorias), sin FK. Una "
+            "categoria mapea a una sola columna del informe."
+        ),
     )
     categoria_reporte_id: Mapped[int] = mapped_column(
         ID, ForeignKey("categorias_reporte.id", ondelete="RESTRICT")
@@ -127,7 +138,7 @@ class HorarioComida(Base):
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     comida_id: Mapped[int] = mapped_column(
-        ID, ForeignKey("comidas.id", ondelete="CASCADE")
+        ID, comment="comidas.id de la base de turnos (v_comidas), sin FK."
     )
     hora_inicio: Mapped[time] = mapped_column(Time)
     hora_fin: Mapped[time] = mapped_column(
@@ -159,7 +170,7 @@ class CoeficienteRacion(Base):
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     comida_id: Mapped[int] = mapped_column(
-        ID, ForeignKey("comidas.id", ondelete="RESTRICT")
+        ID, comment="comidas.id de la base de turnos (v_comidas), sin FK."
     )
     coeficiente: Mapped[float] = mapped_column(Numeric(4, 3))
     vigente_desde: Mapped[date] = mapped_column(Date)
@@ -183,8 +194,10 @@ class LecturaBiometrica(Base):
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     usuario_id: Mapped[int | None] = mapped_column(
         ID,
-        ForeignKey("users.id", ondelete="SET NULL"),
-        comment="NULL cuando el lector no reconoce la huella.",
+        comment=(
+            "users.id de la base de turnos (v_comensales), sin FK. NULL "
+            "cuando el lector no reconoce la huella."
+        ),
     )
     dispositivo: Mapped[str] = mapped_column(String(50))
     fecha_hora: Mapped[datetime] = mapped_column(DateTime)
@@ -213,10 +226,9 @@ class Asistencia(Base):
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     usuario_id: Mapped[int] = mapped_column(
         ID,
-        ForeignKey("users.id", ondelete="RESTRICT"),
         comment=(
-            "RESTRICT a proposito: una racion servida es un hecho historico. "
-            "Para dar de baja a alguien se lo marca inactivo, no se lo borra."
+            "users.id de la base de turnos (v_comensales), sin FK entre bases. "
+            "Una racion servida es un hecho historico: no se borra."
         ),
     )
     fecha_comida: Mapped[date] = mapped_column(
@@ -227,7 +239,7 @@ class Asistencia(Base):
         ),
     )
     comida_id: Mapped[int] = mapped_column(
-        ID, ForeignKey("comidas.id", ondelete="RESTRICT")
+        ID, comment="comidas.id de la base de turnos (v_comidas), sin FK."
     )
     categoria_reporte_id: Mapped[int] = mapped_column(
         ID,
@@ -239,14 +251,13 @@ class Asistencia(Base):
     )
     servicio_id: Mapped[int | None] = mapped_column(
         ID,
-        ForeignKey("servicios.id", ondelete="RESTRICT"),
         comment=(
             "Copia deliberada (ver categoria_reporte_id). Sala del hospital, NO "
             "la categoria 'Servicio' del formulario de Estadistica."
         ),
     )
     turno_asignado_id: Mapped[int | None] = mapped_column(
-        ID, ForeignKey("turnos_asignados.id", ondelete="SET NULL")
+        ID, comment="turnos_asignados.id que justifico la racion, sin FK."
     )
     metodo: Mapped[str] = mapped_column(
         SAEnum("biometrico", "manual", name="metodo_asistencia")
@@ -260,6 +271,6 @@ class Asistencia(Base):
         DateTime, comment="Instante del reloj en que se marco."
     )
     registrado_por: Mapped[int | None] = mapped_column(
-        ID, ForeignKey("users.id", ondelete="SET NULL")
+        ID, comment="users.id de quien la registro a mano, sin FK."
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -1,4 +1,11 @@
-"""Motor, sesión y base declarativa de SQLAlchemy."""
+"""Motor, sesión y bases declarativas de SQLAlchemy.
+
+Un solo motor, contra `bd_nutricion`. La base de turnos no tiene motor
+propio: se lee a través de las vistas v_* que viven en `bd_nutricion` (ver
+app/core/tablas_heredadas.py). Así una misma consulta puede cruzar
+`asistencias` con el padrón en un JOIN y en una sola transacción, cosa que
+dos motores con `bind` separados no permiten.
+"""
 
 from collections.abc import Generator
 from typing import Annotated
@@ -25,7 +32,20 @@ SesionLocal = sessionmaker(bind=motor, autoflush=False, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
+    """Tablas propias del comedor. Es la metadata que compara alembic."""
+
     metadata = MetaData(naming_convention=CONVENCION_NOMBRES)
+
+
+class BaseContrato(DeclarativeBase):
+    """Vistas v_* del contrato con la base de turnos. SOLO LECTURA.
+
+    Metadata aparte a propósito: si compartieran `Base.metadata`, el
+    autogenerate de alembic propondría un CREATE TABLE por cada vista y un
+    `create_all` las crearía como tablas vacías.
+    """
+
+    metadata = MetaData()
 
 
 def obtener_sesion() -> Generator[Session, None, None]:
