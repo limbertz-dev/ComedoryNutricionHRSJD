@@ -11,6 +11,7 @@
  */
 
 import { API_BASE_URL } from './config.js';
+import { avisarSesion, borrarTokens, guardarTokens, leerTokens } from './sesion.js';
 
 /**
  * Estado autoritativo: el cupo previsto sale siempre del conteo real de
@@ -123,20 +124,48 @@ export async function obtenerPeriodos({ signal } = {}) {
   }
 }
 
-async function solicitarApi(ruta, { signal, ...opciones } = {}) {
+/** Error HTTP con el código y el cuerpo JSON de la respuesta, si lo trae. */
+export class ErrorApi extends Error {
+  constructor(mensaje, status, datos) {
+    super(mensaje);
+    this.name = 'ErrorApi';
+    this.status = status;
+    this.datos = datos;
+  }
+}
+
+/*
+ * Toda petición lleva el token de la sesión. Un 401 vacía la sesión y
+ * devuelve al Login con «Sesión expirada»; un 403 le avisa al panel para que
+ * pinte «Sin permiso» en lugar de la sección; un 428 pide el cambio de
+ * contraseña temporal. `manejoPropio` apaga esos avisos en /auth/login y
+ * /auth/cambio-password, donde esos códigos hablan de la credencial tecleada
+ * y los resuelve el propio formulario.
+ */
+async function solicitarApi(ruta, { signal, manejoPropio = false, ...opciones } = {}) {
   const controlador = new AbortController();
   const cancelar = () => controlador.abort();
   const temporizador = setTimeout(cancelar, 15000);
   signal?.addEventListener('abort', cancelar, { once: true });
   if (signal?.aborted) cancelar();
 
+  const token = leerTokens()?.access;
   try {
     const respuesta = await fetch(`${API_BASE_URL.replace(/\/$/, '')}${ruta}`, {
       ...opciones,
-      headers: { Accept: 'application/json', ...opciones.headers },
+      headers: {
+        Accept: 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...opciones.headers,
+      },
       signal: controlador.signal,
     });
-    if (!respuesta.ok) throw new Error(`La API respondió con error HTTP ${respuesta.status}.`);
+    if (!respuesta.ok) {
+      const datos = await respuesta.json().catch(() => null);
+      if (!manejoPropio) avisarPorStatus(respuesta.status);
+      throw new ErrorApi(mensajeDeStatus(respuesta.status), respuesta.status, datos);
+    }
+    if (respuesta.status === 204) return null;
     return await respuesta.json();
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -148,6 +177,128 @@ async function solicitarApi(ruta, { signal, ...opciones } = {}) {
     clearTimeout(temporizador);
     signal?.removeEventListener('abort', cancelar);
   }
+}
+
+function mensajeDeStatus(status) {
+  if (status === 401) return 'La sesión expiró.';
+  if (status === 403) return 'No tiene permiso para ver esta información.';
+  if (status === 428) return 'Debe cambiar su contraseña temporal.';
+  return `La API respondió con error HTTP ${status}.`;
+}
+
+function avisarPorStatus(status) {
+  if (status === 401) {
+    borrarTokens();
+    avisarSesion({ tipo: 'expirada' });
+  } else if (status === 403) {
+    avisarSesion({ tipo: 'prohibido' });
+  } else if (status === 428) {
+    avisarSesion({ tipo: 'cambio_requerido' });
+  }
+}
+
+/*
+ * --- Autenticación (contrato congelado) ---
+ * POST /auth/login → 200 {access, refresh, rol, debe_cambiar}
+ *                  | 401 {detalle} | 423 {detalle, reintento_en} | 428 {temporal: true}
+ * POST /auth/cambio-password
+ * GET  /auth/yo
+ *
+ * El contrato no fija los nombres del cuerpo de las peticiones: viven solo
+ * aquí para ajustarlos en un único lugar al verificar contra el backend.
+ */
+const cuerpoLogin = (usuario, contrasena) => ({ usuario, contrasena });
+const cuerpoCambio = ({ usuario, actual, nueva, conToken }) => ({
+  ...(conToken ? {} : { usuario }),
+  contrasena_actual: actual,
+  contrasena_nueva: nueva,
+});
+
+/**
+ * POST /auth/login. Devuelve lo que el Login tiene que mostrar:
+ * `{ tipo: 'ok', rol, debeCambiar }` (los tokens ya quedan guardados),
+ * `{ tipo: 'credencial', detalle }`, `{ tipo: 'bloqueada', detalle, reintentoEn }`
+ * o `{ tipo: 'cambio' }`. Los errores de red o de servidor se lanzan.
+ */
+export async function iniciarSesion(usuario, contrasena, { signal } = {}) {
+  let datos;
+  try {
+    datos = await solicitarApi('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cuerpoLogin(usuario, contrasena)),
+      manejoPropio: true,
+      signal,
+    });
+  } catch (error) {
+    if (error.status === 401) {
+      return { tipo: 'credencial', detalle: error.datos?.detalle || 'Usuario o contraseña incorrectos.' };
+    }
+    if (error.status === 423) {
+      return {
+        tipo: 'bloqueada',
+        detalle: error.datos?.detalle || 'La cuenta está bloqueada temporalmente.',
+        reintentoEn: momentoDeReintento(error.datos?.reintento_en),
+      };
+    }
+    if (error.status === 428 && error.datos?.temporal === true) return { tipo: 'cambio' };
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo iniciar sesión. ${error.message}`);
+  }
+  if (typeof datos?.access !== 'string' || !datos.access || typeof datos.rol !== 'string'
+    || typeof datos.debe_cambiar !== 'boolean') {
+    throw new Error('No se pudo iniciar sesión. La API devolvió una sesión inválida.');
+  }
+  guardarTokens({ access: datos.access, refresh: datos.refresh ?? null, usuario });
+  return { tipo: 'ok', rol: datos.rol, debeCambiar: datos.debe_cambiar };
+}
+
+/**
+ * `reintento_en` como Date. El contrato no fija el formato: se aceptan
+ * segundos restantes (número o texto numérico) y fecha ISO. null si no se
+ * puede interpretar; el Login muestra entonces solo el `detalle`.
+ */
+export function momentoDeReintento(reintentoEn, ahora = new Date()) {
+  if (typeof reintentoEn === 'number' || (typeof reintentoEn === 'string' && /^\d+$/.test(reintentoEn.trim()))) {
+    return new Date(ahora.getTime() + Number(reintentoEn) * 1000);
+  }
+  if (typeof reintentoEn === 'string') {
+    const momento = new Date(reintentoEn);
+    if (!Number.isNaN(momento.getTime())) return momento;
+  }
+  return null;
+}
+
+/**
+ * POST /auth/cambio-password y, si el servidor lo acepta, un login nuevo con
+ * la contraseña recién puesta: así la sesión queda con tokens emitidos para
+ * ella, sin depender de qué devuelva el cambio. Devuelve el resultado de
+ * `iniciarSesion`.
+ */
+export async function cambiarContrasena({ usuario, actual, nueva, signal }) {
+  const conToken = Boolean(leerTokens()?.access);
+  try {
+    await solicitarApi('/auth/cambio-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cuerpoCambio({ usuario, actual, nueva, conToken })),
+      manejoPropio: true,
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(error.datos?.detalle || `No se pudo cambiar la contraseña. ${error.message}`);
+  }
+  return iniciarSesion(usuario, nueva, { signal });
+}
+
+/** GET /auth/yo: el rol de la sesión guardada, al abrir la app. */
+export async function obtenerUsuarioActual({ signal } = {}) {
+  const yo = await solicitarApi('/auth/yo', { signal });
+  if (typeof yo?.rol !== 'string' || !yo.rol) {
+    throw new Error('La API devolvió un usuario sin rol.');
+  }
+  return { rol: yo.rol };
 }
 
 function adaptarPersona(dato) {

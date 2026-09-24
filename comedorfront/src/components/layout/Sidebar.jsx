@@ -1,12 +1,23 @@
-import { SECCIONES } from '../../navegacion';
+import useSesion from '../../hooks/useSesion.js';
+import { SECCION_INICIAL, guardarSeccionActiva, seccionesDeRol } from '../../navegacion.js';
+import { etiquetaDeRol } from '../../permisos.js';
 import { IconoCerrarSesion, IconoLogo } from '../ui/Iconos.jsx';
 import './Sidebar.css';
 
 /**
  * Columna izquierda completa: marca arriba, módulos en el medio y la sesión
  * al pie — la misma estructura del panel del que se recicla el estilo.
+ * Solo lista las secciones que el rol de la sesión puede abrir.
  */
-export default function Sidebar({ seccionActiva, onCambiarSeccion, onCerrarSesion }) {
+export default function Sidebar({ seccionActiva, onCambiarSeccion }) {
+  const { rol, usuario, logout } = useSesion();
+
+  function manejarCerrarSesion() {
+    // Quien entre después empieza en Control Biométrico, no donde quedó esta sesión.
+    guardarSeccionActiva(SECCION_INICIAL);
+    logout();
+  }
+
   return (
     <aside className="sidebar">
       <div className="sidebar__marca">
@@ -20,7 +31,7 @@ export default function Sidebar({ seccionActiva, onCambiarSeccion, onCerrarSesio
       </div>
 
       <nav className="sidebar__nav" aria-label="Módulos del sistema">
-        {SECCIONES.map(({ id, etiqueta, descripcion, Icono }) => {
+        {seccionesDeRol(rol).map(({ id, etiqueta, descripcion, Icono }) => {
           const activa = id === seccionActiva;
 
           return (
@@ -41,10 +52,10 @@ export default function Sidebar({ seccionActiva, onCambiarSeccion, onCerrarSesio
 
       <div className="sidebar__pie">
         <div className="sidebar__sesion">
-          <strong className="sidebar__sesion-nombre">Lic. Norma Tarifa Castillo</strong>
-          <small className="sidebar__sesion-cargo">Licenciada en Nutrición</small>
+          <strong className="sidebar__sesion-nombre">{usuario || 'Usuario'}</strong>
+          <small className="sidebar__sesion-cargo">{etiquetaDeRol(rol)}</small>
 
-          <button type="button" className="sidebar__cerrar-sesion" onClick={onCerrarSesion}>
+          <button type="button" className="sidebar__cerrar-sesion" onClick={manejarCerrarSesion}>
             <IconoCerrarSesion tamano={18} />
             <span>Cerrar sesión</span>
           </button>

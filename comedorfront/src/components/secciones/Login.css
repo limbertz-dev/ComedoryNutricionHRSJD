@@ -204,15 +204,76 @@
   transition: filter var(--trans-boton), box-shadow var(--trans-boton), transform var(--trans-boton);
 }
 
-.login__ingresar:hover {
+.login__ingresar:hover:not(:disabled) {
   filter: saturate(1.12) brightness(1.02);
   box-shadow: 0 10px 24px rgba(0, 143, 93, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.36);
   transform: translateY(-1px);
 }
 
-.login__ingresar:active {
+.login__ingresar:active:not(:disabled) {
   box-shadow: var(--s-acento);
   transform: translateY(0) scale(0.97);
+}
+
+.login__ingresar:disabled {
+  filter: grayscale(0.35) opacity(0.7);
+  box-shadow: none;
+  transform: none;
+}
+
+/* Salida del cambio obligatorio: acción secundaria, sin competir con «Guardar». */
+.login__volver {
+  justify-self: center;
+  padding: 8px 14px;
+  color: var(--c-acento-oscuro);
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  transition: color var(--trans-boton), background-color var(--trans-boton);
+}
+
+.login__volver:hover:not(:disabled) {
+  background: var(--c-acento-tenue);
+}
+
+/* Franja de estado del ingreso: credencial, bloqueo, cambio, sesión expirada. */
+.login__aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font-size: var(--t-base);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.login__aviso > svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.login__aviso p {
+  text-wrap: pretty;
+}
+
+.login__aviso--error {
+  color: var(--c-error);
+  background: var(--c-error-tenue);
+  border-color: color-mix(in srgb, var(--c-error) 22%, transparent);
+}
+
+.login__aviso--aviso {
+  color: var(--c-aviso);
+  background: var(--c-aviso-tenue);
+  border-color: color-mix(in srgb, var(--c-aviso) 22%, transparent);
+}
+
+.login__aviso--info {
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-tenue);
+  border-color: var(--c-acento-linea);
 }
 
 .login__hospital {

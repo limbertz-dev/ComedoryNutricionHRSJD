@@ -311,21 +311,24 @@ export default function PantallaEnVivo({
                 />
 
                 {/* Autoriza una ración sin pasar por el lector: mismas reglas
-                    de turno y derecho, aplicadas por el servidor. */}
-                <div className="escenario__manual">
-                  <span className="escenario__manual-etiqueta">Modo manual</span>
-                  <p className="escenario__manual-nombre">
-                    {personaSeleccionada ? personaSeleccionada.nombre : 'Seleccione comensal en barra'}
-                  </p>
-                  <Boton
-                    variante="secundario"
-                    anchoCompleto
-                    onClick={() => onMarcarManual(personaSeleccionada.id)}
-                    disabled={!personaSeleccionada || leyendo}
-                  >
-                    Aceptar ración manual
-                  </Boton>
-                </div>
+                    de turno y derecho, aplicadas por el servidor. Sin
+                    `onMarcarManual` (rol cocinera) el bloque no existe. */}
+                {onMarcarManual ? (
+                  <div className="escenario__manual">
+                    <span className="escenario__manual-etiqueta">Modo manual</span>
+                    <p className="escenario__manual-nombre">
+                      {personaSeleccionada ? personaSeleccionada.nombre : 'Seleccione comensal en barra'}
+                    </p>
+                    <Boton
+                      variante="secundario"
+                      anchoCompleto
+                      onClick={() => onMarcarManual(personaSeleccionada.id)}
+                      disabled={!personaSeleccionada || leyendo}
+                    >
+                      Aceptar ración manual
+                    </Boton>
+                  </div>
+                ) : null}
               </div>
 
               <div className="escenario__principal">

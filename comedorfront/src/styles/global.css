@@ -156,6 +156,15 @@ tbody tr:hover {
   transform-origin: top center;
 }
 
+.app__verificando {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: var(--c-texto-2);
+  font-size: var(--t-md);
+  font-weight: 700;
+}
+
 .app__estado-api {
   flex: none;
   margin-bottom: var(--e-2);

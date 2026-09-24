@@ -8,7 +8,16 @@ import Dashboard from './components/secciones/Dashboard.jsx';
 import Reportes from './components/secciones/Reportes.jsx';
 import Historial from './components/secciones/Historial.jsx';
 import Login from './components/secciones/Login.jsx';
-import { SECCION_INICIAL, buscarSeccion, guardarSeccionActiva, leerSeccionGuardada } from './navegacion.js';
+import SinPermiso from './components/secciones/SinPermiso.jsx';
+import {
+  SECCION_SIN_PERMISO,
+  buscarSeccion,
+  guardarSeccionActiva,
+  leerSeccionGuardada,
+  seccionesDeRol,
+} from './navegacion.js';
+import { puedeMarcarManual, puedeVerSeccion, seccionInicialDeRol } from './permisos.js';
+import { escucharSesion } from './sesion.js';
 import {
   marcarAsistencia,
   obtenerEstadoPantalla,
@@ -16,6 +25,7 @@ import {
 } from './api.js';
 
 import useConsultaApi from './hooks/useConsultaApi.js';
+import useSesion, { ProveedorSesion } from './hooks/useSesion.js';
 
 /*
  * Duración mínima del estado "leyendo". El lector físico tarda en resolver una
@@ -53,10 +63,48 @@ function reductorComedor(estado, accion) {
 }
 
 export default function App() {
-  const [sesionIniciada, setSesionIniciada] = useState(true);
+  return (
+    <ProveedorSesion>
+      <PuertaDeSesion />
+    </ProveedorSesion>
+  );
+}
+
+/*
+ * Sin sesión activa no se monta el panel: ni una consulta de datos sale antes
+ * de que GET /auth/yo confirme el rol, y al cerrar o expirar la sesión el
+ * panel se desmonta entero, con todo lo que tenía cargado.
+ */
+function PuertaDeSesion() {
+  const { fase, rol, logout } = useSesion();
+
+  if (fase === 'verificando') {
+    return <p className="app__verificando" role="status">Verificando sesión…</p>;
+  }
+  if (fase !== 'activa') return <Login />;
+  if (seccionesDeRol(rol).length === 0) {
+    return (
+      <main className="sin-permiso-pantalla">
+        <SinPermiso onSalir={logout} />
+      </main>
+    );
+  }
+  return <Panel rol={rol} />;
+}
+
+function Panel({ rol }) {
   /* Persistida en localStorage: un F5 en Historial o Reportes no debe
-     devolver forzadamente a Control Biométrico. */
-  const [seccionActiva, setSeccionActiva] = useState(leerSeccionGuardada);
+     devolver forzadamente a Control Biométrico. Si lo guardado no le
+     corresponde al rol, arranca en su primera sección. */
+  const [seccionActiva, setSeccionActiva] = useState(() => leerSeccionGuardada(rol));
+  /* Sección cuya consulta respondió 403: se reemplaza por «Sin permiso» hasta
+     que se elija otra, para que nunca quede a la vista con datos a medias. */
+  const [seccionVedada, setSeccionVedada] = useState(null);
+  const seccionActual = useRef(seccionActiva);
+  seccionActual.current = seccionActiva;
+  useEffect(() => escucharSesion((aviso) => {
+    if (aviso.tipo === 'prohibido') setSeccionVedada(seccionActual.current);
+  }), []);
   const [estado, despachar] = useReducer(reductorComedor, undefined, estadoInicial);
 
   const [cargandoPersonal, setCargandoPersonal] = useState(true);
@@ -69,7 +117,7 @@ export default function App() {
   const consultaEstado = useCallback((signal) => {
     // Cada entrada a una sección vuelve a consultar el reloj y los cupos del servidor.
     return obtenerEstadoPantalla({ signal });
-  }, [seccionActiva, sesionIniciada]);
+  }, [seccionActiva]);
   const { datos: pantalla, cargando: cargandoEstado, error: errorEstado, recargar: recargarEstado } = useConsultaApi(consultaEstado);
   const turno = pantalla?.fuera_de_horario ? 'Fuera de horario' : pantalla?.comida ?? 'Consultando…';
 
@@ -168,28 +216,16 @@ export default function App() {
     }
   }
 
-  const esPantallaEnVivo = seccionActiva === 'vivo';
-  const seccion = buscarSeccion(seccionActiva);
+  /* Guardia única: ninguna sección se monta si el rol no la tiene o si el
+     backend ya la negó con 403. */
+  const permitida = puedeVerSeccion(rol, seccionActiva) && seccionVedada !== seccionActiva;
+  const esPantallaEnVivo = permitida && seccionActiva === 'vivo';
+  const seccion = permitida ? buscarSeccion(seccionActiva) : SECCION_SIN_PERMISO;
 
   function manejarCambiarSeccion(id) {
+    setSeccionVedada(null);
     setSeccionActiva(id);
     guardarSeccionActiva(id);
-  }
-
-  function manejarIngreso() {
-    setSeccionActiva(SECCION_INICIAL);
-    guardarSeccionActiva(SECCION_INICIAL);
-    setSesionIniciada(true);
-  }
-
-  function manejarCerrarSesion() {
-    setSeccionActiva(SECCION_INICIAL);
-    guardarSeccionActiva(SECCION_INICIAL);
-    setSesionIniciada(false);
-  }
-
-  if (!sesionIniciada) {
-    return <Login onIngresar={manejarIngreso} />;
   }
 
   return (
@@ -197,7 +233,6 @@ export default function App() {
       <Sidebar
         seccionActiva={seccionActiva}
         onCambiarSeccion={manejarCambiarSeccion}
-        onCerrarSesion={manejarCerrarSesion}
       />
 
       <Header seccion={seccion} turno={turno}>
@@ -221,7 +256,7 @@ export default function App() {
           repetirlo solo le resta a un layout sin scroll. Los errores sí se
           quedan: son los únicos que necesitan atención y acción (reintentar).
         */}
-        {!esPantallaEnVivo || errorApi || errorEstado ? (
+        {permitida && (!esPantallaEnVivo || errorApi || errorEstado) ? (
           <div className="app__estado-api">
             {!esPantallaEnVivo ? (
               <p id="estado-api" role="status">
@@ -235,7 +270,14 @@ export default function App() {
           </div>
         ) : null}
         {/* La `key` reinicia la animación de entrada en cada cambio de sección. */}
-        <div className="transicion" key={seccionActiva}>
+        <div className="transicion" key={permitida ? seccionActiva : SECCION_SIN_PERMISO.id}>
+          {!permitida ? (
+            <SinPermiso
+              onVolver={seccionActiva === seccionInicialDeRol(rol) ? null
+                : () => manejarCambiarSeccion(seccionInicialDeRol(rol))}
+            />
+          ) : null}
+
           {esPantallaEnVivo ? (
             <PantallaEnVivo
               evento={estado.ultimoEvento}
@@ -243,19 +285,19 @@ export default function App() {
               pantalla={pantalla}
               turno={turno}
               personaSeleccionada={estado.personal.find(({ id }) => id === Number(seleccionado)) ?? null}
-              onMarcarManual={manejarMarcacionManual}
+              onMarcarManual={puedeMarcarManual(rol) ? manejarMarcacionManual : null}
             />
           ) : null}
 
-          {seccionActiva === 'dashboard' ? (
+          {permitida && seccionActiva === 'dashboard' ? (
             <Dashboard
               pantalla={pantalla}
             />
           ) : null}
 
-          {seccionActiva === 'historial' ? <Historial personal={estado.personal} /> : null}
+          {permitida && seccionActiva === 'historial' ? <Historial personal={estado.personal} /> : null}
 
-          {seccionActiva === 'reportes' ? <Reportes /> : null}
+          {permitida && seccionActiva === 'reportes' ? <Reportes /> : null}
         </div>
       </main>
     </div>
