@@ -5,8 +5,10 @@ import { obtenerPersonal, marcarAsistencia, simularMarcacion, obtenerEstadoPanta
   obtenerHistorialDiarioPersonal, obtenerHistorialMensualPersonal, obtenerDiaPersonal,
   obtenerPeriodos, obtenerGestiones, obtenerMesesDeGestion,
   obtenerRegistroDiario, obtenerInformeMensual, obtenerResumenGestion,
-  obtenerInformeRaciones, etiquetaDeRango } from '../src/api.js';
-import { notasDeInforme } from '../src/exportaciones.js';
+  obtenerInformeRaciones, etiquetaDeRango,
+  obtenerRacionesDia, guardarRacionesDia,
+  eliminarDieta, obtenerReporteDistribucion } from '../src/api.js';
+import { cifraPacientes, notasDeInforme } from '../src/exportaciones.js';
 
 const fetchOriginal = globalThis.fetch;
 afterEach(() => { globalThis.fetch = fetchOriginal; });
@@ -524,4 +526,272 @@ test('el aviso de coeficientes también sale en el informe por rango', async () 
   const notas = notasDeInforme(informe);
   assert.equal(notas.length, 2);
   assert.match(notas[1], /sin coeficiente asignado/);
+});
+
+/* -------------------------------- Matriz diaria de raciones por servicio */
+
+const COLUMNAS_DIST = [
+  ['corriente', 'CORRIENTE'], ['blanda', 'BLANDA'], ['hiposodica', 'HIPOSODICA'],
+  ['hiposograsa', 'HIPOSOGRASA'], ['diabetico', 'DIABETICO'], ['licuadas', 'LICUADAS'],
+  ['quimioterapias', 'QUIMIOTERAPIAS'], ['sondas_liquidas', 'SONDAS Y LIQUIDAS'], ['otros', 'OTROS'],
+];
+const FILAS_DIST = [
+  'cirugia_mujeres', 'cirugia_varones', 'ginecologia', 'infectologia', 'medicina_mujeres',
+  'medicina_varones', 'obstetricia', 'hemodialisis', 'neonatologia_ucin', 'uti', 'traumatologia',
+  'quemados', 'emergencias', 'pediatria_uci', 'pediatria_gral', 'oncologia',
+];
+
+function mockMatrizDia(valoresPorFila = {}, extra = {}) {
+  const columnas = COLUMNAS_DIST.map(([codigo, etiqueta]) => ({ codigo, etiqueta }));
+  const filas = FILAS_DIST.map((codigo) => {
+    const celdas = valoresPorFila[codigo] ?? Array(9).fill(0);
+    return {
+      codigo,
+      etiqueta: `H. ${codigo.toUpperCase()}`,
+      celdas,
+      total: celdas.reduce((a, b) => a + b, 0),
+    };
+  });
+  const celdasTotal = COLUMNAS_DIST.map((_, i) => filas.reduce((s, f) => s + f.celdas[i], 0));
+  return {
+    fecha: '2026-09-24',
+    columnas,
+    filas,
+    total: {
+      celdas: celdasTotal,
+      total: celdasTotal.reduce((a, b) => a + b, 0),
+    },
+    actualizado: '2026-09-24T10:15:00',
+    ...extra,
+  };
+}
+
+test('obtenerRacionesDia pide la fecha y devuelve la matriz adaptada con sus 16 filas y totales', async () => {
+  let ruta = null;
+  globalThis.fetch = async (url) => {
+    ruta = new URL(url);
+    return json(mockMatrizDia({
+      pediatria_gral: [2, 0, 1, 0, 0, 0, 0, 0, 0],
+      cirugia_varones: [0, 1, 0, 0, 0, 0, 0, 0, 0],
+    }));
+  };
+
+  const matriz = await obtenerRacionesDia({ fecha: '2026-09-24' });
+  assert.equal(ruta.pathname, '/pacientes/raciones-dia');
+  assert.equal(ruta.search, '?fecha=2026-09-24');
+  assert.equal(matriz.fecha, '2026-09-24');
+  assert.equal(matriz.titulo, 'RACIONES DEL DÍA POR SERVICIO Y TIPO DE DIETA');
+  assert.equal(matriz.filas.length, 16);
+  assert.equal(matriz.columnas.length, 9);
+  assert.deepEqual(matriz.filas[14].celdas, [2, 0, 1, 0, 0, 0, 0, 0, 0]);
+  assert.equal(matriz.filas[14].total, 3);
+  assert.deepEqual(matriz.total.celdas, [2, 1, 1, 0, 0, 0, 0, 0, 0]);
+  assert.equal(matriz.total.total, 4);
+  assert.equal(matriz.actualizado, '2026-09-24T10:15:00');
+});
+
+test('obtenerRacionesDia valida la fecha y rechaza fechas inválidas', async () => {
+  globalThis.fetch = async () => { throw new Error('no debía llamar a la API'); };
+  await assert.rejects(obtenerRacionesDia({ fecha: '24/09/2026' }), /Fecha inválida/);
+  await assert.rejects(obtenerRacionesDia({ fecha: 'invalida' }), /Fecha inválida/);
+  await assert.rejects(obtenerRacionesDia({ fecha: 123 }), /Fecha inválida/);
+});
+
+test('obtenerRacionesDia rechaza matrices con filas, columnas o totales incoherentes', async () => {
+  const casos = [
+    [(m) => { m.filas.pop(); }, /servicios distintos/],
+    [(m) => { [m.filas[0], m.filas[1]] = [m.filas[1], m.filas[0]]; }, /servicios distintos/],
+    [(m) => { m.columnas[0].codigo = 'otra_dieta'; }, /columnas de dieta distintas/],
+    [(m) => { m.filas[0].total = 99; }, /no cuadra/],
+    [(m) => { m.filas[0].celdas[0] = -1; m.filas[0].total = -1; }, /no cuadra/],
+    [(m) => { m.total.celdas[0] = 99; }, /La fila TOTAL no cuadra/],
+    [(m) => { m.total.total = 99; }, /La fila TOTAL no cuadra/],
+    [(m) => { m.fecha = '2026-09-25'; }, /matriz de raciones inválida/],
+  ];
+  for (const [romper, error] of casos) {
+    const dato = mockMatrizDia();
+    romper(dato);
+    globalThis.fetch = async () => json(dato);
+    await assert.rejects(obtenerRacionesDia({ fecha: '2026-09-24' }), error);
+  }
+});
+
+test('obtenerRacionesDia propaga HTTP 404 del backend', async () => {
+  globalThis.fetch = async () => json({ detail: 'Not Found' }, 404);
+  await assert.rejects(
+    obtenerRacionesDia({ fecha: '2026-09-24' }),
+    /No se pudieron cargar las raciones del día\. Not Found \(HTTP 404\)/,
+  );
+});
+
+test('guardarRacionesDia valida celdas antes de enviar y rechaza inputs inválidos', async () => {
+  globalThis.fetch = async () => { throw new Error('no debía llamar a la API'); };
+  await assert.rejects(guardarRacionesDia({ fecha: '2026-09-24', celdas: [] }), /No hay cambios para guardar/);
+  await assert.rejects(
+    guardarRacionesDia({ fecha: '2026-09-24', celdas: [{ fila: 'fantasma', columna: 'corriente', cantidad: 1 }] }),
+    /Fila inválida: «fantasma»/,
+  );
+  await assert.rejects(
+    guardarRacionesDia({ fecha: '2026-09-24', celdas: [{ fila: 'cirugia_mujeres', columna: 'pizza', cantidad: 1 }] }),
+    /Columna de dieta inválida: «pizza»/,
+  );
+  await assert.rejects(
+    guardarRacionesDia({ fecha: '2026-09-24', celdas: [{ fila: 'cirugia_mujeres', columna: 'corriente', cantidad: -1 }] }),
+    /La cantidad debe ser un entero mayor o igual a 0/,
+  );
+});
+
+test('guardarRacionesDia envía PUT con fecha y celdas modificadas y devuelve la matriz actualizada', async () => {
+  let pedido = null;
+  globalThis.fetch = async (url, opciones) => {
+    pedido = {
+      url: new URL(url),
+      metodo: opciones.method,
+      cuerpo: JSON.parse(opciones.body),
+    };
+    return json(mockMatrizDia({
+      cirugia_mujeres: [5, 0, 0, 0, 0, 0, 0, 0, 0],
+    }));
+  };
+
+  const res = await guardarRacionesDia({
+    fecha: '2026-09-24',
+    celdas: [{ fila: 'cirugia_mujeres', columna: 'corriente', cantidad: 5 }],
+  });
+
+  assert.equal(pedido.url.pathname, '/pacientes/raciones-dia');
+  assert.equal(pedido.metodo, 'PUT');
+  assert.deepEqual(pedido.cuerpo, {
+    fecha: '2026-09-24',
+    celdas: [{ fila: 'cirugia_mujeres', columna: 'corriente', cantidad: 5 }],
+  });
+  assert.equal(res.filas[0].celdas[0], 5);
+  assert.equal(res.total.total, 5);
+});
+
+test('guardarRacionesDia propaga errores del servidor (422, 500)', async () => {
+  globalThis.fetch = async () => json({ detail: 'No se puede registrar para fechas futuras.' }, 422);
+  await assert.rejects(
+    guardarRacionesDia({ fecha: '2026-09-24', celdas: [{ fila: 'cirugia_mujeres', columna: 'corriente', cantidad: 1 }] }),
+    /No se pudieron guardar las raciones del día\. No se puede registrar para fechas futuras\. \(HTTP 422\)/,
+  );
+});
+
+test('eliminarDieta manda DELETE a /pacientes/dietas/{id} y exige la confirmación del backend', async () => {
+  globalThis.fetch = async () => { throw new Error('no debía llamar a la API'); };
+  for (const id of [0, -1, 1.5, '3']) {
+    await assert.rejects(eliminarDieta(id), /Dieta inválida/);
+  }
+
+  let pedido = null;
+  globalThis.fetch = async (ruta, opciones) => {
+    pedido = { ruta: new URL(ruta).pathname, metodo: opciones.method, cuerpo: opciones.body };
+    return json({ eliminado: true, id: 7 });
+  };
+  assert.deepEqual(await eliminarDieta(7), { eliminado: true, id: 7 });
+  assert.deepEqual(pedido, { ruta: '/pacientes/dietas/7', metodo: 'DELETE', cuerpo: undefined });
+
+  // Una respuesta que no confirma la eliminación de ESA dieta es un error.
+  globalThis.fetch = async () => json({ eliminado: true, id: 8 });
+  await assert.rejects(eliminarDieta(7), /respuesta inválida/);
+  globalThis.fetch = async () => json({ eliminado: false, id: 7 });
+  await assert.rejects(eliminarDieta(7), /respuesta inválida/);
+});
+
+test('eliminarDieta muestra el 422 de NPO y el 404 del backend tal cual', async () => {
+  globalThis.fetch = async () => json({ detail: 'NPO es especial: registra que la cama no come y no se puede eliminar.' }, 422);
+  await assert.rejects(eliminarDieta(12), /No se pudo eliminar la dieta\. NPO es especial.*\(HTTP 422\)/);
+  globalThis.fetch = async () => json({ detail: 'La dieta con ID 99 no existe.' }, 404);
+  await assert.rejects(eliminarDieta(99), /No se pudo eliminar la dieta\. La dieta con ID 99 no existe\. \(HTTP 404\)/);
+});
+
+/* ------------------------------------------------ Reportes de pacientes */
+
+const criterioReporte = (extra = {}) => ({
+  ultima_del_dia_manda: true, excluye_suspendidas: true, excluye_npo: true,
+  pendiente_confirmar: [1, 6], ...extra,
+});
+
+/** Respuesta de /pacientes/reporte-distribucion con `valores` por código de fila. */
+function distribucion(valoresPorFila = {}) {
+  const filas = FILAS_DIST.map((codigo) => {
+    const valores = valoresPorFila[codigo] ?? Array(9).fill(0);
+    return {
+      codigo, etiqueta: `H. ${codigo.toUpperCase()}`,
+      valores, total: valores.reduce((a, b) => a + b, 0),
+    };
+  });
+  const porColumna = COLUMNAS_DIST.map((_, i) => filas.reduce((s, f) => s + f.valores[i], 0));
+  return {
+    desde: '2026-09-01', hasta: '2026-09-23', dias: 23,
+    titulo: 'INFORME MENSUAL DE RACIONES SERVIDAS A PACIENTES',
+    columnas: COLUMNAS_DIST.map(([codigo, etiqueta]) => ({ codigo, etiqueta })),
+    filas,
+    total: { valores: porColumna, total: porColumna.reduce((a, b) => a + b, 0) },
+    criterio: criterioReporte(),
+  };
+}
+
+const RANGO_REPORTE = { desde: '2026-09-01', hasta: '2026-09-23', hoy: new Date(2026, 8, 23, 10, 0) };
+
+test('el reporte de distribución pide el rango y arma la planilla con su TOTAL', async () => {
+  let ruta = null;
+  globalThis.fetch = async (url) => {
+    ruta = new URL(url);
+    return json(distribucion({ pediatria_gral: [1, 0, 0, 1, 0, 0, 0, 0, 0], oncologia: [0, 0, 0, 0, 0, 0, 0, 0, 2] }));
+  };
+  const reporte = await obtenerReporteDistribucion(RANGO_REPORTE);
+
+  assert.equal(ruta.pathname, '/pacientes/reporte-distribucion');
+  assert.equal(ruta.search, '?desde=2026-09-01&hasta=2026-09-23');
+  assert.equal(reporte.tipo, 'distribucion');
+  assert.equal(reporte.titulo, 'INFORME MENSUAL DE RACIONES SERVIDAS A PACIENTES');
+  assert.equal(reporte.grupoColumnas, 'TIPOS DE DIETAS');
+  assert.deepEqual(reporte.columnas, COLUMNAS_DIST.map(([, etiqueta]) => etiqueta));
+  assert.equal(reporte.conTotal, true);
+  assert.equal(reporte.filas.length, 16);
+  assert.deepEqual(reporte.filas[14], { etiqueta: 'H. PEDIATRIA_GRAL', celdas: [1, 0, 0, 1, 0, 0, 0, 0, 0], total: 2 });
+  assert.equal(reporte.filas[15].etiqueta, 'H. ONCOLOGIA');
+  assert.deepEqual(reporte.total, { etiqueta: 'TOTAL', celdas: [1, 0, 0, 1, 0, 0, 0, 0, 2], total: 4 });
+  assert.equal(reporte.totalGeneral, 4);
+  assert.deepEqual(reporte.secciones, []);
+  assert.equal(reporte.periodo.secundario, '23 días');
+  assert.equal(reporte.archivo, 'pacientes-distribucion-2026-09-01-a-2026-09-23');
+  assert.match(reporte.notas[0], /^Conteo provisorio, pendiente de confirmar con nutrición \(preguntas 1, 6 del contexto\): cuenta la última dieta del día de cada cama; las camas suspendidas no suman; NPO no suma\.$/);
+});
+
+test('el reporte de distribución rechaza filas, columnas o totales que no son los de la planilla', async () => {
+  const casos = [
+    [(d) => { d.filas.pop(); }, /servicios distintos/],
+    [(d) => { [d.filas[0], d.filas[1]] = [d.filas[1], d.filas[0]]; }, /servicios distintos/],
+    [(d) => { d.columnas[8].codigo = 'papilla'; }, /columnas de dieta distintas/],
+    [(d) => { d.filas[2].total = 5; }, /El total de H\. GINECOLOGIA no cuadra/],
+    [(d) => { d.filas[2].valores[0] = -1; d.filas[2].total = -1; }, /no cuadra/],
+    [(d) => { d.total.valores[0] = 9; }, /La fila TOTAL no cuadra/],
+    [(d) => { d.total.total = 9; }, /La fila TOTAL no cuadra/],
+    [(d) => { d.hasta = '2026-09-22'; }, /otro rango/],
+    [(d) => { d.criterio.excluye_npo = 'sí'; }, /criterio de conteo inválido/],
+  ];
+  for (const [romper, error] of casos) {
+    const dato = distribucion({ ginecologia: [0, 0, 0, 0, 0, 0, 0, 0, 0] });
+    romper(dato);
+    globalThis.fetch = async () => json(dato);
+    await assert.rejects(obtenerReporteDistribucion(RANGO_REPORTE), error);
+  }
+});
+
+test('el reporte de distribución valida el rango antes de llamar y pasa el error del backend tal cual', async () => {
+  globalThis.fetch = async () => { throw new Error('no debía llamar a la API'); };
+  await assert.rejects(obtenerReporteDistribucion({ desde: '2026-09-23', hasta: '2026-09-01' }), /posterior a la final/);
+  await assert.rejects(obtenerReporteDistribucion({ desde: '01/09/2026', hasta: '2026-09-23' }), /Rango de fechas inválido/);
+
+  globalThis.fetch = async () => json({ detail: 'Not Found' }, 404);
+  await assert.rejects(obtenerReporteDistribucion(RANGO_REPORTE), /No se pudo cargar el reporte de distribución\. Not Found \(HTTP 404\)/);
+});
+
+test('las celdas de pacientes se leen igual en pantalla, Excel y PDF', () => {
+  assert.equal(cifraPacientes(0), '—');
+  assert.equal(cifraPacientes(null), 'Sin fuente');
+  assert.equal(cifraPacientes(12), '12');
+  assert.equal(cifraPacientes(4680), '4680');
 });

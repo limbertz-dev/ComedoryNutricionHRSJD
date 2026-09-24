@@ -14,12 +14,14 @@ import {
   ajustarAnchos,
   banner,
   cabecera,
+  cabeceraAgrupada,
   celda,
   columna,
   configurarImpresion,
   filaDatos,
   filaTotales,
   formula,
+  FORMATO_CERO_GUION,
   FORMATO_DECIMAL,
   FORMATO_DIA,
   FORMATO_ENTERO,
@@ -446,6 +448,8 @@ function textoSinCoeficiente(cantidad) {
  */
 export function notasDeInforme(informe) {
   if (!informe) return [];
+  /* Los reportes de pacientes ya traen sus notas armadas desde api.js. */
+  if (Array.isArray(informe.notas)) return informe.notas;
   const notas = [];
   if (informe.sinClasificar > 0) notas.push(textoSinClasificar(informe.sinClasificar));
   if (esFormulario(informe) && informe.sinCoeficiente > 0) {
@@ -477,7 +481,7 @@ function cabeceraFormulario(doc, informe, margen) {
   doc.setFontSize(9.5);
   doc.text(ENCABEZADO_FORMULARIO[0], margen, 44);
   doc.setFontSize(8.5);
-  doc.text(ENCABEZADO_FORMULARIO[1], margen, 56);
+  doc.text(informe.servicio ?? ENCABEZADO_FORMULARIO[1], margen, 56);
 
   /* El título va en su propia línea: centrado a la altura del membrete se
      solapaba con el nombre del hospital. */
@@ -1005,6 +1009,203 @@ export function exportarInformeExcel(informe) {
       ultimaColumna: raciones.columnas,
       pie: pieImpreso(informe.generado),
     });
+  });
+
+  return archivo;
+}
+
+/* ------------------------------------------- Reportes de pacientes */
+
+/*
+ * Distribución (servicios × dietas).
+ * Los dos exportadores reciben el objeto de `obtenerReporteDistribucion()`
+ * —el mismo que pinta la pantalla— y no calculan nada: título, encabezados,
+ * filas, TOTAL, secciones y notas salen de ahí. El verde es el del libro del
+ * hospital (`ARGB` de excelEstilos), en el Excel y en el PDF.
+ */
+
+/* Las bandas del libro del hospital, en RGB para jsPDF. */
+const RGB_BANDA = [184, 220, 171]; /* ARGB.banda */
+const RGB_BANDA_TOTAL = [149, 202, 130]; /* ARGB.bandaTotal */
+const RGB_BANDA_COLUMNA = [163, 196, 167]; /* ARGB.bandaColumna */
+
+const CIFRA_PACIENTES = new Intl.NumberFormat('es-BO', { useGrouping: false });
+
+/**
+ * Cómo se lee una celda en las tres salidas: el cero es «—» y una fila sin
+ * fuente de datos dice «Sin fuente», porque ahí un 0 afirmaría algo falso.
+ */
+export function cifraPacientes(valor) {
+  if (valor === null || valor === undefined) return 'Sin fuente';
+  return valor === 0 ? '—' : CIFRA_PACIENTES.format(valor);
+}
+
+/** Encabezados de la tabla, en las dos filas de la planilla. */
+function columnasDelReporte(reporte) {
+  return 1 + reporte.columnas.length + (reporte.conTotal ? 1 : 0);
+}
+
+/* ------------------------------------------------------------ PDF */
+
+export function exportarReportePacientesPdf(reporte) {
+  const apaisado = reporte.conTotal; /* Distribución: once columnas. */
+  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: apaisado ? 'landscape' : 'portrait' });
+  const margen = 40;
+  const y = cabeceraFormulario(doc, reporte, margen);
+  const ancho = columnasDelReporte(reporte);
+  const colTotal = ancho - 1;
+
+  const estilos = {
+    margin: { left: margen, right: margen, bottom: 60 },
+    theme: 'grid',
+    styles: {
+      font: 'helvetica',
+      /* Apaisado y compacto: la tabla y sus notas tienen que caber en una hoja. */
+      fontSize: apaisado ? 8 : 9.5,
+      cellPadding: apaisado ? 3.5 : 5,
+      textColor: RGB_NEGRO,
+      lineColor: RGB_NEGRO,
+      lineWidth: 0.6,
+      halign: 'center',
+      valign: 'middle',
+    },
+    headStyles: { fillColor: RGB_BANDA, textColor: RGB_NEGRO, fontStyle: 'bold', lineColor: RGB_NEGRO, lineWidth: 0.6 },
+    footStyles: { fillColor: RGB_BANDA_TOTAL, textColor: RGB_NEGRO, fontStyle: 'bold', lineColor: RGB_NEGRO, lineWidth: 0.6 },
+    columnStyles: {
+      0: { halign: 'left', fontStyle: 'bold', cellWidth: apaisado ? 150 : 220 },
+      ...(reporte.conTotal ? { [colTotal]: { fillColor: RGB_BANDA_COLUMNA, fontStyle: 'bold' } } : {}),
+    },
+  };
+
+  const filaPdf = (fila) => [
+    fila === reporte.total ? { content: fila.etiqueta, styles: { halign: 'left' } } : fila.etiqueta,
+    ...fila.celdas.map(cifraPacientes),
+    ...(reporte.conTotal ? [cifraPacientes(fila.total)] : []),
+  ];
+
+  autoTable(doc, {
+    ...estilos,
+    startY: y,
+    head: [
+      [
+        { content: reporte.primeraColumna, rowSpan: 2 },
+        { content: reporte.grupoColumnas, colSpan: reporte.columnas.length },
+        ...(reporte.conTotal ? [{ content: 'TOTAL', rowSpan: 2 }] : []),
+      ],
+      reporte.columnas,
+    ],
+    body: reporte.filas.map(filaPdf),
+    foot: [filaPdf(reporte.total)],
+  });
+
+  /* Las secciones debajo del TOTAL, si las hubiera. */
+  let finalY = doc.lastAutoTable.finalY;
+  reporte.secciones.forEach((seccion) => {
+    autoTable(doc, {
+      ...estilos,
+      startY: finalY + 14,
+      head: [[{ content: seccion.etiqueta, colSpan: ancho, styles: { halign: 'left' } }]],
+      body: seccion.filas.map(filaPdf),
+    });
+    finalY = doc.lastAutoTable.finalY;
+  });
+
+  notasFormulario(doc, reporte, margen, finalY + 22);
+  pieFormulario(doc, reporte, margen);
+
+  const archivo = `${reporte.archivo}.pdf`;
+  doc.save(archivo);
+  return archivo;
+}
+
+/* ---------------------------------------------------------- Excel */
+
+/**
+ * Libro .xlsx con una hoja: la planilla tal cual se ve en pantalla. Los
+ * totales son `SUM()` sobre las celdas de arriba, así que corregir una cifra
+ * recalcula la fila TOTAL; las secciones sin fuente van con su texto y fuera
+ * de las sumas.
+ */
+export function exportarReportePacientesExcel(reporte) {
+  const archivo = `${reporte.archivo}.xlsx`;
+  const ancho = columnasDelReporte(reporte);
+  const colTotal = reporte.conTotal ? ancho : null;
+  const ultimaDato = 1 + reporte.columnas.length;
+
+  generarLibroEnSegundoPlano(archivo, (libro) => {
+    const hoja = nuevaHoja(libro, 'Distribución');
+    const filaCabecera = banner(hoja, ancho, {
+      sistema: NOMBRE_SISTEMA.toUpperCase(),
+      titulo: reporte.titulo,
+      subtitulo: `${reporte.servicio} · ${reporte.periodo.principal} · ${reporte.periodo.secundario}  |  Generado: ${reporte.generado}`,
+    });
+    const finCabecera = cabeceraAgrupada(hoja, filaCabecera, {
+      primera: reporte.primeraColumna,
+      grupo: reporte.grupoColumnas,
+      columnas: reporte.columnas,
+      ultima: reporte.conTotal ? 'TOTAL' : null,
+    });
+
+    const primera = finCabecera + 1;
+    reporte.filas.forEach((fila, indice) => {
+      const numero = primera + indice;
+      filaDatos(hoja, numero, [
+        fila.etiqueta,
+        ...fila.celdas,
+        ...(reporte.conTotal
+          ? [formula(`SUM(${celda(numero, 2)}:${celda(numero, ultimaDato)})`, fila.total)]
+          : []),
+      ], { formato: FORMATO_CERO_GUION, columnaDestacada: colTotal });
+    });
+
+    const ultima = primera + reporte.filas.length - 1;
+    const sumaColumna = (indice, resultado) =>
+      formula(`SUM(${columna(indice)}${primera}:${columna(indice)}${ultima})`, resultado);
+    const filaTotal = ultima + 1;
+    filaTotales(hoja, filaTotal, [
+      reporte.total.etiqueta,
+      ...reporte.total.celdas.map((valor, indice) => sumaColumna(indice + 2, valor)),
+      ...(reporte.conTotal ? [sumaColumna(ancho, reporte.total.total)] : []),
+    ], { formato: FORMATO_CERO_GUION });
+
+    let fila = filaTotal;
+    reporte.secciones.forEach((seccion) => {
+      fila += 2;
+      cabecera(hoja, fila, [seccion.etiqueta, ...Array(ancho - 1).fill(null)], { alto: 24 });
+      hoja.mergeCells(fila, 1, fila, ancho);
+      seccion.filas.forEach((filaSeccion) => {
+        fila += 1;
+        filaDatos(hoja, fila, [
+          filaSeccion.etiqueta,
+          ...filaSeccion.celdas.map((valor) => (valor === null ? cifraPacientes(null) : valor)),
+        ], { formato: FORMATO_CERO_GUION });
+      });
+    });
+
+    const notas = notasDeInforme(reporte);
+    if (notas.length > 0) {
+      fila += 2;
+      notaAlPie(hoja, fila, 'Notas:', ancho);
+      notas.forEach((nota) => {
+        fila += 1;
+        notaAlPie(hoja, fila, nota, ancho);
+        hoja.getRow(fila).height = 34;
+      });
+    }
+
+    configurarImpresion(hoja, {
+      orientacion: reporte.conTotal ? 'landscape' : 'portrait',
+      ultimaFila: fila,
+      ultimaColumna: ancho,
+      pie: pieImpreso(reporte.generado),
+    });
+
+    ajustarAnchos(hoja, [
+      [reporte.primeraColumna, ...reporte.filas.map((f) => f.etiqueta),
+        ...reporte.secciones.flatMap((s) => s.filas.map((f) => f.etiqueta))],
+      ...reporte.columnas.map((titulo) => [titulo]),
+      ...(reporte.conTotal ? [['TOTAL']] : []),
+    ], reporte.conTotal ? { minimo: 11, maximo: 13, primera: 26 } : { minimo: 14, primera: 34 });
   });
 
   return archivo;

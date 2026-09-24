@@ -136,7 +136,17 @@ async function solicitarApi(ruta, { signal, ...opciones } = {}) {
       headers: { Accept: 'application/json', ...opciones.headers },
       signal: controlador.signal,
     });
-    if (!respuesta.ok) throw new Error(`La API respondió con error HTTP ${respuesta.status}.`);
+    if (!respuesta.ok) {
+      let detalle = '';
+      try {
+        const cuerpo = await respuesta.json();
+        detalle = typeof cuerpo?.detail === 'string' ? cuerpo.detail
+          : (Array.isArray(cuerpo?.detail) ? cuerpo.detail.map((d) => d.msg).join(', ') : '');
+      } catch {
+        // ignora si no es JSON
+      }
+      throw new Error(detalle ? `${detalle} (HTTP ${respuesta.status})` : `La API respondió con error HTTP ${respuesta.status}.`);
+    }
     return await respuesta.json();
   } catch (error) {
     if (signal?.aborted) throw error;
@@ -1138,4 +1148,528 @@ export async function obtenerDiaPersonal(usuarioId, { fecha, signal } = {}) {
     desplazamiento += pagina.datos.length;
   } while (desplazamiento < pagina.total);
   return null;
+}
+
+/* ============================================================================
+ * Módulo Pacientes — dietas de internados
+ *
+ * PENDIENTE DE BACKEND. De todo este bloque hoy solo responde
+ * `GET /pacientes/salud-sih`; el control de dietas, el catálogo y los
+ * informes están declarados en el plan del módulo pero todavía no
+ * implementados en FastAPI. Las funciones que siguen quedan escritas contra
+ * las rutas de ese plan, con su validación estricta: hasta que el backend las
+ * sirva devuelven el error de transporte normal (HTTP 404), que es lo
+ * correcto — ninguna cae de vuelta a otro endpoint ni fabrica datos para
+ * disimular la falta.
+ * El reporte de pacientes (distribución) está al final
+ * del bloque, con la misma disciplina de `validarInformeDeRango`. El libro
+ * mensual y sus columnas viven solo en Reportes; Control de Dietas es operativo.
+ *
+ * Principio del módulo, que manda sobre todo lo de abajo: las camas, las
+ * salas y los pacientes los administra el hospital. Esta app los lee y jamás
+ * los escribe. Por eso las escrituras mandan únicamente `cam_codigo` y, al
+ * asignar, la dieta: nombre, sala, pieza, historia y sexo nunca viajan de
+ * vuelta al servidor.
+ * ========================================================================== */
+
+/** Hora del reloj del hospital: acepta "09:40" o con segundos "09:40:00". */
+const HORA_API = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
+function esTextoConContenido(valor) {
+  return typeof valor === 'string' && valor.trim().length > 0;
+}
+
+function esTextoOpcional(valor) {
+  return valor === null || valor === undefined || typeof valor === 'string';
+}
+
+function esEnteroOpcional(valor) {
+  return valor === null || valor === undefined || esEnteroNoNegativo(valor);
+}
+
+/** Fecha del módulo en formato API, siempre local para no mover el día. */
+function fechaDeConsulta(fecha) {
+  if (fecha === undefined || fecha === null) return fechaArchivo(new Date());
+  if (fecha instanceof Date) return fechaArchivo(fecha);
+  if (typeof fecha === 'string' && FECHA_API.test(fecha)) return fecha;
+  throw new Error('Fecha inválida para consultar el control de dietas.');
+}
+
+/**
+ * GET /pacientes/salud-sih — diagnóstico de la conexión al SIH.
+ *
+ * El backend responde 200 incluso con el SIH caído, a propósito: "no hay SIH"
+ * es un estado normal del módulo y no un error de la API. Por eso acá tampoco
+ * se lanza por `conectado: false`; se lanza solo si la forma de la respuesta
+ * no es la esperada.
+ *
+ * Los conteos vienen en `null` cuando no se pudo leer la base: se conservan
+ * como `null` y no como 0, porque "no sé" y "cero camas" son cosas distintas
+ * y la pantalla tiene que poder decirlo.
+ */
+export async function obtenerSaludSih({ signal } = {}) {
+  try {
+    const dato = await solicitarApi('/pacientes/salud-sih', { signal });
+    if (!dato || typeof dato !== 'object'
+      || typeof dato.configurado !== 'boolean' || typeof dato.conectado !== 'boolean'
+      || typeof dato.mensaje !== 'string'
+      || !esEnteroOpcional(dato.filas_censo) || !esEnteroOpcional(dato.filas_vista)
+      || !esEnteroOpcional(dato.historias_distintas) || !esEnteroOpcional(dato.solo_en_la_vista)
+      || !Array.isArray(dato.descartadas_por_la_vista)
+      || dato.descartadas_por_la_vista.some((grupo) => !grupo || typeof grupo !== 'object'
+        || !esEnteroNoNegativo(grupo.camas)
+        || !esTextoOpcional(grupo.servicio_cama) || !esTextoOpcional(grupo.servicio_internacion))) {
+      throw new Error('La API devolvió un diagnóstico del SIH inválido.');
+    }
+    return {
+      configurado: dato.configurado,
+      conectado: dato.conectado,
+      mensaje: dato.mensaje,
+      filasCenso: dato.filas_censo ?? null,
+      filasVista: dato.filas_vista ?? null,
+      historias: dato.historias_distintas ?? null,
+      soloEnLaVista: dato.solo_en_la_vista ?? null,
+      descartadas: dato.descartadas_por_la_vista.map((grupo) => ({
+        camas: grupo.camas,
+        codigoServicioCama: grupo.cod_servicio_cama ?? null,
+        servicioCama: grupo.servicio_cama ?? null,
+        codigoServicioInternacion: grupo.cod_servicio_internacion ?? null,
+        servicioInternacion: grupo.servicio_internacion ?? null,
+      })),
+      /* Suma de camas que el hospital descarta de su vista y esta app sí
+         muestra: es el número que explica por qué los dos papeles no dan
+         igual, y la pantalla lo necesita en una sola cifra. */
+      camasDescartadas: dato.descartadas_por_la_vista.reduce((suma, grupo) => suma + grupo.camas, 0),
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo consultar el estado del SIH. ${error.message}`);
+  }
+}
+
+/* ----------------------------- Matriz diaria de raciones por servicio */
+
+export const CODIGOS_COLUMNAS_DISTRIBUCION = [
+  'corriente', 'blanda', 'hiposodica', 'hiposograsa', 'diabetico',
+  'licuadas', 'quimioterapias', 'sondas_liquidas', 'otros',
+];
+
+export const CODIGOS_FILAS_DISTRIBUCION = [
+  'cirugia_mujeres', 'cirugia_varones', 'ginecologia', 'infectologia',
+  'medicina_mujeres', 'medicina_varones', 'obstetricia', 'hemodialisis',
+  'neonatologia_ucin', 'uti', 'traumatologia', 'quemados', 'emergencias',
+  'pediatria_uci', 'pediatria_gral', 'oncologia',
+];
+
+function sumar(valores) {
+  return valores.reduce((suma, valor) => suma + valor, 0);
+}
+
+function mismosCodigos(lista, esperados) {
+  return Array.isArray(lista) && lista.length === esperados.length
+    && lista.every((item, indice) => item && typeof item === 'object'
+      && item.codigo === esperados[indice] && esTextoConContenido(item.etiqueta));
+}
+
+function adaptarMatrizRacionesDia(dato, diaEsperado) {
+  if (!dato || typeof dato !== 'object'
+    || dato.fecha !== diaEsperado
+    || (dato.actualizado !== null && dato.actualizado !== undefined && typeof dato.actualizado !== 'string')) {
+    throw new Error('La API devolvió una matriz de raciones inválida.');
+  }
+  if (!mismosCodigos(dato.columnas, CODIGOS_COLUMNAS_DISTRIBUCION)) {
+    throw new Error('La API devolvió columnas de dieta distintas de las de la planilla.');
+  }
+  if (!mismosCodigos(dato.filas, CODIGOS_FILAS_DISTRIBUCION)) {
+    throw new Error('La API devolvió servicios distintos de los de la planilla.');
+  }
+  const ancho = CODIGOS_COLUMNAS_DISTRIBUCION.length;
+  for (const fila of dato.filas) {
+    if (!Array.isArray(fila.celdas) || fila.celdas.length !== ancho
+      || !fila.celdas.every(esEnteroNoNegativo) || fila.total !== sumar(fila.celdas)) {
+      throw new Error(`El total de ${fila.etiqueta} no cuadra con sus dietas.`);
+    }
+  }
+  const total = dato.total;
+  const porColumna = CODIGOS_COLUMNAS_DISTRIBUCION.map((_, i) => sumar(dato.filas.map((f) => f.celdas[i])));
+  if (!total || typeof total !== 'object' || !Array.isArray(total.celdas)
+    || total.celdas.length !== ancho
+    || total.celdas.some((valor, i) => valor !== porColumna[i])
+    || total.total !== sumar(porColumna)
+    || total.total !== sumar(dato.filas.map((f) => f.total))) {
+    throw new Error('La fila TOTAL no cuadra con los servicios.');
+  }
+
+  return {
+    fecha: diaEsperado,
+    titulo: 'RACIONES DEL DÍA POR SERVICIO Y TIPO DE DIETA',
+    primeraColumna: 'SERVICIOS',
+    grupoColumnas: 'TIPOS DE DIETAS',
+    columnas: dato.columnas,
+    filas: dato.filas.map((f) => ({
+      codigo: f.codigo,
+      etiqueta: f.etiqueta,
+      celdas: f.celdas,
+      total: f.total,
+    })),
+    total: {
+      etiqueta: 'TOTAL',
+      celdas: total.celdas,
+      total: total.total,
+    },
+    actualizado: dato.actualizado ?? null,
+    totalGeneral: total.total,
+  };
+}
+
+/**
+ * GET /pacientes/raciones-dia?fecha=YYYY-MM-DD — matriz del día.
+ *
+ * Devuelve la matriz de 16 servicios × 9 columnas de dietas, con totales
+ * y fecha de última actualización.
+ */
+export async function obtenerRacionesDia({ fecha, signal } = {}) {
+  const dia = fechaDeConsulta(fecha);
+  try {
+    const dato = await solicitarApi(`/pacientes/raciones-dia?fecha=${dia}`, { signal });
+    return adaptarMatrizRacionesDia(dato, dia);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar las raciones del día. ${error.message}`);
+  }
+}
+
+/**
+ * PUT /pacientes/raciones-dia — guarda celdas modificadas de la matriz.
+ *
+ * Solo manda las celdas que cambiaron ({ fila, columna, cantidad }).
+ * Devuelve la matriz recalculada por el backend.
+ */
+export async function guardarRacionesDia({ fecha, celdas = [], signal } = {}) {
+  const dia = fechaDeConsulta(fecha);
+  if (!Array.isArray(celdas) || celdas.length === 0) {
+    throw new Error('No hay cambios para guardar.');
+  }
+  for (const celda of celdas) {
+    if (!celda || typeof celda !== 'object') {
+      throw new Error('Formato de celda inválido.');
+    }
+    if (!CODIGOS_FILAS_DISTRIBUCION.includes(celda.fila)) {
+      throw new Error(`Fila inválida: «${celda.fila}».`);
+    }
+    if (!CODIGOS_COLUMNAS_DISTRIBUCION.includes(celda.columna)) {
+      throw new Error(`Columna de dieta inválida: «${celda.columna}».`);
+    }
+    if (!esEnteroNoNegativo(celda.cantidad)) {
+      throw new Error('La cantidad debe ser un entero mayor o igual a 0.');
+    }
+  }
+
+  try {
+    const dato = await solicitarApi('/pacientes/raciones-dia', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fecha: dia,
+        celdas: celdas.map((c) => ({
+          fila: c.fila,
+          columna: c.columna,
+          cantidad: c.cantidad,
+        })),
+      }),
+      signal,
+    });
+    return adaptarMatrizRacionesDia(dato, dia);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron guardar las raciones del día. ${error.message}`);
+  }
+}
+
+/* ----------------------------- Catálogo de dietas */
+
+/**
+ * GET /pacientes/dietas — el catálogo.
+ *
+ * Cada dieta trae su nombre, si está activa y la columna del libro a la que
+ * suma. NPO es el caso aparte: es ayuno y no suma a ninguna columna. Otros
+ * campos que mande el backend no se validan ni pasan a la pantalla.
+ */
+export async function obtenerDietas({ signal } = {}) {
+  try {
+    const dato = await solicitarApi('/pacientes/dietas', { signal });
+    const lista = Array.isArray(dato) ? dato : dato?.dietas;
+    if (!Array.isArray(lista)
+      || lista.some((dieta) => !dieta || typeof dieta !== 'object'
+        || !Number.isInteger(dieta.id) || dieta.id <= 0
+        || !esTextoConContenido(dieta.nombre)
+        || typeof dieta.activa !== 'boolean'
+        || typeof dieta.suma_al_libro !== 'boolean'
+        || !esTextoOpcional(dieta.columna_libro))) {
+      throw new Error('La API devolvió un catálogo de dietas inválido.');
+    }
+    return lista.map((dieta) => ({
+      id: dieta.id,
+      codigo: dieta.codigo ?? '',
+      nombre: dieta.nombre,
+      /* Sin columna del libro no hay dónde sumarla: la pantalla lo muestra
+         como una falta, no como un guion cualquiera. */
+      columnaLibro: dieta.columna_libro ?? null,
+      sumaAlLibro: dieta.suma_al_libro,
+      esAyuno: dieta.es_ayuno === true,
+      activa: dieta.activa,
+    }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo cargar el catálogo de dietas. ${error.message}`);
+  }
+}
+
+/**
+ * POST /pacientes/dietas — crea una nueva dieta en el catálogo.
+ */
+export async function crearDieta({ nombre, columnaInforme, cuentaRacion = true, orden, activo = true }, { signal } = {}) {
+  try {
+    if (!esTextoConContenido(nombre)) {
+      throw new Error('Escriba el nombre de la dieta.');
+    }
+    if (!columnaInforme) {
+      throw new Error('Seleccione la columna del libro a la que suma.');
+    }
+    const dato = await solicitarApi('/pacientes/dietas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nombre: nombre.trim(),
+        columna_informe: columnaInforme,
+        cuenta_racion: Boolean(cuentaRacion),
+        orden: Number.isInteger(orden) ? orden : null,
+        activo: Boolean(activo),
+      }),
+      signal,
+    });
+    if (!dato || typeof dato !== 'object' || !Number.isInteger(dato.id) || !esTextoConContenido(dato.nombre)) {
+      throw new Error('La API devolvió una dieta inválida.');
+    }
+    return {
+      id: dato.id,
+      codigo: dato.codigo,
+      nombre: dato.nombre,
+      columnaLibro: dato.columna_libro ?? dato.columna_informe ?? null,
+      sumaAlLibro: dato.suma_al_libro ?? dato.cuenta_racion ?? true,
+      esAyuno: dato.es_ayuno === true,
+      activa: dato.activa ?? dato.activo ?? true,
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo crear la dieta. ${error.message}`);
+  }
+}
+
+/**
+ * PUT /pacientes/dietas/{id} — edita una dieta (nombre, columna, activa, cuenta_racion).
+ */
+export async function editarDieta(id, { nombre, columnaInforme, cuentaRacion, orden, activa, activo }, { signal } = {}) {
+  try {
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Dieta inválida.');
+    }
+    const cuerpo = {};
+    if (nombre !== undefined) cuerpo.nombre = nombre.trim();
+    if (columnaInforme !== undefined) cuerpo.columna_informe = columnaInforme;
+    if (cuentaRacion !== undefined) cuerpo.cuenta_racion = Boolean(cuentaRacion);
+    if (orden !== undefined) cuerpo.orden = orden;
+    const estadoActivo = activa !== undefined ? activa : activo;
+    if (estadoActivo !== undefined) {
+      cuerpo.activo = Boolean(estadoActivo);
+      cuerpo.activa = Boolean(estadoActivo);
+    }
+
+    const dato = await solicitarApi(`/pacientes/dietas/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cuerpo),
+      signal,
+    });
+    if (!dato || typeof dato !== 'object' || !Number.isInteger(dato.id)) {
+      throw new Error('La API devolvió una dieta inválida.');
+    }
+    return {
+      id: dato.id,
+      codigo: dato.codigo,
+      nombre: dato.nombre,
+      columnaLibro: dato.columna_libro ?? dato.columna_informe ?? null,
+      sumaAlLibro: dato.suma_al_libro ?? dato.cuenta_racion ?? true,
+      esAyuno: dato.es_ayuno === true,
+      activa: dato.activa ?? dato.activo ?? true,
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo editar la dieta. ${error.message}`);
+  }
+}
+
+/**
+ * DELETE /pacientes/dietas/{id} — elimina una dieta del catálogo.
+ *
+ * Es borrado LÓGICO: el backend pone `visible = 0` y la fila queda en la
+ * base, porque los hechos ya registrados la siguen citando. Desde acá la
+ * dieta deja de existir: no vuelve a listarse ni se puede asignar. NPO no se
+ * elimina (422) y una dieta inexistente o ya eliminada da 404; los dos
+ * errores se muestran tal cual los manda el backend.
+ */
+export async function eliminarDieta(id, { signal } = {}) {
+  try {
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Dieta inválida.');
+    }
+    const dato = await solicitarApi(`/pacientes/dietas/${id}`, { method: 'DELETE', signal });
+    if (!dato || typeof dato !== 'object' || dato.eliminado !== true || dato.id !== id) {
+      throw new Error('La API devolvió una respuesta inválida.');
+    }
+    return { eliminado: true, id: dato.id };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo eliminar la dieta. ${error.message}`);
+  }
+}
+
+/* ----------------------------- Reporte de pacientes */
+
+/*
+ * La planilla de nutrición para cualquier rango de fechas:
+ *
+ *   · Distribución     servicios × tipos de dieta (hoja INFORMES del libro).
+ *
+ * El backend manda filas y columnas en el orden FIJO de la planilla, con un
+ * `codigo` estable y una `etiqueta` que puede cambiar. Acá se exige que los
+ * códigos sean exactamente esos y en ese orden, y que cada total cuadre con
+ * lo que suma: una fila de menos o un total que no cierra es un error, no
+ * algo que se acomode en el navegador. Las etiquetas se muestran tal cual.
+ *
+ * El adaptador devuelve una forma única que es la fuente de la pantalla,
+ * del Excel y del PDF: lo que se ve y lo que se descarga no pueden separarse.
+ */
+
+function rangoDeReporte(desde, hasta) {
+  if (typeof desde !== 'string' || !FECHA_API.test(desde)
+    || typeof hasta !== 'string' || !FECHA_API.test(hasta)) {
+    throw new Error('Rango de fechas inválido.');
+  }
+  if (desde > hasta) {
+    throw new Error('La fecha inicial no puede ser posterior a la final.');
+  }
+}
+
+/** Cabecera común: el rango pedido tiene que ser el que volvió. */
+function validarRangoDeRespuesta(dato, { desde, hasta }) {
+  if (!dato || typeof dato !== 'object'
+    || dato.desde !== desde || dato.hasta !== hasta
+    || dato.dias !== diasEntre(desde, hasta)
+    || !esTextoConContenido(dato.titulo)) {
+    throw new Error('La API devolvió un reporte de otro rango o sin título.');
+  }
+}
+
+/**
+ * El criterio con que se contó, en una frase. Sale de las banderas que manda
+ * el backend y no de reglas escritas acá: si nutrición cambia una regla, la
+ * nota cambia sola. Mientras haya preguntas abiertas se dice que es provisorio.
+ */
+function notaDeCriterio(criterio) {
+  if (!criterio || typeof criterio !== 'object'
+    || typeof criterio.ultima_del_dia_manda !== 'boolean'
+    || (criterio.excluye_suspendidas !== undefined && typeof criterio.excluye_suspendidas !== 'boolean')
+    || (criterio.excluye_npo !== undefined && typeof criterio.excluye_npo !== 'boolean')
+    || !Array.isArray(criterio.pendiente_confirmar)
+    || criterio.pendiente_confirmar.some((n) => !Number.isInteger(n) || n <= 0)) {
+    throw new Error('La API devolvió un criterio de conteo inválido.');
+  }
+  const partes = [
+    criterio.ultima_del_dia_manda
+      ? 'cuenta la última dieta del día de cada cama'
+      : 'cuenta cada dieta registrada en el día',
+  ];
+  if (criterio.excluye_suspendidas !== undefined) {
+    partes.push(criterio.excluye_suspendidas ? 'las camas suspendidas no suman' : 'las camas suspendidas suman');
+  }
+  if (criterio.excluye_npo !== undefined) {
+    partes.push(criterio.excluye_npo ? 'NPO no suma' : 'NPO suma');
+  }
+  const texto = partes.join('; ');
+  const pendientes = criterio.pendiente_confirmar;
+  if (pendientes.length === 0) return `Criterio de conteo: ${texto}.`;
+  const preguntas = pendientes.length === 1 ? 'pregunta' : 'preguntas';
+  return `Conteo provisorio, pendiente de confirmar con nutrición (${preguntas} ${pendientes.join(', ')} del contexto): ${texto}.`;
+}
+
+/** Lo que comparte la planilla: período, sello y membrete. */
+function baseDeReporte({ desde, hasta, hoy, tipo, titulo }) {
+  const dias = diasEntre(desde, hasta);
+  const rango = etiquetaDeRango(desde, hasta);
+  return {
+    tipo,
+    titulo,
+    servicio: 'SERVICIO DE NUTRICIÓN',
+    generado: selloDeGeneracion(hoy),
+    gestion: fechaDeValor(hasta).getFullYear(),
+    desde,
+    hasta,
+    dias,
+    rango,
+    periodo: { principal: rango, secundario: dias === 1 ? '1 día' : `${dias} días` },
+    encabezado: { rotulo: 'PERÍODO :', valor: rango.toUpperCase() },
+    archivo: `pacientes-${tipo}-${desde}-a-${hasta}`,
+  };
+}
+
+/**
+ * GET /pacientes/reporte-distribucion?desde&hasta — servicios × tipos de dieta.
+ * Cada fila trae sus `valores` alineados con `columnas` y su total.
+ */
+export async function obtenerReporteDistribucion({ desde, hasta, hoy = new Date(), signal } = {}) {
+  rangoDeReporte(desde, hasta);
+  try {
+    const dato = await solicitarApi(`/pacientes/reporte-distribucion?desde=${desde}&hasta=${hasta}`, { signal });
+    validarRangoDeRespuesta(dato, { desde, hasta });
+
+    if (!mismosCodigos(dato.columnas, CODIGOS_COLUMNAS_DISTRIBUCION)) {
+      throw new Error('La API devolvió columnas de dieta distintas de las de la planilla.');
+    }
+    if (!mismosCodigos(dato.filas, CODIGOS_FILAS_DISTRIBUCION)) {
+      throw new Error('La API devolvió servicios distintos de los de la planilla.');
+    }
+    const ancho = CODIGOS_COLUMNAS_DISTRIBUCION.length;
+    for (const fila of dato.filas) {
+      if (!Array.isArray(fila.valores) || fila.valores.length !== ancho
+        || !fila.valores.every(esEnteroNoNegativo) || fila.total !== sumar(fila.valores)) {
+        throw new Error(`El total de ${fila.etiqueta} no cuadra con sus dietas.`);
+      }
+    }
+    const total = dato.total;
+    const porColumna = CODIGOS_COLUMNAS_DISTRIBUCION.map((_, i) => sumar(dato.filas.map((f) => f.valores[i])));
+    if (!total || typeof total !== 'object' || !Array.isArray(total.valores)
+      || total.valores.length !== ancho
+      || total.valores.some((valor, i) => valor !== porColumna[i])
+      || total.total !== sumar(porColumna)
+      || total.total !== sumar(dato.filas.map((f) => f.total))) {
+      throw new Error('La fila TOTAL no cuadra con los servicios.');
+    }
+
+    return {
+      ...baseDeReporte({ desde, hasta, hoy, tipo: 'distribucion', titulo: dato.titulo }),
+      primeraColumna: 'SERVICIOS',
+      grupoColumnas: 'TIPOS DE DIETAS',
+      columnas: dato.columnas.map((c) => c.etiqueta),
+      conTotal: true,
+      filas: dato.filas.map((f) => ({ etiqueta: f.etiqueta, celdas: f.valores, total: f.total })),
+      total: { etiqueta: 'TOTAL', celdas: total.valores, total: total.total },
+      secciones: [],
+      totalGeneral: total.total,
+      notas: [notaDeCriterio(dato.criterio)],
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo cargar el reporte de distribución. ${error.message}`);
+  }
 }

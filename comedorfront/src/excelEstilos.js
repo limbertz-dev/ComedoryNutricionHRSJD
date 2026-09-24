@@ -41,6 +41,9 @@ export const FORMATO_PROMEDIO = '0.00';
 export const FORMATO_PORCENTAJE = '0%';
 /* Día del mes con cero delante: «01», pero como número, no como texto. */
 export const FORMATO_DIA = '00';
+/* Planillas de pacientes: el cero se lee «—», como en pantalla y en el PDF,
+   pero la celda sigue siendo el número 0 y las sumas funcionan. */
+export const FORMATO_CERO_GUION = '0;-0;"—"';
 
 /* Alturas de fila del original: la tabla respira, no es una lista apretada. */
 export const ALTO_CABECERA = 42;
@@ -137,6 +140,24 @@ export function cabecera(hoja, fila, titulos, { alto = ALTO_CABECERA } = {}) {
     });
   });
   return row;
+}
+
+/**
+ * Cabecera de dos filas, como en las planillas de nutrición: la primera
+ * columna (y la de TOTAL, si hay) ocupa las dos filas, y un rótulo agrupa las
+ * columnas del medio («TIPOS DE DIETAS», «No. DE RACIONES»). Devuelve la
+ * segunda fila de la cabecera: los datos empiezan en la siguiente.
+ */
+export function cabeceraAgrupada(hoja, fila, { primera, grupo, columnas, ultima = null }) {
+  const colUltima = columnas.length + 2;
+  cabecera(hoja, fila, [primera, grupo, ...columnas.slice(1).map(() => null), ...(ultima ? [ultima] : [])], {
+    alto: 24,
+  });
+  cabecera(hoja, fila + 1, [null, ...columnas, ...(ultima ? [null] : [])], { alto: 30 });
+  hoja.mergeCells(fila, 1, fila + 1, 1);
+  if (columnas.length > 1) hoja.mergeCells(fila, 2, fila, columnas.length + 1);
+  if (ultima) hoja.mergeCells(fila, colUltima, fila + 1, colUltima);
+  return fila + 1;
 }
 
 /**
