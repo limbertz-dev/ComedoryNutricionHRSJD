@@ -1,12 +1,12 @@
 /*
  * exportaciones.js — generación de los archivos descargables de «Reportes».
  *
- * Ambos exportadores reciben el mismo objeto que devuelve
- * `obtenerReporteDelDia()` (api.js) y no calculan nada por su cuenta: el
- * Excel y el PDF salen siempre con las mismas cifras.
+ * `exportarInformeExcel()` y `exportarInformePdf()` reciben el informe que
+ * arma `obtenerInformeRaciones()` (api.js) a partir de FastAPI y no calculan
+ * nada por su cuenta: el Excel y el PDF salen siempre con las mismas cifras.
  *
- * Cuando exista FastAPI, el reporte llegará del backend y estos dos
- * exportadores seguirán funcionando igual, sin tocarlos.
+ * `exportarReporteExcel()` y `exportarReportePdf()` son del reporte del día
+ * de la maqueta: hoy ninguna pantalla los importa.
  */
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -199,7 +199,7 @@ function hojaDetalleTurno(libro, reporte) {
  * La generación es asíncrona (ExcelJS se carga bajo demanda), pero el nombre
  * del archivo se devuelve de inmediato: la UI lo muestra sin esperar.
  *
- * @param {object} reporte  salida de obtenerReporteDelDia()
+ * @param {object} reporte  reporte del día: turno, fechaArchivo, resumen, porCategoria y detalle
  * @returns {string} nombre del archivo generado
  */
 export function exportarReporteExcel(reporte) {
@@ -291,7 +291,7 @@ function estilosTabla(doc, margen, paginasConPie) {
  * PDF A4 con el mismo contenido del Excel: resumen del turno, raciones por
  * categoría y detalle nominal, con pie de página numerado.
  *
- * @param {object} reporte  salida de obtenerReporteDelDia()
+ * @param {object} reporte  reporte del día: turno, fechaArchivo, resumen, porCategoria y detalle
  * @returns {string} nombre del archivo generado
  */
 export function exportarReportePdf(reporte) {

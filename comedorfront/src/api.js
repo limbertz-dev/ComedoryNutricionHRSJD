@@ -167,63 +167,6 @@ function adaptarPersona(dato) {
   };
 }
 
-/**
- * Categorías de comensal habilitadas en el módulo Personal.
- *
- * Son exactamente las columnas del formulario del Servicio de Estadística: el
- * padrón del biométrico y el informe mensual tienen que hablar el mismo idioma
- * para que cada marcación pueda sumar a su casilla del reporte.
- */
-export const CATEGORIAS = [
-  'Médico',
-  'Servicio',
-  'Administrativo',
-  'Técnicos',
-  'Policías',
-];
-
-/**
- * Filas del informe: los cuatro tiempos de comida oficiales, en su orden.
- *
- * Sobrealimentación y café nocturno ya no existen como comidas propias: el
- * sistema y la base de datos quedaron en estos cuatro, y cada uno lleva su
- * coeficiente individual (ver COEFICIENTES_RACION).
- */
-export const TIEMPOS_COMIDA = [
-  'Desayuno',
-  'Almuerzo',
-  'Té',
-  'Cena',
-];
-
-/**
- * Raciones previstas para el turno en curso.
- * Es menor que el padrón de 10 personas para que el mockup pueda demostrar
- * también el tercer caso:
- * una vez agotado el cupo, quien todavía no marcó recibe "No quedan raciones
- * disponibles". Con el padrón real este número lo fijará el backend.
- */
-export const RACIONES_PREVISTAS_TURNO = 8;
-
-/**
- * Personal de prueba: dos comensales por cada columna del formulario.
- * `yaMarcoHoy` arranca en true para cinco personas (una por categoría): el
- * dashboard inicia con actividad creíble y el rechazo por marcación duplicada
- * es visible desde la primera simulación.
- */
-export const PERSONAL_INICIAL = [
-  { id: 1, nombre: 'Dra. Carla Mendoza Rojas', categoria: 'Médico', legajo: 'MED-1042', yaMarcoHoy: false },
-  { id: 2, nombre: 'Dr. Javier Peñaranda Salas', categoria: 'Médico', legajo: 'MED-1078', yaMarcoHoy: true },
-  { id: 5, nombre: 'Lucía Ferrufino Arce', categoria: 'Servicio', legajo: 'SER-3310', yaMarcoHoy: true },
-  { id: 6, nombre: 'Diego Ticona Mamani', categoria: 'Servicio', legajo: 'SER-3325', yaMarcoHoy: false },
-  { id: 7, nombre: 'Silvia Rocha Camacho', categoria: 'Administrativo', legajo: 'ADM-6104', yaMarcoHoy: true },
-  { id: 8, nombre: 'Iván Molina Terceros', categoria: 'Administrativo', legajo: 'ADM-6119', yaMarcoHoy: false },
-  { id: 9, nombre: 'Nelson Gutiérrez Ibáñez', categoria: 'Técnicos', legajo: 'TEC-5201', yaMarcoHoy: true },
-  { id: 10, nombre: 'Roxana Sejas Montaño', categoria: 'Técnicos', legajo: 'TEC-5216', yaMarcoHoy: false },
-  { id: 11, nombre: 'Sgto. Ramiro Choque Apaza', categoria: 'Policías', legajo: 'POL-4108', yaMarcoHoy: false },
-  { id: 12, nombre: 'Cbo. Elena Cruz Villarroel', categoria: 'Policías', legajo: 'POL-4123', yaMarcoHoy: true },
-];
-
 /** Motivos de rechazo. El componente decide el texto visual a partir de esto. */
 export const MOTIVOS = {
   OK: 'ok',
@@ -255,21 +198,6 @@ export async function obtenerPersonal({ signal } = {}) {
     if (signal?.aborted) throw error;
     throw new Error(`No se pudo cargar el padrón. ${error.message}`);
   }
-}
-
-/**
- * Tiempo de comida vigente según la hora, con los seis nombres del formulario.
- * Es lo que decide a qué fila del informe suma cada marcación.
- * Mañana lo definirá el backend.
- */
-export function obtenerTurnoActual(fecha = new Date()) {
-  const hora = fecha.getHours();
-  if (hora < 10) return 'Desayuno';
-  if (hora < 11) return 'Sobrealimentación';
-  if (hora < 15) return 'Almuerzo';
-  if (hora < 17) return 'Té';
-  if (hora < 21) return 'Cena';
-  return 'Café nocturno';
 }
 
 function horaLegible(fecha) {
@@ -344,93 +272,10 @@ export async function simularMarcacion({ personal, personaId, signal }) {
   return marcarAsistencia(personaId, { persona, signal });
 }
 
-/**
- * Consumo acumulado del día por categoría, derivado del mismo padrón que usa
- * la pantalla en vivo. Así el total nunca puede superar las 10 personas.
- * Mañana: GET /reportes/consumo-por-categoria?fecha=hoy
- */
-export function obtenerConsumoPorCategoria(personal) {
-  return CATEGORIAS.map((categoria) => ({
-    categoria,
-    raciones: personal.filter(
-      (persona) => persona.categoria === categoria && persona.yaMarcoHoy,
-    ).length,
-  }));
-}
-
-/** Fecha larga para la portada del reporte: "jueves, 3 de septiembre de 2026". */
-function fechaLegible(fecha) {
-  return fecha.toLocaleDateString('es-BO', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-}
-
 /** Fecha compacta para el nombre del archivo exportado: "2026-09-03". */
 function fechaArchivo(fecha) {
   const dos = (n) => String(n).padStart(2, '0');
   return `${fecha.getFullYear()}-${dos(fecha.getMonth() + 1)}-${dos(fecha.getDate())}`;
-}
-
-/**
- * Reporte del día ya armado: cabecera, resumen del turno, corte por categoría
- * y detalle nominal. Es la única fuente de los dos exportadores, de modo que
- * el Excel y el PDF nunca puedan mostrar cifras distintas entre sí.
- *
- * Mañana: GET /reportes/dia?fecha=hoy&turno=almuerzo devolverá esta misma
- * estructura y solo habrá que borrar el cálculo local.
- */
-export function obtenerReporteDelDia({
-  personal,
-  turno,
-  racionesPrevistas,
-  racionesRestantes,
-  validas = 0,
-  rechazadas = 0,
-  fecha = new Date(),
-}) {
-  const servidas = Math.max(0, racionesPrevistas - racionesRestantes);
-  const porcentaje = racionesPrevistas > 0 ? Math.round((servidas / racionesPrevistas) * 100) : 0;
-  const consumo = obtenerConsumoPorCategoria(personal);
-  const totalConsumo = consumo.reduce((suma, fila) => suma + fila.raciones, 0);
-
-  return {
-    titulo: 'Reporte de raciones del día',
-    subtitulo: 'Módulo Personal / Comensales',
-    generadoEn: horaLegible(fecha),
-    fecha: fechaLegible(fecha),
-    fechaArchivo: fechaArchivo(fecha),
-    turno,
-
-    resumen: {
-      padron: personal.length,
-      racionesPrevistas,
-      servidas,
-      restantes: racionesRestantes,
-      porcentaje,
-      validas,
-      rechazadas,
-    },
-
-    porCategoria: consumo.map((fila) => ({
-      categoria: fila.categoria,
-      raciones: fila.raciones,
-      /* Participación de la categoría sobre el total servido del día. */
-      participacion: totalConsumo > 0 ? Math.round((fila.raciones / totalConsumo) * 100) : 0,
-    })),
-
-    totalCategorias: totalConsumo,
-
-    detalle: personal.map((persona) => ({
-      legajo: persona.legajo,
-      nombre: persona.nombre,
-      categoria: persona.categoria,
-      turno,
-      estado: persona.yaMarcoHoy ? 'Servida' : 'Pendiente',
-    })),
-  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -456,45 +301,6 @@ export function obtenerReporteDelDia({
  * cuadra 100 % con el papel: la UI los muestra como advertencia, nunca en
  * silencio.
  * ------------------------------------------------------------------ */
-
-/**
- * Coeficientes asignados a los tiempos de comida para reducir a ración
- * completa. Son los del formulario y no se tocan sin autorización de la
- * jefatura: de ellos sale el número que se reporta al hospital.
- *
- * Uno por comida, y los cuatro suman 1.000: cuatro comidas de un mismo día
- * equivalen exactamente a una ración completa. Antes iban agrupados de a dos
- * porque el papel juntaba desayuno con sobrealimentación y cena con café
- * nocturno; sin esas dos comidas, la agrupación sobra.
- */
-export const COEFICIENTES_RACION = [
-  { etiqueta: 'Desayuno', tiempos: ['Desayuno'], coeficiente: 0.15 },
-  { etiqueta: 'Almuerzo', tiempos: ['Almuerzo'], coeficiente: 0.5 },
-  { etiqueta: 'Té', tiempos: ['Té'], coeficiente: 0.05 },
-  { etiqueta: 'Cena', tiempos: ['Cena'], coeficiente: 0.3 },
-];
-
-/** Matriz vacía tiempo × categoría, que es la forma de todo consumo. */
-export function crearMatrizVacia() {
-  return Object.fromEntries(
-    TIEMPOS_COMIDA.map((tiempo) => [
-      tiempo,
-      Object.fromEntries(CATEGORIAS.map((categoria) => [categoria, 0])),
-    ]),
-  );
-}
-
-/**
- * Suma una ración a su casilla y devuelve una matriz nueva.
- */
-export function sumarRacion(consumo, tiempo, categoria) {
-  if (!consumo[tiempo] || consumo[tiempo][categoria] === undefined) return consumo;
-
-  return {
-    ...consumo,
-    [tiempo]: { ...consumo[tiempo], [categoria]: consumo[tiempo][categoria] + 1 },
-  };
-}
 
 /** Fecha corta del formulario: "04/09/2026". */
 function fechaCorta(fecha) {

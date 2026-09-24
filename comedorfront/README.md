@@ -23,11 +23,18 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | Función | Endpoint | Uso |
 |---|---|---|
 | obtenerPersonal | GET /personal | Reúne páginas de 200 comensales para el selector |
-| marcarAsistencia / simularMarcacion | POST /asistencias | Registra la persona seleccionada con metodo manual |
+| marcarAsistencia | GET /personal/{id} + POST /asistencias | metodo biometrico desde el simulador del lector, manual desde el registro a mano |
 | obtenerEstadoPantalla | GET /pantalla/estado | Comida vigente, cupo, totales del día y gráfico |
+| obtenerUltimasMarcaciones | GET /pantalla/ultimas-marcaciones | Lecturas guardadas de hoy, incluidos los rechazos |
+| obtenerDiaPersonal | GET /historial/diario | Detalle del día de un comensal bajo la marcación |
 | obtenerHistorialDiarioPersonal | GET /historial/diario | Historial diario, 50 registros por página |
 | obtenerHistorialMensualPersonal | GET /historial/mensual | Totales mensuales, 50 registros por página |
-| obtenerPeriodos | GET /reportes/periodos | Gestiones y sus 12 meses en una consulta |
+| obtenerInformeRaciones | GET /reportes/informe | Informe de Estadística por rango de fechas (Reportes) |
+
+Adaptadores con pruebas pero sin pantalla que los use hoy: simularMarcacion
+(alias de marcarAsistencia), obtenerPeriodos (GET /reportes/periodos),
+obtenerRegistroDiario (GET /reportes/registro-diario), obtenerInformeMensual
+(GET /reportes/mensual) y obtenerResumenGestion (GET /reportes/gestion).
 
 **Registrar asistencia guarda datos reales.** Envía usuario_id (users.id), sin
 seleccionar personas al azar. La API decide derechos, duplicados, horario y cupo.
@@ -45,8 +52,9 @@ fijo de 8. **Actualizar datos** vuelve a consultar padrón y estado.
 - El gráfico conserva todas las categorías entregadas, incluida Sin clasificar.
 - Lecturas aceptadas/rechazadas usa totales_del_dia; son lecturas biométricas.
   Las asistencias manuales sí suman a las raciones servidas, pero no a las lecturas.
-- La lista lateral muestra solo marcaciones de esta sesión. La hora del evento
-  sigue siendo la recepción local porque el POST no devuelve la hora.
+- La lista lateral sale de /pantalla/ultimas-marcaciones y se vuelve a pedir
+  tras cada marcación. La hora de la marcación recién enviada es la recepción
+  local porque el POST no devuelve la hora.
 
 ## Historial y períodos
 
@@ -61,10 +69,10 @@ muestran el total del servidor. Al cambiar período se vuelve a la primera pági
 El detalle bajo una marcación busca al usuario entre las páginas del historial
 diario, usando fecha_comida cuando está disponible.
 
-El selector de informes consulta /reportes/periodos al abrirse. Cambiar año o mes
-usa esa misma respuesta. situacion indica el calendario; cerrado indica la
-aprobación de la jefatura y se muestra por separado. Los meses sin raciones se
-presentan vacíos y no muestran cifras de demostración ni permiten exportarlas.
+Reportes muestra una sola vista, el formulario de Estadística, pedida por rango
+de fechas a /reportes/informe: «este mes» y «esta gestión» son rangos. Un rango
+sin raciones se presenta vacío, sin cifras de demostración. Excel y PDF salen de
+ese mismo informe (exportarInformeExcel / exportarInformePdf).
 
 useConsultaApi cancela lecturas obsoletas al cambiar de período o desmontar una
 vista. Carga, respuesta vacía y error son estados distintos. Hay reintento manual
@@ -72,9 +80,8 @@ para lecturas; no hay reintentos automáticos del POST ni datos ficticios de res
 
 ## Pendiente de mapeo
 
-Los tres informes (registro diario, mensual y gestión) ya consultan sus
-endpoints reales y sus vistas/exportaciones salieron del modo demostración.
-sin_clasificar y sin_coeficiente se muestran como advertencia ámbar al pie de
+Los coeficientes de ración completa llegan del backend con cada informe; el
+frontend no guarda una copia. sin_clasificar y sin_coeficiente se muestran como advertencia ámbar al pie de
 la tabla y como nota al pie en Excel/PDF: mientras sean mayores que cero, el
 informe no cuadra 100 % con el papel.
 

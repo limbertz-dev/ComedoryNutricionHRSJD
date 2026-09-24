@@ -11,6 +11,9 @@
 # nombres, carnets, telefonos y hashes de contrasena del personal, y
 # lo que se sube una vez queda en el historial para siempre.
 *.sql
+# Excepcion: las vistas SQL del esquema son codigo, no datos.
+!sql/vistas/*.sql
+!comedorback/sql/vistas/*.sql
 *.xlsx
 *.xls
 *.csv
