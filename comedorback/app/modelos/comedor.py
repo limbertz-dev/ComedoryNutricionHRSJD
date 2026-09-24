@@ -31,6 +31,7 @@ from sqlalchemy.dialects.mysql import BIGINT, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
+from app.modelos.heredados import ESQUEMA_TURNOS
 
 # Las claves de bd_turnos son BIGINT UNSIGNED: toda FK que las apunte debe
 # usar el mismo tipo o MySQL rechaza la restricción.
@@ -100,7 +101,7 @@ class CategoriaReporteMap(Base):
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     categoria_id: Mapped[int] = mapped_column(
         ID,
-        ForeignKey("categorias.id", ondelete="CASCADE"),
+        ForeignKey(f"{ESQUEMA_TURNOS}.categorias.id", ondelete="CASCADE"),
         unique=True,
         comment="Una categoria mapea a una sola columna del informe.",
     )
@@ -127,7 +128,7 @@ class HorarioComida(Base):
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     comida_id: Mapped[int] = mapped_column(
-        ID, ForeignKey("comidas.id", ondelete="CASCADE")
+        ID, ForeignKey(f"{ESQUEMA_TURNOS}.comidas.id", ondelete="CASCADE")
     )
     hora_inicio: Mapped[time] = mapped_column(Time)
     hora_fin: Mapped[time] = mapped_column(
@@ -159,7 +160,7 @@ class CoeficienteRacion(Base):
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     comida_id: Mapped[int] = mapped_column(
-        ID, ForeignKey("comidas.id", ondelete="RESTRICT")
+        ID, ForeignKey(f"{ESQUEMA_TURNOS}.comidas.id", ondelete="RESTRICT")
     )
     coeficiente: Mapped[float] = mapped_column(Numeric(4, 3))
     vigente_desde: Mapped[date] = mapped_column(Date)
@@ -183,7 +184,7 @@ class LecturaBiometrica(Base):
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     usuario_id: Mapped[int | None] = mapped_column(
         ID,
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey(f"{ESQUEMA_TURNOS}.users.id", ondelete="SET NULL"),
         comment="NULL cuando el lector no reconoce la huella.",
     )
     dispositivo: Mapped[str] = mapped_column(String(50))
@@ -213,7 +214,7 @@ class Asistencia(Base):
     id: Mapped[int] = mapped_column(ID, primary_key=True)
     usuario_id: Mapped[int] = mapped_column(
         ID,
-        ForeignKey("users.id", ondelete="RESTRICT"),
+        ForeignKey(f"{ESQUEMA_TURNOS}.users.id", ondelete="RESTRICT"),
         comment=(
             "RESTRICT a proposito: una racion servida es un hecho historico. "
             "Para dar de baja a alguien se lo marca inactivo, no se lo borra."
@@ -227,7 +228,7 @@ class Asistencia(Base):
         ),
     )
     comida_id: Mapped[int] = mapped_column(
-        ID, ForeignKey("comidas.id", ondelete="RESTRICT")
+        ID, ForeignKey(f"{ESQUEMA_TURNOS}.comidas.id", ondelete="RESTRICT")
     )
     categoria_reporte_id: Mapped[int] = mapped_column(
         ID,
@@ -239,14 +240,14 @@ class Asistencia(Base):
     )
     servicio_id: Mapped[int | None] = mapped_column(
         ID,
-        ForeignKey("servicios.id", ondelete="RESTRICT"),
+        ForeignKey(f"{ESQUEMA_TURNOS}.servicios.id", ondelete="RESTRICT"),
         comment=(
             "Copia deliberada (ver categoria_reporte_id). Sala del hospital, NO "
             "la categoria 'Servicio' del formulario de Estadistica."
         ),
     )
     turno_asignado_id: Mapped[int | None] = mapped_column(
-        ID, ForeignKey("turnos_asignados.id", ondelete="SET NULL")
+        ID, ForeignKey(f"{ESQUEMA_TURNOS}.turnos_asignados.id", ondelete="SET NULL")
     )
     metodo: Mapped[str] = mapped_column(
         SAEnum("biometrico", "manual", name="metodo_asistencia")
@@ -260,6 +261,6 @@ class Asistencia(Base):
         DateTime, comment="Instante del reloj en que se marco."
     )
     registrado_por: Mapped[int | None] = mapped_column(
-        ID, ForeignKey("users.id", ondelete="SET NULL")
+        ID, ForeignKey(f"{ESQUEMA_TURNOS}.users.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

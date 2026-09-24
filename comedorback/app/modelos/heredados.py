@@ -15,13 +15,19 @@ from sqlalchemy import Date, DateTime, Integer, String, Text, Time
 from sqlalchemy.dialects.mysql import BIGINT, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.config import config
 from app.core.db import Base
 
 # Las claves de bd_turnos son BIGINT UNSIGNED. Cualquier FK que las apunte
 # debe usar el mismo tipo o MySQL rechaza la restricción.
 ID = BIGINT(unsigned=True)
 
-HEREDADA = {"info": {"heredada": True}}
+# Estas tablas NO viven en la base de este sistema: viven en la del modulo
+# de turnos, en la misma instancia de MySQL. El esquema se declara aqui una
+# sola vez para que toda consulta y toda FK lo resuelvan solas.
+ESQUEMA_TURNOS = config.db_name_turnos
+
+HEREDADA = {"info": {"heredada": True}, "schema": ESQUEMA_TURNOS}
 
 
 class Categoria(Base):
