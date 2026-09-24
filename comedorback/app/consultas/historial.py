@@ -25,14 +25,10 @@ from sqlalchemy.orm import Session
 from app.consultas.derecho import aplicar_reglas
 from app.modelos.comedor import Asistencia, HorarioComida
 from app.modelos.heredados import (
-    Categoria,
+    Comensal,
     Comida,
-    Persona,
+    ComidaPorTurno,
     Servicio,
-    Turno,
-    TurnoAsignado,
-    TurnoComida,
-    Usuario,
     UsuarioServicio,
 )
 
@@ -45,10 +41,6 @@ MESES = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ]
-
-_NOMBRE = func.regexp_replace(func.trim(Persona.nombre_completo), "[[:space:]]+", " ")
-
-_FECHA_COMIDA = func.adddate(TurnoAsignado.fecha, TurnoComida.dia_relativo)
 
 
 @dataclass
@@ -160,20 +152,13 @@ def _pagina_de_usuarios(
         select(func.count()).select_from(universo)
     ).scalar_one()
 
-    ficha = (
-        select(
-            Persona.user_id.label("user_id"),
-            func.min(Persona.id).label("persona_id"),
-        )
-        .group_by(Persona.user_id)
-        .subquery("ficha")
-    )
     pagina = sesion.execute(
         select(columna)
         .select_from(universo)
-        .outerjoin(ficha, ficha.c.user_id == columna)
-        .outerjoin(Persona, Persona.id == ficha.c.persona_id)
-        .order_by(Persona.nombre_completo.is_(None), _NOMBRE, columna)
+        .outerjoin(Comensal, Comensal.usuario_id == columna)
+        .order_by(
+            Comensal.nombre_completo.is_(None), Comensal.nombre_completo, columna
+        )
         .limit(limite)
         .offset(desplazamiento)
     ).scalars().all()
@@ -185,14 +170,6 @@ def _datos_de_comensales(sesion: Session, usuarios: list[int]) -> dict[int, dict
     if not usuarios:
         return {}
 
-    ficha = (
-        select(
-            Persona.user_id.label("user_id"),
-            func.min(Persona.id).label("persona_id"),
-        )
-        .group_by(Persona.user_id)
-        .subquery("ficha")
-    )
     sala = (
         select(
             UsuarioServicio.usuario_id.label("usuario_id"),
@@ -204,20 +181,17 @@ def _datos_de_comensales(sesion: Session, usuarios: list[int]) -> dict[int, dict
     )
     filas = sesion.execute(
         select(
-            Usuario.id,
-            _NOMBRE.label("nombre_completo"),
-            Persona.carnet_identidad,
-            Categoria.nombre.label("categoria"),
+            Comensal.usuario_id.label("id"),
+            Comensal.nombre_completo,
+            Comensal.carnet_identidad,
+            Comensal.categoria,
             Servicio.nombre.label("servicio"),
         )
-        .select_from(Usuario)
-        .outerjoin(ficha, ficha.c.user_id == Usuario.id)
-        .outerjoin(Persona, Persona.id == ficha.c.persona_id)
-        .outerjoin(Categoria, Categoria.id == Usuario.categoria_id)
-        .outerjoin(sala, sala.c.usuario_id == Usuario.id)
+        .select_from(Comensal)
+        .outerjoin(sala, sala.c.usuario_id == Comensal.usuario_id)
         .outerjoin(UsuarioServicio, UsuarioServicio.id == sala.c.asignacion_id)
         .outerjoin(Servicio, Servicio.id == UsuarioServicio.servicio_id)
-        .where(Usuario.id.in_(usuarios))
+        .where(Comensal.usuario_id.in_(usuarios))
     ).mappings().all()
     return {fila["id"]: dict(fila) for fila in filas}
 
@@ -235,10 +209,9 @@ def historial_diario(
     momento = momento or datetime.now()
 
     con_derecho = aplicar_reglas(
-        select(TurnoAsignado.usuario_id.label("usuario_id"))
-        .select_from(TurnoAsignado)
-        .join(TurnoComida, TurnoComida.turno_id == TurnoAsignado.turno_id)
-        .where(_FECHA_COMIDA == fecha)
+        select(ComidaPorTurno.usuario_id.label("usuario_id"))
+        .select_from(ComidaPorTurno)
+        .where(ComidaPorTurno.fecha_comida == fecha)
     )
     con_racion = select(Asistencia.usuario_id.label("usuario_id")).where(
         Asistencia.fecha_comida == fecha
@@ -257,16 +230,15 @@ def historial_diario(
     derechos = sesion.execute(
         aplicar_reglas(
             select(
-                TurnoAsignado.usuario_id,
-                TurnoComida.comida_id,
-                Turno.nombre_turno,
-                TurnoAsignado.id,
+                ComidaPorTurno.usuario_id,
+                ComidaPorTurno.comida_id,
+                ComidaPorTurno.turno,
+                ComidaPorTurno.turno_asignado_id,
             )
-            .select_from(TurnoAsignado)
-            .join(TurnoComida, TurnoComida.turno_id == TurnoAsignado.turno_id)
-            .where(_FECHA_COMIDA == fecha)
-            .where(TurnoAsignado.usuario_id.in_(usuarios))
-        ).order_by(TurnoAsignado.id)
+            .select_from(ComidaPorTurno)
+            .where(ComidaPorTurno.fecha_comida == fecha)
+            .where(ComidaPorTurno.usuario_id.in_(usuarios))
+        ).order_by(ComidaPorTurno.turno_asignado_id)
     ).all()
 
     aplica: dict[int, set[int]] = {u: set() for u in usuarios}
@@ -353,10 +325,9 @@ def historial_mensual(
     ) - timedelta(days=1)
 
     con_derecho = aplicar_reglas(
-        select(TurnoAsignado.usuario_id.label("usuario_id"))
-        .select_from(TurnoAsignado)
-        .join(TurnoComida, TurnoComida.turno_id == TurnoAsignado.turno_id)
-        .where(_FECHA_COMIDA.between(desde, hasta))
+        select(ComidaPorTurno.usuario_id.label("usuario_id"))
+        .select_from(ComidaPorTurno)
+        .where(ComidaPorTurno.fecha_comida.between(desde, hasta))
     )
     con_racion = select(Asistencia.usuario_id.label("usuario_id")).where(
         Asistencia.fecha_comida.between(desde, hasta)
@@ -378,14 +349,13 @@ def historial_mensual(
     derechos = (
         aplicar_reglas(
             select(
-                TurnoAsignado.usuario_id.label("usuario_id"),
-                TurnoComida.comida_id.label("comida_id"),
-                _FECHA_COMIDA.label("fecha_comida"),
+                ComidaPorTurno.usuario_id,
+                ComidaPorTurno.comida_id,
+                ComidaPorTurno.fecha_comida,
             )
-            .select_from(TurnoAsignado)
-            .join(TurnoComida, TurnoComida.turno_id == TurnoAsignado.turno_id)
-            .where(_FECHA_COMIDA.between(desde, hasta))
-            .where(TurnoAsignado.usuario_id.in_(usuarios))
+            .select_from(ComidaPorTurno)
+            .where(ComidaPorTurno.fecha_comida.between(desde, hasta))
+            .where(ComidaPorTurno.usuario_id.in_(usuarios))
         )
         .distinct()
         .subquery("derechos")

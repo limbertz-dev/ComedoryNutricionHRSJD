@@ -1,8 +1,8 @@
 """El derecho a comer.
 
 No existe ninguna tabla que lo guarde: sale de cruzar `turnos_asignados` con
-`turno_comida`. Es la misma consulta que ya hace la vista
-`vw_personal_comidas_externo` del módulo heredado.
+`turno_comida`. Ese cruce, sin reglas, es la vista `v_comidas_por_turno` de
+bd_nutricion (lee la base de turnos); las reglas se aplican acá.
 
 La pieza clave es `fecha_comida`:
 
@@ -26,15 +26,7 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.modelos.heredados import (
-    Categoria,
-    Comida,
-    NovedadLaboral,
-    TurnoAsignado,
-    TurnoComida,
-    Turno,
-    Usuario,
-)
+from app.modelos.heredados import ComidaPorTurno, NovedadLaboral
 
 # Un permiso, una baja, una vacación o una licencia anulan el derecho de esa
 # asignación. `devolucion_turno` NO está en la lista: es un cambio entre
@@ -55,36 +47,36 @@ NOVEDADES_QUE_ANULAN = ("permiso", "baja_medica", "vacacion", "licencia")
 DURACION_MINIMA_HORAS = 12
 PATRON_CATEGORIA_ENFERMERIA = "%enfermer%"
 
-_FECHA_COMIDA = func.adddate(TurnoAsignado.fecha, TurnoComida.dia_relativo)
+def no_es_enfermeria(categoria):
+    """`categoria` es la columna con el NOMBRE de la categoría del hospital.
 
-
-def no_es_enfermeria():
-    return ~Categoria.nombre.ilike(PATRON_CATEGORIA_ENFERMERIA)
+    Una categoría NULL (usuario sin categoría) tampoco pasa: `NOT (NULL LIKE
+    ...)` es NULL, igual que antes con el INNER JOIN a `categorias`.
+    """
+    return ~categoria.ilike(PATRON_CATEGORIA_ENFERMERIA)
 
 
 def sin_novedad():
     """Que no haya un permiso, baja, vacación o licencia sobre la asignación."""
     return ~select(NovedadLaboral.id).where(
-        NovedadLaboral.asignacion_id == TurnoAsignado.id,
+        NovedadLaboral.asignacion_id == ComidaPorTurno.turno_asignado_id,
         NovedadLaboral.tipo_novedad.in_(NOVEDADES_QUE_ANULAN),
     ).exists()
 
 
 def aplicar_reglas(consulta):
-    """Une `turnos` y aplica las condiciones que dan derecho a comer.
+    """Aplica las condiciones que dan derecho a comer.
 
     Punto único: cualquier consulta que derive el derecho —la marcación, el
     historial diario, el mensual— pasa por aquí. Si la política cambia, se
     cambia en un solo lugar y las tres quedan alineadas.
 
-    La consulta que se recibe ya debe partir de `turnos_asignados`.
+    La consulta que se recibe ya debe partir de `v_comidas_por_turno`
+    (`ComidaPorTurno`), que trae la duración del turno y la categoría.
     """
     return (
-        consulta.join(Turno, Turno.id == TurnoAsignado.turno_id)
-        .join(Usuario, Usuario.id == TurnoAsignado.usuario_id)
-        .join(Categoria, Categoria.id == Usuario.categoria_id)
-        .where(Turno.duracion_horas >= DURACION_MINIMA_HORAS)
-        .where(no_es_enfermeria())
+        consulta.where(ComidaPorTurno.duracion_horas >= DURACION_MINIMA_HORAS)
+        .where(no_es_enfermeria(ComidaPorTurno.categoria))
         .where(sin_novedad())
     )
 
@@ -106,18 +98,15 @@ class Derecho:
 def _consulta_base():
     return aplicar_reglas(
         select(
-            Comida.id.label("comida_id"),
-            Comida.nombre.label("comida"),
-            _FECHA_COMIDA.label("fecha_comida"),
-            TurnoAsignado.id.label("turno_asignado_id"),
-            TurnoAsignado.servicio_id,
-            TurnoAsignado.fecha.label("fecha_turno"),
-            Turno.nombre_turno.label("turno"),
-            TurnoComida.dia_relativo,
-        )
-        .select_from(TurnoAsignado)
-        .join(TurnoComida, TurnoComida.turno_id == TurnoAsignado.turno_id)
-        .join(Comida, Comida.id == TurnoComida.comida_id)
+            ComidaPorTurno.comida_id,
+            ComidaPorTurno.comida,
+            ComidaPorTurno.fecha_comida,
+            ComidaPorTurno.turno_asignado_id,
+            ComidaPorTurno.servicio_id,
+            ComidaPorTurno.fecha_turno,
+            ComidaPorTurno.turno,
+            ComidaPorTurno.dia_relativo,
+        ).select_from(ComidaPorTurno)
     )
 
 
@@ -134,11 +123,11 @@ def contar_personas_con_derecho(
     consulta = (
         _consulta_base()
         .with_only_columns(
-            func.count(func.distinct(TurnoAsignado.usuario_id)),
+            func.count(func.distinct(ComidaPorTurno.usuario_id)),
             maintain_column_froms=True,
         )
-        .where(Comida.id == comida_id)
-        .where(_FECHA_COMIDA == fecha_comida)
+        .where(ComidaPorTurno.comida_id == comida_id)
+        .where(ComidaPorTurno.fecha_comida == fecha_comida)
     )
     return sesion.execute(consulta).scalar_one()
 
@@ -159,9 +148,9 @@ def derechos_del_dia(
     """
     consulta = (
         _consulta_base()
-        .where(TurnoAsignado.usuario_id == usuario_id)
-        .where(_FECHA_COMIDA == fecha_comida)
-        .order_by(Comida.id, TurnoAsignado.id)
+        .where(ComidaPorTurno.usuario_id == usuario_id)
+        .where(ComidaPorTurno.fecha_comida == fecha_comida)
+        .order_by(ComidaPorTurno.comida_id, ComidaPorTurno.turno_asignado_id)
     )
     vistas: dict[int, Derecho] = {}
     for fila in sesion.execute(consulta).mappings().all():
@@ -180,10 +169,10 @@ def buscar_derecho(
     """
     consulta = (
         _consulta_base()
-        .where(TurnoAsignado.usuario_id == usuario_id)
-        .where(Comida.id == comida_id)
-        .where(_FECHA_COMIDA == fecha_comida)
-        .order_by(TurnoAsignado.id)
+        .where(ComidaPorTurno.usuario_id == usuario_id)
+        .where(ComidaPorTurno.comida_id == comida_id)
+        .where(ComidaPorTurno.fecha_comida == fecha_comida)
+        .order_by(ComidaPorTurno.turno_asignado_id)
         .limit(1)
     )
     fila = sesion.execute(consulta).mappings().first()

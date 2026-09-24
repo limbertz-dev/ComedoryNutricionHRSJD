@@ -15,56 +15,107 @@ uvicorn app.main:app --reload       # http://127.0.0.1:8000
 Verificar que todo responde: `http://127.0.0.1:8000/salud`
 Documentación automática de la API: `http://127.0.0.1:8000/docs`
 
-## Bases de datos
+## Bases de datos: dos bases, un solo servidor
 
-| Base | Qué es | Se toca |
-|---|---|---|
-| `bd_proyecto_backend` | La base viva del módulo de turnos | **Nunca** |
-| `bd_comedor_dev` | Copia de `bd_turnos.sql` para desarrollar | Sí |
+| Base | Variable | Qué es | Se toca |
+|---|---|---|---|
+| `bd_nutricion` | `DB_NAME` | La base propia del comedor | Sí: la administra alembic |
+| `bd_proyecto_backend` | `DB_NAME_TURNOS` | La base del módulo de turnos (otro ingeniero) | **Nunca**: ni ALTER, ni CREATE, ni INSERT, ni FK que le apunte |
 
-Para rehacer la copia de desarrollo desde cero:
+`bd_nutricion` tiene exactamente **6 tablas + 9 vistas** (más `alembic_version`):
 
-```bash
-mysql -h 127.0.0.1 -u root -e "DROP DATABASE IF EXISTS bd_comedor_dev; CREATE DATABASE bd_comedor_dev CHARACTER SET utf8mb4;"
-sed '/^CREATE DATABASE /d; /^USE `/d' ../bd_turnos.sql | mysql -h 127.0.0.1 -u root bd_comedor_dev
+- **Tablas propias:** `categorias_reporte`, `categoria_reporte_map`,
+  `horarios_comida`, `coeficientes_racion`, `lecturas_biometricas`, `asistencias`.
+- **Vistas del contrato de lectura** (`SQL SECURITY INVOKER`, leen
+  `bd_proyecto_backend`): `v_comensales`, `v_categorias`, `v_servicios`,
+  `v_comidas`, `v_usuario_servicios`, `v_turnos_asignados`, `v_turno_comida`,
+  `v_novedades_laborales`, `v_comidas_por_turno`.
+
+### Estrategia de lectura entre bases
+
+Las consultas leen la base de turnos **solo a través de las vistas `v_*`**, con
+un único motor contra `bd_nutricion`. Se descartó el doble motor con `bind`
+porque los informes y el historial cruzan `asistencias` con el padrón en un
+mismo JOIN, y dos motores no pueden hacer eso en una sola consulta ni en una
+sola transacción. Las vistas, además, son el único punto que conoce los nombres
+de columnas del otro ingeniero: si él renombra algo, se redefine la vista en
+una migración nueva y el resto del código no se entera. Se mapean en
+`app/modelos/heredados.py` sobre una metadata aparte (`BaseContrato`), así que
+alembic nunca las toma por tablas.
+
+Las columnas propias que guardan un id de la base de turnos (`usuario_id`,
+`comida_id`, `categoria_id`, `servicio_id`, `turno_asignado_id`,
+`registrado_por`) son referencias **lógicas, sin FK**: una FK entre bases le
+impediría al otro ingeniero borrar un usuario o migrar su propio esquema.
+
+`v_comensales` entrega una fila por `users.id` (LEFT JOIN a `personas` y
+`categorias`, `tiene_ficha = 0` si no hay ficha), toma la ficha de menor id si
+hubiera duplicados y trae el nombre con los espacios ya limpiados.
+
+### Receta limpia: recrear `bd_nutricion` desde cero
+
+Desde la raíz del repositorio:
+
+```powershell
+comedorback\.venv\Scripts\python scripts\recrear_bd_limpia.py        # pide escribir el nombre de la base
+comedorback\.venv\Scripts\python scripts\recrear_bd_limpia.py --si   # sin preguntar
 ```
 
-El `sed` no es opcional: el dump trae `CREATE DATABASE` y `USE bd_proyecto_backend`
-en las líneas 19-20, así que sin filtrarlas escribe sobre la base viva del hospital
-aunque hayas seleccionado otra.
+Hace, en orden: guardas (`DB_NAME` no puede ser `DB_NAME_TURNOS` ni una base del
+sistema, y la base de turnos tiene que existir) → `DROP DATABASE IF EXISTS` +
+`CREATE DATABASE` (`utf8mb4_unicode_ci`) → `alembic upgrade head` (tablas,
+columnas del formulario, vistas) → verificación de 6 tablas + 9 vistas → semilla.
+Es idempotente. **Borra todo lo que tenga `bd_nutricion`, asistencias incluidas**;
+sobre `bd_proyecto_backend` solo ejecuta los `SELECT` de las vistas.
+
+`GET /salud` responde `"estado": "ok"` con `tablas_propias: 6`,
+`vistas_contrato: 9` y la revisión de alembic, o **503** con la lista de lo que
+falta. Solo mira objetos de `bd_nutricion`: no lee la base de turnos.
 
 ## Migraciones
 
 ```powershell
-alembic revision --autogenerate -m "descripción"
 alembic upgrade head
 alembic downgrade -1
+alembic check                                   # modelos y base coinciden
+alembic revision --autogenerate -m "descripción"
 ```
 
-**Este sistema no administra las tablas del módulo de turnos.** Las 36 tablas
-heredadas están listadas en `app/core/tablas_heredadas.py` y `alembic/env.py` las
-excluye de la comparación. Sin ese filtro, el primer autogenerate emitiría un
-`DROP TABLE` por cada una. Si agregas un modelo que mapea una tabla heredada,
-márcalo con `__table_args__ = {"info": {"heredada": True}}`.
+La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
+`0c294cd98c3a` (head):
 
-No hay excepciones: ni siquiera se les agrega una columna. Lo que este sistema
-necesita saber de ellas vive en tablas propias que las referencian por FK —
-por ejemplo el coeficiente de cada comida, en `coeficientes_racion.comida_id`.
+| Revisión | Qué hace |
+|---|---|
+| `4b5a9ed9330e` | Las 6 tablas propias, sin FK hacia la base de turnos |
+| `ff4ddf3c8a18` | Las 6 columnas del formulario de Estadística (`categorias_reporte`) |
+| `0c294cd98c3a` | Las 9 vistas `v_*`; el nombre de la base de turnos sale de `DB_NAME_TURNOS` |
 
-## Carga inicial
+Reemplaza a la cadena vieja `fa64a5d4e912 → … → f6a7b8c9d0e1`, que asumía las
+tablas heredadas copiadas en la misma base y le agregaba columnas a `comidas`.
+Una base creada con esa cadena no se migra: se recrea con la receta de arriba.
 
-Después de `alembic upgrade head`:
+`alembic/env.py` sigue excluyendo de la comparación las 36 tablas heredadas
+(`app/core/tablas_heredadas.py`) y también las vistas `v_*`, que el autogenerate
+no entiende y se administran a mano en su migración.
+
+## Carga inicial (semilla)
+
+La corre la receta; a mano, después de `alembic upgrade head`:
 
 ```powershell
-python -m app.semillas.horarios   # franjas horarias de cada comida
+python -m app.semillas     # las tres, idempotentes
 ```
 
-Lo que **sí** va en migraciones, porque está impreso en el formulario y sin
-ello el sistema no funciona: las 6 columnas del Servicio de Estadística y los
-coeficientes de ración. Lo que va en scripts, porque toca decisiones del
-hospital o escribe en tablas del otro ingeniero: los horarios —cuyos valores
-son **provisionales** y hay que confirmar con la jefa de nutrición— y la
-asignación de orden y grupo a `comidas`.
+| Semilla | Qué carga |
+|---|---|
+| `app.semillas.horarios` | Franjas horarias de cada comida. **Provisionales**: confirmar con la jefa de nutrición |
+| `app.semillas.coeficientes` | Coeficientes de ración del formulario (0,15 · 0,50 · 0,05 · 0,30) |
+| `app.semillas.mapeo_categorias` | Categoría del hospital → columna del formulario. Decisión del hospital, a confirmar |
+
+Las columnas del formulario van en migración porque son datos 100 % propios e
+impresos en el papel. Horarios, coeficientes y mapeo van en semilla porque
+dependen de ids de la base de turnos (se resuelven por código o nombre a través
+de las vistas) o de decisiones del hospital.
 
 ## Conexión con el front (CORS)
 
@@ -88,7 +139,7 @@ real del servidor del hospital.
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| GET | `/salud` | Comprueba API y base de datos |
+| GET | `/salud` | Comprueba API y que `bd_nutricion` tenga sus 6 tablas y 9 vistas (503 si falta algo) |
 | GET | `/pantalla/estado` | Todo lo que la pantalla en vivo necesita para pintarse |
 | GET | `/pantalla/ultimas-marcaciones` | Hilo del lector, incluidos los rechazos |
 | GET | `/personal` | Padrón paginado, con búsqueda y filtros |
@@ -101,10 +152,11 @@ real del servidor del hospital.
 | GET | `/reportes/registro-diario` | Planilla del mes, una fila por día |
 | GET | `/reportes/mensual` | Formulario de Estadística, con coeficientes |
 | GET | `/reportes/gestion` | Resumen anual, una fila por mes |
+| GET | `/reportes/informe?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` | Formulario de Estadística para un rango de fechas arbitrario (hoy, una semana, una quincena), con coeficientes. 422 si `desde > hasta` |
 
-Los tres informes salen de la misma tabla, `asistencias`, con distinto
+Los informes salen de la misma tabla, `asistencias`, con distinto
 agrupamiento: el total del registro diario y el del informe mensual tienen que
-dar exactamente igual. Cada uno devuelve además `sin_clasificar` y
+dar exactamente igual, y `/reportes/informe` sobre el mes completo también. Cada uno devuelve además `sin_clasificar` y
 `sin_coeficiente`, que miden lo que falta en vez de esconderlo.
 
 `POST /asistencias` responde **200 tanto si acepta como si rechaza**: un rechazo
@@ -112,24 +164,24 @@ no es un error de la API, es una respuesta del negocio que el lector muestra en
 pantalla. El campo `valido` lo distingue y `motivo` dice por qué.
 
 El orden de las validaciones no es arbitrario: `fuera_horario` (necesidad
-técnica: sin comida resuelta no se puede comprobar nada), luego `duplicado`,
-después `sin_derecho` y por último `sin_cupo`. Decirle "no hay raciones" a
-alguien que ya comió genera un reclamo injusto en la cocina.
+técnica: sin comida resuelta no se puede comprobar nada), luego `duplicado` y
+después `sin_derecho`. En el registro manual se invierten los dos últimos.
 
 ### El derecho a comer
 
 Una asignación de turno da derecho sólo si cumple **las tres** condiciones:
 
 1. El turno dura **12 horas o más** (`turnos.duracion_horas`). Es política del
-   hospital y descarta 49 de los 76 turnos cargados.
+   hospital y descarta 49 de los 76 turnos cargados. Enfermería queda fuera.
 2. El turno tiene comidas mapeadas en `turno_comida`.
 3. No hay una novedad que lo anule (permiso, baja, vacación, licencia).
 
 La primera **habilita**, la segunda **otorga**: son cosas distintas. Un turno de
 12 horas sin filas en `turno_comida` sigue sin dar derecho, y es correcto.
 
-Las tres viven en `aplicar_reglas()` de `app/consultas/derecho.py`, que es el
-punto único por el que pasan la marcación y los dos historiales. Si la política
+Las tres viven en `aplicar_reglas()` de `app/consultas/derecho.py`, sobre
+`v_comidas_por_turno`, que entrega el cruce sin reglas. Es el punto único por
+el que pasan la marcación, la pantalla y los dos historiales. Si la política
 cambia, se cambia ahí y los tres caminos quedan alineados.
 
 ## Estructura
@@ -142,12 +194,13 @@ app/
 ├─ logica/              reglas del negocio (marcación)
 ├─ esquemas/            formas de entrada y salida
 ├─ modelos/
-│  ├─ heredados.py      tablas del módulo de turnos, SOLO LECTURA
-│  └─ comedor.py        las 11 tablas nuevas
-├─ semillas/            carga de datos iniciales
+│  ├─ heredados.py      las 9 vistas v_* (base de turnos), SOLO LECTURA
+│  └─ comedor.py        las 6 tablas propias
+├─ semillas/            carga de datos iniciales (python -m app.semillas)
 └─ core/
-   ├─ config.py         configuración leída de .env
-   ├─ db.py             motor, sesión y base declarativa
-   └─ tablas_heredadas.py   las 36 tablas que no administramos
-alembic/                migraciones
+   ├─ config.py         configuración leída de .env (DB_NAME, DB_NAME_TURNOS)
+   ├─ db.py             motor único, sesión, Base y BaseContrato
+   └─ tablas_heredadas.py   lo que no administramos + la lista de vistas v_*
+alembic/                migraciones (base 4b5a9ed9330e, head 0c294cd98c3a)
+../scripts/recrear_bd_limpia.py   receta limpia de bd_nutricion
 ```
