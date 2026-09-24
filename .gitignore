@@ -11,6 +11,7 @@
 # nombres, carnets, telefonos y hashes de contrasena del personal, y
 # lo que se sube una vez queda en el historial para siempre.
 *.sql
+!docs/sql/*.sql
 *.xlsx
 *.xls
 *.csv
