@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from app.consultas import derecho as consultas_derecho
 from app.consultas import personal as consultas
 from app.consultas.personal import FiltrosPadron
+from app.core import reloj
 from app.core.db import SesionDep
 from app.esquemas.marcacion import DerechoComida
 from app.esquemas.personal import Comensal, PaginaComensales
@@ -84,6 +85,6 @@ def derecho_del_dia(
     desayuno aparece consultando el martes, no el lunes.
     """
     derechos = consultas_derecho.derechos_del_dia(
-        sesion, usuario_id, fecha or date.today()
+        sesion, usuario_id, fecha or reloj.hoy()
     )
     return [DerechoComida(**vars(d)) for d in derechos]

@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core import seguridad
+from app.core import reloj, seguridad
 from app.modelos.usuarios import IntentoLogin, UsuarioSistema
 
 
@@ -28,7 +28,7 @@ def ahora() -> datetime:
     """Reloj del módulo. Hora local sin zona, como el resto de las tablas.
     Existe como función para que los tests puedan adelantarlo. Sin
     microsegundos: la columna es DATETIME y MySQL los redondearía."""
-    return datetime.now().replace(microsecond=0)
+    return reloj.real().replace(microsecond=0)
 
 
 def normalizar_username(username: str) -> str:

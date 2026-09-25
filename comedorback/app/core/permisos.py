@@ -51,4 +51,6 @@ ACCESO: dict[str, Regla] = {
     "personal": Regla(completo=JEFATURA),
     "historial": Regla(completo=JEFATURA),
     "reportes": Regla(completo=JEFATURA),
+    # Solo existe con ENTORNO=simulacion (app/main.py).
+    "simulacion": Regla(completo=JEFATURA),
 }

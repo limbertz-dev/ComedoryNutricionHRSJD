@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 
 from app.consultas import historial as consultas
 from app.consultas.historial import MESES
+from app.core import reloj
 from app.core.db import SesionDep
 from app.esquemas.historial import (
     ComensalDelDia,
@@ -35,7 +36,7 @@ def diario(
 
     Los cuatro estados se derivan al consultar, no se guardan en ninguna tabla.
     """
-    fecha = fecha or date.today()
+    fecha = fecha or reloj.hoy()
     total, comidas, datos = consultas.historial_diario(
         sesion, fecha, limite, desplazamiento
     )
@@ -60,7 +61,7 @@ def mensual(
     desplazamiento: Annotated[int, Query(ge=0)] = 0,
 ) -> HistorialMensual:
     """Cuántas raciones recibió y cuántas no cada persona, por tiempo de comida."""
-    hoy = date.today()
+    hoy = reloj.hoy()
     gestion = gestion or hoy.year
     mes = mes or hoy.month
     total, comidas, datos = consultas.historial_mensual(
