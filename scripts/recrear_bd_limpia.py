@@ -9,13 +9,15 @@ Pasos, todos contra la base de DB_NAME (comedorback/.env):
      y la base de turnos tiene que existir (las vistas la leen).
   2. DROP DATABASE IF EXISTS + CREATE DATABASE (utf8mb4_unicode_ci, la
      collation de las tablas del módulo de turnos).
-  3. alembic upgrade head: las 6 tablas, las columnas del formulario y las
-     9 vistas v_*.
-  4. Verificación: están las 6 tablas y las 9 vistas, y cada vista responde.
-  5. Semilla: python -m app.semillas (horarios, coeficientes, mapeo).
+  3. alembic upgrade head: las 8 tablas (6 del comedor + usuarios_sistema e
+     intentos_login), las columnas del formulario y las 9 vistas v_*.
+  4. Verificación: están las 8 tablas y las 9 vistas, y cada vista responde.
+  5. Semilla: python -m app.semillas (horarios, coeficientes, mapeo). La
+     cuenta de sistemas NO se crea acá: python -m app.semillas.admin aparte.
 
 Idempotente: correrlo dos veces deja la base igual. DESTRUCTIVO para
-DB_NAME: borra todo lo que tenga, incluidas las asistencias. Sobre la base de
+DB_NAME: borra todo lo que tenga, incluidas las asistencias y las cuentas de
+usuarios_sistema. Sobre la base de
 turnos NO emite nada más que los SELECT de las vistas: ni DROP, ni ALTER, ni
 CREATE, ni INSERT. El nombre de la base de turnos nunca aparece en un DROP.
 """
