@@ -77,35 +77,36 @@ test('login 200 guarda los tokens y firma las peticiones siguientes con Authoriz
     if (new URL(ruta).pathname === '/auth/login') {
       return json({ access: 'acc-1', refresh: 'ref-1', rol: 'jefa', debe_cambiar: false });
     }
-    return json({ rol: 'jefa' });
+    return json({ id: 1, username: 'ntarifa', rol: 'jefa', debe_cambiar: false });
   };
   const resultado = await iniciarSesion('ntarifa', 'secreta');
   assert.deepEqual(resultado, { tipo: 'ok', rol: 'jefa', debeCambiar: false });
   assert.equal(peticiones[0].opciones.method, 'POST');
   assert.equal(peticiones[0].opciones.headers.Authorization, undefined);
+  assert.deepEqual(JSON.parse(peticiones[0].opciones.body), { username: 'ntarifa', password: 'secreta' });
   assert.deepEqual(leerTokens(), { access: 'acc-1', refresh: 'ref-1', usuario: 'ntarifa' });
   assert.deepEqual(accionDeIngreso(resultado, 'ntarifa'), { tipo: 'INGRESO', rol: 'jefa', usuario: 'ntarifa' });
 
-  assert.deepEqual(await obtenerUsuarioActual(), { rol: 'jefa' });
+  assert.deepEqual(await obtenerUsuarioActual(), { id: 1, username: 'ntarifa', rol: 'jefa', debeCambiar: false });
   assert.equal(peticiones[1].ruta, '/auth/yo');
   assert.equal(peticiones[1].opciones.headers.Authorization, 'Bearer acc-1');
 });
 
 test('login 401 es credencial incorrecta con el detalle del servidor, no «sesión expirada»', async () => {
   guardarTokens({ access: 'viejo', refresh: null, usuario: 'otra' });
-  globalThis.fetch = async () => json({ detalle: 'Usuario o contraseña incorrectos' }, 401);
+  globalThis.fetch = async () => json({ detail: 'Usuario o contraseña incorrectos.', motivo: 'credenciales_invalidas' }, 401);
   const resultado = await iniciarSesion('ntarifa', 'mal');
-  assert.deepEqual(resultado, { tipo: 'credencial', detalle: 'Usuario o contraseña incorrectos' });
+  assert.deepEqual(resultado, { tipo: 'credencial', detalle: 'Usuario o contraseña incorrectos.' });
   assert.equal(accionDeIngreso(resultado, 'ntarifa'), null);
   assert.deepEqual(avisos, []);
 });
 
 test('login 423 es cuenta bloqueada con la hora de reintento', async () => {
-  globalThis.fetch = async () => json({ detalle: 'Cuenta bloqueada por intentos fallidos',
-    reintento_en: '2026-09-24T15:30:00Z' }, 423);
+  globalThis.fetch = async () => json({ detail: 'Cuenta bloqueada por intentos fallidos. Intente más tarde.',
+    motivo: 'cuenta_bloqueada', reintento_en: '2026-09-24T15:30:00Z' }, 423);
   const resultado = await iniciarSesion('ntarifa', 'mal');
   assert.equal(resultado.tipo, 'bloqueada');
-  assert.equal(resultado.detalle, 'Cuenta bloqueada por intentos fallidos');
+  assert.equal(resultado.detalle, 'Cuenta bloqueada por intentos fallidos. Intente más tarde.');
   assert.equal(resultado.reintentoEn.toISOString(), '2026-09-24T15:30:00.000Z');
   assert.equal(leerTokens(), null);
 });
@@ -132,73 +133,75 @@ test('login con una respuesta 200 sin la forma del contrato no abre sesión', as
 
 // --- Flujo 428: cambio obligatorio ---
 
-test('flujo 428: login pide cambio, se cambia la contraseña y se entra con la nueva', async () => {
+test('flujo 428: login pide cambio, se cambia la contraseña y el 200 hidrata sin segundo login', async () => {
   const peticiones = [];
-  let cambiada = false;
   globalThis.fetch = async (ruta, opciones) => {
     const camino = new URL(ruta).pathname;
     const cuerpo = JSON.parse(opciones.body ?? 'null');
     peticiones.push({ camino, cuerpo, auth: opciones.headers.Authorization });
     if (camino === '/auth/login') {
-      if (!cambiada) return json({ temporal: true }, 428);
-      return json({ access: 'acc-nuevo', refresh: 'ref-nuevo', rol: 'cocinera', debe_cambiar: false });
+      return json({ detail: 'Debe cambiar la contraseña temporal.', motivo: 'cambio_password_pendiente', temporal: 'temp-1' }, 428);
     }
     if (camino === '/auth/cambio-password') {
-      cambiada = true;
-      return new Response(null, { status: 204 });
+      return json({ access: 'acc-nuevo', refresh: 'ref-nuevo', rol: 'cocinera', debe_cambiar: false });
     }
     throw new Error(`ruta inesperada ${camino}`);
   };
 
   const primero = await iniciarSesion('cocina1', 'Temporal123');
   assert.deepEqual(primero, { tipo: 'cambio' });
+  assert.equal(peticiones[0].cuerpo.username, 'cocina1');
+  assert.equal(leerTokens().access, 'temp-1', 'el temporal queda guardado para firmar el cambio');
   let estado = recorrer({ ...SESION_INICIAL, fase: 'anonima' }, accionDeIngreso(primero, 'cocina1'));
   assert.equal(estado.fase, 'cambio');
   assert.equal(estado.rol, null, 'sin rol no se monta el panel');
   assert.equal(estado.usuario, 'cocina1');
 
-  const final = await cambiarContrasena({ usuario: 'cocina1', actual: 'Temporal123', nueva: 'Nueva#2026' });
+  const final = await cambiarContrasena({ usuario: 'cocina1', nueva: 'Nueva#2026' });
   assert.deepEqual(final, { tipo: 'ok', rol: 'cocinera', debeCambiar: false });
   estado = recorrer(estado, accionDeIngreso(final, 'cocina1'));
   assert.deepEqual(estado, { fase: 'activa', rol: 'cocinera', usuario: 'cocina1', aviso: null });
 
   assert.deepEqual(peticiones.map(({ camino }) => camino),
-    ['/auth/login', '/auth/cambio-password', '/auth/login']);
-  assert.equal(peticiones[2].cuerpo.contrasena, 'Nueva#2026');
+    ['/auth/login', '/auth/cambio-password']);
+  assert.deepEqual(peticiones[1].cuerpo, { password_nueva: 'Nueva#2026' });
+  assert.equal(peticiones[1].auth, 'Bearer temp-1');
   assert.equal(leerTokens().access, 'acc-nuevo');
   assert.deepEqual(avisos, [], 'el 428 del login lo resuelve el formulario, no el aviso global');
 });
 
 test('flujo 428: 200 con debe_cambiar lleva al cambio y el cambio va firmado con ese token', async () => {
-  const auth = [];
+  const llamadas = [];
   globalThis.fetch = async (ruta, opciones) => {
-    auth.push(opciones.headers.Authorization);
+    llamadas.push({ camino: new URL(ruta).pathname, auth: opciones.headers.Authorization, cuerpo: JSON.parse(opciones.body) });
     if (new URL(ruta).pathname === '/auth/cambio-password') {
-      assert.equal(JSON.parse(opciones.body).usuario, undefined, 'con token no hace falta el usuario');
-      return json({ ok: true });
+      return json({ access: 'acc-ok', refresh: 'r2', rol: 'jefa', debe_cambiar: false });
     }
-    return json({ access: 'acc-temp', refresh: 'r', rol: 'jefa', debe_cambiar: auth.length === 1 });
+    return json({ access: 'acc-temp', refresh: 'r', rol: 'jefa', debe_cambiar: true });
   };
   const resultado = await iniciarSesion('ntarifa', 'Temporal1');
   assert.deepEqual(accionDeIngreso(resultado, 'ntarifa'), { tipo: 'CAMBIO_REQUERIDO', usuario: 'ntarifa' });
-  const final = await cambiarContrasena({ usuario: 'ntarifa', actual: 'Temporal1', nueva: 'Otra#2026' });
-  assert.equal(final.debeCambiar, false);
-  assert.equal(auth[1], 'Bearer acc-temp');
+  const final = await cambiarContrasena({ usuario: 'ntarifa', nueva: 'Otra#2026' });
+  assert.deepEqual(final, { tipo: 'ok', rol: 'jefa', debeCambiar: false });
+  assert.deepEqual(llamadas.map(({ camino }) => camino), ['/auth/login', '/auth/cambio-password']);
+  assert.equal(llamadas[1].auth, 'Bearer acc-temp');
+  assert.deepEqual(llamadas[1].cuerpo, { password_nueva: 'Otra#2026' });
 });
 
 test('flujo 428: un 428 desde cualquier sección saca del panel al cambio de contraseña', async () => {
   guardarTokens({ access: 'acc', refresh: null, usuario: 'ntarifa' });
-  globalThis.fetch = async () => json({ temporal: true }, 428);
+  globalThis.fetch = async () => json({ detail: 'Debe cambiar su contraseña temporal.', motivo: 'cambio_password_pendiente', temporal: 'temp-2' }, 428);
   await assert.rejects(obtenerEstadoPantalla(), /cambiar su contraseña/);
   assert.deepEqual(avisos, ['cambio_requerido']);
+  assert.equal(leerTokens().access, 'temp-2', 'el temporal del 428 queda para firmar el cambio');
   const estado = recorrer(ACTIVA_JEFA, accionDeAviso({ tipo: 'cambio_requerido' }));
   assert.equal(estado.fase, 'cambio');
   assert.equal(estado.usuario, 'ntarifa');
 });
 
 test('un cambio de contraseña rechazado muestra el detalle y no entra', async () => {
-  globalThis.fetch = async () => json({ detalle: 'La contraseña es demasiado corta' }, 422);
-  await assert.rejects(cambiarContrasena({ usuario: 'x', actual: 'a', nueva: 'b' }), /demasiado corta/);
+  globalThis.fetch = async () => json({ detail: 'La contraseña es demasiado corta', motivo: 'password_rechazada' }, 422);
+  await assert.rejects(cambiarContrasena({ usuario: 'x', nueva: 'b' }), /demasiado corta/);
   assert.equal(leerTokens(), null);
 });
 
@@ -206,7 +209,7 @@ test('un cambio de contraseña rechazado muestra el detalle y no entra', async (
 
 test('expirado → login: un 401 en cualquier sección borra los tokens y vuelve con «Sesión expirada»', async () => {
   guardarTokens({ access: 'vencido', refresh: 'r', usuario: 'ntarifa' });
-  globalThis.fetch = async () => json({ detalle: 'Token expirado' }, 401);
+  globalThis.fetch = async () => json({ detail: 'Sesión inválida o vencida.', motivo: 'token_invalido' }, 401);
   await assert.rejects(obtenerPersonal(), /sesión expiró/);
   assert.equal(leerTokens(), null);
   assert.equal(sessionStorage.getItem('comedor_sesion'), null);
@@ -217,7 +220,7 @@ test('expirado → login: un 401 en cualquier sección borra los tokens y vuelve
 
 test('expirado → login: al abrir la app con un token vencido, GET /auth/yo 401 lleva al Login', async () => {
   guardarTokens({ access: 'vencido', refresh: 'r', usuario: 'ntarifa' });
-  globalThis.fetch = async () => json({ detalle: 'Token expirado' }, 401);
+  globalThis.fetch = async () => json({ detail: 'Sesión inválida o vencida.', motivo: 'token_invalido' }, 401);
   const accion = await restaurarSesion();
   assert.deepEqual(accion, { tipo: 'EXPIRADA' });
   assert.equal(recorrer(SESION_INICIAL, accion).aviso, 'expirada');
@@ -235,7 +238,7 @@ test('al abrir la app: sin tokens va al Login sin consultar; con tokens, GET /au
     llamadas += 1;
     assert.equal(new URL(ruta).pathname, '/auth/yo');
     assert.equal(opciones.headers.Authorization, 'Bearer acc');
-    return json({ rol: 'cocinera' });
+    return json({ id: 7, username: 'cocina1', rol: 'cocinera', debe_cambiar: false });
   };
   assert.deepEqual(await restaurarSesion(), { tipo: 'SIN_SESION' });
   assert.equal(llamadas, 0);
@@ -252,9 +255,74 @@ test('al abrir la app: sin tokens va al Login sin consultar; con tokens, GET /au
 
 test('un 403 avisa «sin permiso», no devuelve datos y no cierra la sesión', async () => {
   guardarTokens({ access: 'acc', refresh: null, usuario: 'cocina1' });
-  globalThis.fetch = async () => json({ detalle: 'Prohibido' }, 403);
+  globalThis.fetch = async () => json({ detail: 'Sin permiso.', motivo: 'rol_no_autorizado' }, 403);
   await assert.rejects(obtenerPersonal(), /No tiene permiso/);
   assert.deepEqual(avisos, ['prohibido']);
   assert.equal(accionDeAviso({ tipo: 'prohibido' }), null, 'la sesión sigue activa');
   assert.equal(leerTokens()?.access, 'acc');
+});
+
+// --- Refresh con reintento ---
+
+test('refresh: un 401 token_expirado renueva y reintenta UNA vez sin avisar', async () => {
+  guardarTokens({ access: 'vencido', refresh: 'ref-viejo', usuario: 'ntarifa' });
+  const llamadas = [];
+  globalThis.fetch = async (ruta, opciones) => {
+    const camino = new URL(ruta).pathname;
+    llamadas.push({ camino, auth: opciones.headers.Authorization, cuerpo: opciones.body ? JSON.parse(opciones.body) : null });
+    if (camino === '/auth/refresh') {
+      return json({ access: 'acc-nuevo', refresh: 'ref-viejo', rol: 'jefa', debe_cambiar: false });
+    }
+    if (llamadas.filter(({ camino: c }) => c === '/personal').length === 1) {
+      return json({ detail: 'Sesión inválida o vencida.', motivo: 'token_expirado' }, 401);
+    }
+    return json({ total: 0, datos: [] });
+  };
+  assert.deepEqual(await obtenerPersonal(), []);
+  assert.deepEqual(llamadas.map(({ camino }) => camino), ['/personal', '/auth/refresh', '/personal']);
+  assert.deepEqual(llamadas[1].cuerpo, { refresh: 'ref-viejo' });
+  assert.equal(llamadas[2].auth, 'Bearer acc-nuevo');
+  assert.equal(leerTokens().access, 'acc-nuevo');
+  assert.deepEqual(avisos, [], 'el reintento exitoso no avisa expiración');
+});
+
+test('refresh: si renovar falla, la sesión expira sin reintentar la sección', async () => {
+  guardarTokens({ access: 'vencido', refresh: 'ref-viejo', usuario: 'ntarifa' });
+  const caminos = [];
+  globalThis.fetch = async (ruta) => {
+    const camino = new URL(ruta).pathname;
+    caminos.push(camino);
+    if (camino === '/auth/refresh') {
+      return json({ detail: 'Sesión inválida o vencida.', motivo: 'token_expirado' }, 401);
+    }
+    return json({ detail: 'Sesión inválida o vencida.', motivo: 'token_expirado' }, 401);
+  };
+  await assert.rejects(obtenerPersonal(), /sesión expiró/);
+  assert.deepEqual(caminos, ['/personal', '/auth/refresh']);
+  assert.equal(leerTokens(), null);
+  assert.deepEqual(avisos, ['expirada']);
+});
+
+// --- Cambio y bloqueo desde cualquier llamada ---
+
+test('un 403 cambio_password_pendiente desde una sección pide cambio, no «sin permiso»', async () => {
+  guardarTokens({ access: 'acc', refresh: null, usuario: 'ntarifa' });
+  globalThis.fetch = async () => json({ detail: 'Debe cambiar la contraseña temporal.', motivo: 'cambio_password_pendiente' }, 403);
+  await assert.rejects(obtenerEstadoPantalla(), /No tiene permiso/);
+  assert.deepEqual(avisos, ['cambio_requerido']);
+  assert.equal(leerTokens()?.usuario, 'ntarifa');
+  const estado = recorrer(ACTIVA_JEFA, accionDeAviso({ tipo: 'cambio_requerido' }));
+  assert.equal(estado.fase, 'cambio');
+});
+
+test('login 423 sin reintento_en usa el header Retry-After', async () => {
+  const antes = Date.now();
+  globalThis.fetch = async () => new Response(JSON.stringify(
+    { detail: 'Cuenta bloqueada.', motivo: 'cuenta_bloqueada' },
+  ), { status: 423, headers: { 'Retry-After': '300' } });
+  const resultado = await iniciarSesion('ntarifa', 'mal');
+  assert.equal(resultado.tipo, 'bloqueada');
+  assert.ok(resultado.reintentoEn instanceof Date);
+  const espera = resultado.reintentoEn.getTime() - antes;
+  assert.ok(espera > 290_000 && espera < 310_000, `espera ${espera} ms, debían ser ~300 s`);
 });

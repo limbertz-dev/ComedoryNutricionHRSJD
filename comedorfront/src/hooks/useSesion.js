@@ -14,18 +14,24 @@ const ContextoSesion = createContext(null);
 
 /**
  * Acción con la que arranca la app: sin tokens guardados, al Login; con
- * tokens, GET /auth/yo decide el rol. Un 401 ya vació los tokens en
- * `api.js` y se ve como «Sesión expirada»; un 428, como cambio obligatorio.
+ * tokens, GET /auth/yo decide el rol (un 401 token_expirado ya se reintentó
+ * con refresh dentro de `api.js`). Un 401 vació los tokens y se ve como
+ * «Sesión expirada»; un 428 o un 403 cambio_password_pendiente, como cambio.
  */
 export async function restaurarSesion({ signal } = {}) {
   const tokens = leerTokens();
   if (!tokens) return { tipo: 'SIN_SESION' };
   try {
-    const { rol } = await obtenerUsuarioActual({ signal });
-    return { tipo: 'INGRESO', rol, usuario: tokens.usuario };
+    const yo = await obtenerUsuarioActual({ signal });
+    const usuario = yo.username ?? tokens.usuario;
+    if (yo.debeCambiar) return { tipo: 'CAMBIO_REQUERIDO', usuario };
+    return { tipo: 'INGRESO', rol: yo.rol, usuario };
   } catch (error) {
     if (error.status === 401) return { tipo: 'EXPIRADA' };
     if (error.status === 428) return { tipo: 'CAMBIO_REQUERIDO', usuario: tokens.usuario };
+    if (error.status === 403 && error.datos?.motivo === 'cambio_password_pendiente') {
+      return { tipo: 'CAMBIO_REQUERIDO', usuario: tokens.usuario };
+    }
     return { tipo: 'SIN_CONEXION' };
   }
 }
