@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.consultas.derecho import Derecho, buscar_derecho
+from app.core import reloj
 from app.modelos.comedor import (
     Asistencia,
     CategoriaReporte,
@@ -181,7 +182,7 @@ def registrar_marcacion(
     registrado_por: int | None = None,
 ) -> Resultado:
     """Aplica las reglas y, si pasan todas, registra la ración."""
-    momento = momento or datetime.now()
+    momento = momento or reloj.ahora()
     nombre = _nombre_de(sesion, usuario_id) if usuario_id is not None else None
     es_biometrico = metodo == "biometrico"
 

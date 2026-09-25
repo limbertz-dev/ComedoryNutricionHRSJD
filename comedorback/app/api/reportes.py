@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.consultas import informes as consultas
 from app.consultas import periodos as consultas_periodos
+from app.core import reloj
 from app.core.db import SesionDep
 from app.esquemas.informes import Informe
 from app.esquemas.periodos import GestionDisponible
@@ -19,7 +20,7 @@ NumeroMes = Annotated[int, Query(ge=1, le=12)]
 
 
 def _hoy() -> date:
-    return date.today()
+    return reloj.hoy()
 
 
 @router.get(

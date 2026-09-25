@@ -17,6 +17,7 @@ from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.consultas.derecho import contar_personas_con_derecho, no_es_enfermeria
+from app.core import reloj
 from app.logica.marcacion import ComidaEnCurso, resolver_comida_en_curso
 from app.modelos.comedor import (
     Asistencia,
@@ -161,7 +162,7 @@ def estado(
     internas que necesiten controlar el reloj completo.
     """
     if momento is None:
-        ahora = datetime.now()
+        ahora = reloj.ahora()
         momento = datetime.combine(fecha or ahora.date(), hora or ahora.time())
     comida = resolver_comida_en_curso(sesion, momento)
     fecha_comida = comida.fecha_comida if comida else momento.date()
@@ -197,7 +198,7 @@ def ultimas_marcaciones(
     muestra los rechazos del lector y las raciones registradas por la
     jefatura en una sola secuencia cronológica.
     """
-    dia = fecha or datetime.now().date()
+    dia = fecha or reloj.hoy()
     comida_asistencia = aliased(Comida, name="comida_asistencia")
     comida_horario = aliased(Comida, name="comida_horario")
     hora_lectura = func.time(LecturaBiometrica.fecha_hora)
