@@ -26,6 +26,7 @@ from datetime import date
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core import reloj
 from app.modelos.comedor import (
     Asistencia,
     CategoriaReporte,
@@ -249,7 +250,7 @@ def _armar(
     for fila in filas:
         fila.cerrar()
     totales = _totales_de_columna(filas, len(columnas))
-    situacion = _situacion(gestion, mes, date.today())
+    situacion = _situacion(gestion, mes, reloj.hoy())
     return Informe(
         tipo=tipo,
         gestion=gestion,
@@ -273,7 +274,7 @@ def registro_diario(sesion: Session, gestion: int, mes: int) -> Informe:
     columnas = _columnas(sesion)
     indice = {c.id: i for i, c in enumerate(columnas)}
     desde, hasta = _rango(gestion, mes)
-    hoy = date.today()
+    hoy = reloj.hoy()
 
     filas = [
         Fila(etiqueta=str(dia), celdas=[0] * len(columnas), registrado=date(gestion, mes, dia) <= hoy)
@@ -344,7 +345,7 @@ def informe_rango(sesion: Session, desde: date, hasta: date) -> Informe:
         fila.cerrar()
     totales = _totales_de_columna(filas, len(columnas))
     grupos = _grupos(sesion, desde, hasta)
-    situacion = "curso" if hasta >= date.today() else "cerrado"
+    situacion = "curso" if hasta >= reloj.hoy() else "cerrado"
 
     return Informe(
         tipo="informe",
@@ -371,7 +372,7 @@ def resumen_gestion(sesion: Session, gestion: int) -> Informe:
     columnas = _columnas(sesion)
     indice = {c.id: i for i, c in enumerate(columnas)}
     desde, hasta = _rango(gestion, None)
-    hoy = date.today()
+    hoy = reloj.hoy()
 
     filas = [
         Fila(

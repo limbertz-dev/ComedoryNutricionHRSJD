@@ -21,13 +21,14 @@ Variables de .env (todas opcionales salvo el secreto fuera de desarrollo):
 
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from functools import lru_cache
 
 import bcrypt
 import jwt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core import reloj
 from app.core.config import config
 
 log = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ def emitir_token(
             REFRESH: timedelta(hours=a.refresh_horas),
             TEMPORAL: timedelta(minutes=a.temporal_minutos),
         }[tipo]
-    emitido = datetime.now(timezone.utc)
+    emitido = reloj.real_utc()
     carga = {
         "sub": str(usuario_id),
         "typ": tipo,
