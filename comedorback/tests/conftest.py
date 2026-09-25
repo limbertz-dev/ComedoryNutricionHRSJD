@@ -1,0 +1,124 @@
+"""Tests contra `bd_nutricion_test`, NUNCA contra la base de desarrollo.
+
+Correr desde comedorback/ (usa las credenciales DB_HOST/DB_USER/DB_PASSWORD
+de .env, pero la base la fija este archivo):
+
+    .venv/Scripts/python -m pytest
+
+Al empezar la sesión se BORRA y recrea `bd_nutricion_test` con
+`alembic upgrade head`. Las vistas v_* leen la base de turnos (solo SELECT),
+así que DB_NAME_TURNOS tiene que existir en el servidor.
+
+Otro nombre de base: TEST_DB_NAME=otra_test (tiene que terminar en _test).
+"""
+
+import os
+import re
+from pathlib import Path
+
+# Antes de importar la app: la configuración se lee una sola vez al importar.
+NOMBRE_BASE = os.environ.get("TEST_DB_NAME", "bd_nutricion_test")
+if not re.fullmatch(r"[a-z0-9_]+_test", NOMBRE_BASE):
+    raise RuntimeError(f"La base de tests debe terminar en _test: {NOMBRE_BASE!r}")
+os.environ["DB_NAME"] = NOMBRE_BASE
+os.environ["AUTH_JWT_SECRETO"] = "secreto-de-tests-" + "x" * 32
+os.environ["AUTH_BCRYPT_RONDAS"] = "4"  # el mínimo: los tests no miden bcrypt
+
+import pytest  # noqa: E402
+from alembic import command  # noqa: E402
+from alembic.config import Config  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import create_engine, event, text  # noqa: E402
+from sqlalchemy.engine import Engine  # noqa: E402
+
+from app.core import seguridad  # noqa: E402
+from app.core.config import config  # noqa: E402
+from app.core.db import SesionLocal  # noqa: E402
+from app.main import app  # noqa: E402
+from app.modelos.usuarios import UsuarioSistema  # noqa: E402
+
+RAIZ = Path(__file__).resolve().parents[1]
+
+# Toda sentencia que cualquier motor ejecute durante los tests (también los
+# de alembic). tests/test_zz_sin_escrituras_heredadas.py la revisa al final.
+SENTENCIAS: list[str] = []
+
+
+@event.listens_for(Engine, "before_cursor_execute")
+def _anotar(conexion, cursor, sentencia, parametros, contexto, multiples):
+    SENTENCIAS.append(sentencia)
+
+
+def config_alembic() -> Config:
+    return Config(str(RAIZ / "alembic.ini"))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def base_de_prueba():
+    # Doble guarda: si algo pisó DB_NAME, no se borra nada.
+    assert config.db_name == NOMBRE_BASE, config.db_name
+    assert config.db_name.endswith("_test")
+    assert config.db_name.lower() != config.db_name_turnos.lower()
+
+    servidor = create_engine(config.url_servidor, isolation_level="AUTOCOMMIT")
+    with servidor.connect() as conexion:
+        conexion.execute(text(f"DROP DATABASE IF EXISTS `{NOMBRE_BASE}`"))
+        conexion.execute(
+            text(
+                f"CREATE DATABASE `{NOMBRE_BASE}` "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+            )
+        )
+    servidor.dispose()
+    command.upgrade(config_alembic(), "head")
+    yield
+
+
+@pytest.fixture(autouse=True)
+def tablas_auth_limpias():
+    with SesionLocal() as sesion:
+        sesion.execute(text("DELETE FROM intentos_login"))
+        sesion.execute(text("DELETE FROM usuarios_sistema"))
+        sesion.commit()
+    yield
+
+
+@pytest.fixture
+def cliente() -> TestClient:
+    return TestClient(app)
+
+
+@pytest.fixture
+def crear_usuario():
+    def crear(
+        username: str,
+        rol: str = "jefa",
+        clave: str = "clave-segura-1",
+        *,
+        debe_cambiar: bool = False,
+        activo: bool = True,
+    ) -> int:
+        with SesionLocal() as sesion:
+            usuario = UsuarioSistema(
+                username=username,
+                password_hash=seguridad.hashear_clave(clave),
+                rol=rol,
+                debe_cambiar=debe_cambiar,
+                activo=activo,
+                version_token=0,
+            )
+            sesion.add(usuario)
+            sesion.commit()
+            return usuario.id
+
+    return crear
+
+
+def encabezado(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def ingresar(cliente: TestClient, username: str, clave: str = "clave-segura-1") -> dict:
+    respuesta = cliente.post("/auth/login", json={"username": username, "password": clave})
+    assert respuesta.status_code == 200, respuesta.text
+    return respuesta.json()
