@@ -23,6 +23,7 @@ from sqlalchemy import Select, and_, func, or_, select, union
 from sqlalchemy.orm import Session
 
 from app.consultas.derecho import aplicar_reglas
+from app.core import reloj
 from app.modelos.comedor import Asistencia, HorarioComida
 from app.modelos.heredados import (
     Comensal,
@@ -206,7 +207,7 @@ def historial_diario(
     desplazamiento: int = 0,
     momento: datetime | None = None,
 ) -> tuple[int, list[ComidaListada], list[ComensalDelDia]]:
-    momento = momento or datetime.now()
+    momento = momento or reloj.ahora()
 
     con_derecho = aplicar_reglas(
         select(ComidaPorTurno.usuario_id.label("usuario_id"))
@@ -318,7 +319,7 @@ def historial_mensual(
     desplazamiento: int = 0,
     momento: datetime | None = None,
 ) -> tuple[int, list[ComidaListada], list[ComensalDelMes]]:
-    momento = momento or datetime.now()
+    momento = momento or reloj.ahora()
     desde = date(gestion, mes, 1)
     hasta = (
         date(gestion + 1, 1, 1) if mes == 12 else date(gestion, mes + 1, 1)

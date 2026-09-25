@@ -23,6 +23,7 @@ from datetime import date
 from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
+from app.core import reloj
 from app.modelos.comedor import Asistencia
 
 MESES = [
@@ -81,7 +82,7 @@ def _raciones_por_mes(sesion: Session) -> dict[tuple[int, int], int]:
 def periodos_disponibles(
     sesion: Session, hoy: date | None = None
 ) -> list[GestionDisponible]:
-    hoy = hoy or date.today()
+    hoy = hoy or reloj.hoy()
     raciones = _raciones_por_mes(sesion)
 
     # Años sin ninguna ración anteriores al actual no se ofrecen: solo
