@@ -22,6 +22,9 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 
 | Función | Endpoint | Uso |
 |---|---|---|
+| iniciarSesion | POST /auth/login | 200 guarda tokens; 401 credencial, 423 bloqueo con reintento_en, 428 cambio obligatorio |
+| cambiarContrasena | POST /auth/cambio-password + POST /auth/login | Cambio de contraseña temporal y reingreso con la nueva |
+| obtenerUsuarioActual | GET /auth/yo | Rol de la sesión guardada al abrir la app |
 | obtenerPersonal | GET /personal | Reúne páginas de 200 comensales para el selector |
 | marcarAsistencia | GET /personal/{id} + POST /asistencias | metodo biometrico desde el simulador del lector, manual desde el registro a mano |
 | obtenerEstadoPantalla | GET /pantalla/estado | Comida vigente, cupo, totales del día y gráfico |
@@ -55,6 +58,25 @@ fijo de 8. **Actualizar datos** vuelve a consultar padrón y estado.
 - La lista lateral sale de /pantalla/ultimas-marcaciones y se vuelve a pedir
   tras cada marcación. La hora de la marcación recién enviada es la recepción
   local porque el POST no devuelve la hora.
+
+## Sesión y roles
+
+Los tokens van en sessionStorage (la PC es compartida: cerrar la pestaña cierra la
+sesión). Toda petición lleva `Authorization: Bearer <access>`. Fuera del Login, un 401
+borra la sesión y vuelve al Login con «Sesión expirada»; un 403 reemplaza la sección por
+«Sin permiso» (nunca con datos); un 428 lleva al cambio de contraseña. El contrato no
+trae endpoint de refresh ni de logout: `refresh` se guarda sin usarse y cerrar sesión
+solo olvida los tokens.
+
+| Rol | Secciones | Modo manual |
+|---|---|---|
+| cocinera | Control Biométrico | oculto |
+| jefa | las cuatro | sí |
+| sistemas | las cuatro | sí |
+| cualquier otro | ninguna («Sin permiso») | — |
+
+Los nombres de los campos del cuerpo de login y de cambio de contraseña no están en el
+contrato: viven solos en `cuerpoLogin` / `cuerpoCambio` de `src/api.js`.
 
 ## Historial y períodos
 
