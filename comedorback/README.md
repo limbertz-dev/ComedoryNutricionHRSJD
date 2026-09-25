@@ -22,10 +22,12 @@ Documentación automática de la API: `http://127.0.0.1:8000/docs`
 | `bd_nutricion` | `DB_NAME` | La base propia del comedor | Sí: la administra alembic |
 | `bd_proyecto_backend` | `DB_NAME_TURNOS` | La base del módulo de turnos (otro ingeniero) | **Nunca**: ni ALTER, ni CREATE, ni INSERT, ni FK que le apunte |
 
-`bd_nutricion` tiene exactamente **6 tablas + 9 vistas** (más `alembic_version`):
+`bd_nutricion` tiene exactamente **8 tablas + 9 vistas** (más `alembic_version`):
 
 - **Tablas propias:** `categorias_reporte`, `categoria_reporte_map`,
   `horarios_comida`, `coeficientes_racion`, `lecturas_biometricas`, `asistencias`.
+- **Tablas de la autenticación:** `usuarios_sistema`, `intentos_login`
+  (ver [Autenticación y roles](#autenticación-y-roles)).
 - **Vistas del contrato de lectura** (`SQL SECURITY INVOKER`, leen
   `bd_proyecto_backend`): `v_comensales`, `v_categorias`, `v_servicios`,
   `v_comidas`, `v_usuario_servicios`, `v_turnos_asignados`, `v_turno_comida`,
@@ -64,7 +66,7 @@ comedorback\.venv\Scripts\python scripts\recrear_bd_limpia.py --si   # sin pregu
 Hace, en orden: guardas (`DB_NAME` no puede ser `DB_NAME_TURNOS` ni una base del
 sistema, y la base de turnos tiene que existir) → `DROP DATABASE IF EXISTS` +
 `CREATE DATABASE` (`utf8mb4_unicode_ci`) → `alembic upgrade head` (tablas,
-columnas del formulario, vistas) → verificación de 6 tablas + 9 vistas → semilla.
+columnas del formulario, vistas) → verificación de las tablas propias + 9 vistas → semilla.
 Es idempotente. **Borra todo lo que tenga `bd_nutricion`, asistencias incluidas**;
 sobre `bd_proyecto_backend` solo ejecuta los `SELECT` de las vistas.
 
@@ -82,13 +84,14 @@ alembic revision --autogenerate -m "descripción"
 ```
 
 La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
-`0c294cd98c3a` (head):
+`7e2b9c4d1a60` (head):
 
 | Revisión | Qué hace |
 |---|---|
 | `4b5a9ed9330e` | Las 6 tablas propias, sin FK hacia la base de turnos |
 | `ff4ddf3c8a18` | Las 6 columnas del formulario de Estadística (`categorias_reporte`) |
 | `0c294cd98c3a` | Las 9 vistas `v_*`; el nombre de la base de turnos sale de `DB_NAME_TURNOS` |
+| `7e2b9c4d1a60` | `usuarios_sistema` e `intentos_login` (autenticación) |
 
 Reemplaza a la cadena vieja `fa64a5d4e912 → … → f6a7b8c9d0e1`, que asumía las
 tablas heredadas copiadas en la misma base y le agregaba columnas a `comidas`.
@@ -135,11 +138,85 @@ para probarlo desde un celular— hay que agregar ese origen exacto a la lista, 
 el navegador lo bloquea aunque sea el mismo front. En producción va la dirección
 real del servidor del hospital.
 
+## Autenticación y roles
+
+Cuentas **propias** del comedor en `usuarios_sistema` (no son los `users` de la
+base de turnos, y no se les escribe nada allá). Dónde se validan las claves
+está aislado en `verificar_credenciales()` (`app/logica/autenticacion.py`): si
+mañana se valida contra el SIH o contra `users`, se cambia esa función y nada
+más.
+
+| Rol | Puede |
+|---|---|
+| `jefa` | Todo lo operativo: pantalla, padrón, historial, informes, marcación biométrica y manual |
+| `cocinera` | Solo `GET /pantalla/*` y `POST /asistencias` con `metodo='biometrico'` |
+| `sistemas` | Todo lo de la jefa, más administración de cuentas |
+
+La matriz vive en `app/core/permisos.py` y se aplica router por router en
+`app/main.py` con `requiere_rol(...)`. La regla "manual solo jefatura" depende
+del cuerpo de la petición, así que la aplica `POST /asistencias`. Sin token
+solo responden `/salud`, `/auth/login` y `/auth/refresh`.
+
+Reglas:
+
+- **Claves:** solo hash bcrypt. Mínimo 8 caracteres, máximo 72 bytes, distinta
+  del usuario y de la anterior.
+- **Bloqueo:** 5 fallidos seguidos dentro de 15 minutos bloquean la cuenta 15
+  minutos desde el 5.º (423). Mientras dura no se verifica la clave, y esos
+  intentos no alargan el bloqueo. Un usuario inexistente se bloquea igual,
+  para no revelar qué cuentas existen. Todo intento queda en `intentos_login`.
+- **Primer ingreso:** una cuenta con clave temporal (`debe_cambiar = 1`)
+  recibe 428 con un token `temporal` que **solo** sirve para
+  `POST /auth/cambio-password`. En cualquier otra ruta da 403.
+- **Tokens JWT:** `access` de 15 min y `refresh` de 12 h. Cambiar la clave
+  o dar de baja la cuenta anula en el acto todas las sesiones abiertas
+  (`version_token`).
+- Los errores traen `motivo` además de `detail`: `falta_token`,
+  `token_invalido`, `token_expirado` (el front renueva con `/auth/refresh`),
+  `credenciales_invalidas`, `cuenta_bloqueada`, `cambio_password_pendiente`,
+  `rol_no_autorizado`, `metodo_no_autorizado`, `password_rechazada`,
+  `password_actual_incorrecta`.
+
+Ajustes en `.env`, prefijo `AUTH_` (`app/core/seguridad.py`, no `config.py`):
+
+```
+AUTH_JWT_SECRETO=<32+ caracteres al azar>   # OBLIGATORIO fuera de desarrollo
+# Opcionales: AUTH_ACCESS_MINUTOS=15  AUTH_REFRESH_HORAS=12  AUTH_TEMPORAL_MINUTOS=10
+#             AUTH_INTENTOS_MAXIMOS=5  AUTH_VENTANA_MINUTOS=15  AUTH_BLOQUEO_MINUTOS=15
+#             AUTH_BCRYPT_RONDAS=12
+```
+
+Generar el secreto: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+En desarrollo, sin secreto se usa uno efímero y las sesiones se pierden cada
+vez que la API se reinicia.
+
+### Primera cuenta
+
+Después de `alembic upgrade head`, desde `comedorback/`:
+
+```powershell
+python -m app.semillas.admin                                 # 'admin', rol sistemas
+python -m app.semillas.admin --username jefa --rol jefa      # otras cuentas
+python -m app.semillas.admin --username jefa --resetear      # clave temporal nueva
+```
+
+Imprime una clave temporal **una sola vez**: en el primer ingreso se pide
+cambiarla. Es idempotente, y `--resetear` también reactiva la cuenta y cierra
+sus sesiones. No va dentro de `python -m app.semillas` para que la clave no
+se pierda en la salida de la receta de recreación.
+
 ## Endpoints
+
+Todos exigen `Authorization: Bearer <access>` salvo `/salud`, `/auth/login` y
+`/auth/refresh`.
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| GET | `/salud` | Comprueba API y que `bd_nutricion` tenga sus 6 tablas y 9 vistas (503 si falta algo) |
+| GET | `/salud` | Comprueba API y que `bd_nutricion` tenga sus tablas propias y 9 vistas (503 si falta algo) |
+| POST | `/auth/login` | `{username, password}` → 200 `{access, refresh, rol, debe_cambiar}` · 401 · 423 `{reintento_en}` · 428 `{temporal}` |
+| POST | `/auth/cambio-password` | `{password_nueva, password_actual?}` con el temporal del 428 o con un access (ahí pide la actual). 200 como login |
+| POST | `/auth/refresh` | `{refresh}` → 200 como login, con access nuevo y el mismo refresh |
+| GET | `/auth/yo` | `{id, username, rol, debe_cambiar}` de la sesión |
 | GET | `/pantalla/estado` | Todo lo que la pantalla en vivo necesita para pintarse |
 | GET | `/pantalla/ultimas-marcaciones` | Hilo del lector, incluidos los rechazos |
 | GET | `/personal` | Padrón paginado, con búsqueda y filtros |
@@ -195,12 +272,36 @@ app/
 ├─ esquemas/            formas de entrada y salida
 ├─ modelos/
 │  ├─ heredados.py      las 9 vistas v_* (base de turnos), SOLO LECTURA
-│  └─ comedor.py        las 6 tablas propias
+│  ├─ comedor.py        las 6 tablas propias del comedor
+│  └─ usuarios.py       usuarios_sistema e intentos_login
 ├─ semillas/            carga de datos iniciales (python -m app.semillas)
 └─ core/
    ├─ config.py         configuración leída de .env (DB_NAME, DB_NAME_TURNOS)
+   ├─ seguridad.py      ajustes AUTH_*, bcrypt y tokens JWT
+   ├─ autorizacion.py   usuario_actual, requiere_rol, errores con motivo
+   ├─ permisos.py       la matriz rol x recurso
    ├─ db.py             motor único, sesión, Base y BaseContrato
    └─ tablas_heredadas.py   lo que no administramos + la lista de vistas v_*
-alembic/                migraciones (base 4b5a9ed9330e, head 0c294cd98c3a)
+alembic/                migraciones (base 4b5a9ed9330e, head 7e2b9c4d1a60)
+tests/                  pytest, contra bd_nutricion_test
 ../scripts/recrear_bd_limpia.py   receta limpia de bd_nutricion
 ```
+
+## Tests
+
+```powershell
+cd .\comedorback
+.\.venv\Scripts\python -m pytest
+```
+
+Corren contra **`bd_nutricion_test`**, nunca contra la base de desarrollo:
+`tests/conftest.py` fija `DB_NAME` antes de importar la app, y al empezar
+**borra y recrea** esa base con `alembic upgrade head`. Toma las credenciales
+(`DB_HOST`, `DB_USER`, `DB_PASSWORD`) de `.env`. Las vistas leen la base de
+turnos, así que `DB_NAME_TURNOS` tiene que existir en el servidor (solo se le
+hacen SELECT). Para otra base: `TEST_DB_NAME=otra_test` (tiene que terminar en
+`_test`).
+
+`test_zz_sin_escrituras_heredadas.py` corre al final y revisa todo el SQL de
+la sesión, alembic incluido: falla si alguna sentencia escribió en la base de
+turnos, en sus tablas heredadas o en las vistas `v_*`.

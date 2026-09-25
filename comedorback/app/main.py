@@ -1,14 +1,16 @@
 """Punto de entrada de la API del Módulo Personal / Comensales."""
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 import app.modelos  # noqa: F401  registra las tablas propias en Base.metadata
-from app.api import asistencias, historial, pantalla, personal, reportes
+from app.api import asistencias, auth, historial, pantalla, personal, reportes
+from app.core.autorizacion import ErrorAuth, requiere_rol
 from app.core.config import config
 from app.core.db import Base, SesionDep
+from app.core.permisos import ACCESO
 from app.core.tablas_heredadas import VISTAS_CONTRATO
 
 app = FastAPI(title=config.nombre_app, version="0.1.0")
@@ -28,11 +30,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(pantalla.router)
-app.include_router(personal.router)
-app.include_router(asistencias.router)
-app.include_router(historial.router)
-app.include_router(reportes.router)
+
+@app.exception_handler(ErrorAuth)
+def _error_auth(_: Request, error: ErrorAuth) -> JSONResponse:
+    """Los errores de auth llevan `motivo` para que el front decida sin
+    interpretar el texto (renovar el token, pedir el cambio de clave...)."""
+    return JSONResponse(
+        {"detail": error.detail, "motivo": error.motivo},
+        status_code=error.status_code,
+        headers=error.headers,
+    )
+
+
+# Sin token solo responden /salud y /auth/login (y /auth/refresh, que trae el
+# suyo en el cuerpo). Cada router exige los roles de su fila en la matriz de
+# app/core/permisos.py: la política se lee y se cambia allá, no acá.
+app.include_router(auth.router)
+for modulo, recurso in (
+    (pantalla, "pantalla"),
+    (personal, "personal"),
+    (asistencias, "asistencias"),
+    (historial, "historial"),
+    (reportes, "reportes"),
+):
+    regla = ACCESO[recurso]
+    app.include_router(
+        modulo.router,
+        dependencies=[Depends(requiere_rol(*regla.completo, lectura=regla.lectura))],
+    )
 
 
 @app.get("/salud", tags=["diagnóstico"])
