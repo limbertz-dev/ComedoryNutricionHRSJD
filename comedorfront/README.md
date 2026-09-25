@@ -14,7 +14,14 @@ npm.cmd run build
 npm.cmd test
 ```
 
-La URL de la API está en src/config.js: http://127.0.0.1:8000.
+La URL de la API sale de src/config.js: por omisión http://127.0.0.1:8000, o la
+de la variable VITE_API_URL si se define (por ejemplo, para el backend de
+simulación en otro puerto):
+
+```powershell
+$env:VITE_API_URL = 'http://127.0.0.1:8001'; npm.cmd run dev
+```
+
 El backend debe permitir por CORS el origen de Vite (http://localhost:5173 o
 http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 
@@ -33,6 +40,26 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | obtenerHistorialDiarioPersonal | GET /historial/diario | Historial diario, 50 registros por página |
 | obtenerHistorialMensualPersonal | GET /historial/mensual | Totales mensuales, 50 registros por página |
 | obtenerInformeRaciones | GET /reportes/informe | Informe de Estadística por rango de fechas (Reportes) |
+| obtenerSalud | GET /salud | Entorno de la API y, en simulación, la hora del servidor |
+| obtenerReloj | GET /simulacion/reloj | Hora del sistema y si está congelada (solo simulación, jefatura) |
+| fijarReloj | PUT /simulacion/reloj | Fija fecha y hora, corriendo o congelada |
+| avanzarReloj | POST /simulacion/reloj/avanzar | Adelanta el reloj (el simulador usa +15 min) |
+| saltarAProximaFranja | POST /simulacion/reloj/proxima-franja | Salta al inicio de la próxima comida; 409 se muestra como mensaje |
+| volverARelojReal | DELETE /simulacion/reloj | Devuelve el sistema a la hora real |
+
+## Modo simulación
+
+Solo cuando GET /salud responde `entorno: "simulacion"`. En cualquier otro
+entorno no se dibuja nada de esto y nunca se llama a /simulacion/*.
+
+- El header muestra la franja SIMULACIÓN con la hora del servidor, para todos
+  los roles.
+- Jefa y sistemas tienen además el reloj en el simulador del lector (Control
+  Biométrico): fijar fecha y hora, +15 min, próxima franja y volver a la hora
+  real. La cocinera no, porque el backend reserva /simulacion/* a jefatura.
+- La fecha del header y el "hoy" de Control Biométrico, Historial y Reportes
+  salen del reloj del servidor, nunca de la PC. Fuera de simulación siguen
+  como siempre.
 
 Adaptadores con pruebas pero sin pantalla que los use hoy: simularMarcacion
 (alias de marcarAsistencia), obtenerPeriodos (GET /reportes/periodos),

@@ -5,9 +5,9 @@ import './Reportes.css';
 /**
  * Selector entre los reportes del personal y de pacientes. El del personal ya
  * muestra el formulario digitalizado (día y mes); el de pacientes llega con su
- * módulo.
+ * módulo. `ahora` es la hora del servidor en simulación (null fuera de ella).
  */
-export default function Reportes() {
+export default function Reportes({ ahora = null }) {
   const [vistaActiva, setVistaActiva] = useState('personal');
 
   return (
@@ -41,7 +41,7 @@ export default function Reportes() {
       </div>
 
       {vistaActiva === 'personal' ? (
-        <InformeRaciones />
+        <InformeRaciones ahora={ahora} />
       ) : (
         <p className="reportes__pendiente">
           Los reportes de pacientes se habilitarán junto con el módulo de Pacientes.

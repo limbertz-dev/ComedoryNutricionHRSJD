@@ -179,8 +179,8 @@ function Coeficientes({ informe }) {
   );
 }
 
-export default function InformeRaciones() {
-  const [hoy] = useState(() => new Date());
+export default function InformeRaciones({ ahora = null }) {
+  const [hoy] = useState(() => ahora ?? new Date());
   const [rango, setRango] = useState(() => rangoInicial(hoy));
   /* Nombre del último archivo generado: confirma la descarga sin interrumpir. */
   const [descargado, setDescargado] = useState(null);
@@ -201,6 +201,7 @@ export default function InformeRaciones() {
   return (
     <article className="informe">
       <FiltroRangoFechas
+        hoy={ahora}
         fechaInicio={rango.desde}
         fechaFin={rango.hasta}
         onActualizar={actualizarRango}

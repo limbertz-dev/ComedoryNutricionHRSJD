@@ -15,9 +15,9 @@ export const IDS_SECCIONES = ['vivo', 'dashboard', 'historial', 'reportes'];
  * todo. Un rol que no esté aquí no ve nada: se niega por defecto.
  */
 const PERMISOS = {
-  cocinera: { etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false },
-  jefa: { etiqueta: 'Jefa de nutrición', secciones: IDS_SECCIONES, marcacionManual: true },
-  sistemas: { etiqueta: 'Sistemas', secciones: IDS_SECCIONES, marcacionManual: true },
+  cocinera: { etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false, reloj: false },
+  jefa: { etiqueta: 'Jefa de nutrición', secciones: IDS_SECCIONES, marcacionManual: true, reloj: true },
+  sistemas: { etiqueta: 'Sistemas', secciones: IDS_SECCIONES, marcacionManual: true, reloj: true },
 };
 
 const permisosDe = (rol) => (typeof rol === 'string' ? PERMISOS[rol.trim().toLowerCase()] : undefined);
@@ -38,6 +38,14 @@ export function puedeVerSeccion(rol, id) {
 
 export function puedeMarcarManual(rol) {
   return permisosDe(rol)?.marcacionManual === true;
+}
+
+/*
+ * Mover el reloj de simulación (/simulacion/*) es de jefatura, igual que en
+ * el backend. A la cocinera no se le ofrece: su 403 vedaría la sección.
+ */
+export function puedeOperarReloj(rol) {
+  return permisosDe(rol)?.reloj === true;
 }
 
 /** Primera sección del rol, o null si no tiene ninguna. */

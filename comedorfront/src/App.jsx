@@ -16,8 +16,9 @@ import {
   leerSeccionGuardada,
   seccionesDeRol,
 } from './navegacion.js';
-import { puedeMarcarManual, puedeVerSeccion, seccionInicialDeRol } from './permisos.js';
+import { puedeMarcarManual, puedeOperarReloj, puedeVerSeccion, seccionInicialDeRol } from './permisos.js';
 import { escucharSesion } from './sesion.js';
+import { claveDelDia } from './simulacion.js';
 import {
   marcarAsistencia,
   obtenerEstadoPantalla,
@@ -26,6 +27,7 @@ import {
 
 import useConsultaApi from './hooks/useConsultaApi.js';
 import useSesion, { ProveedorSesion } from './hooks/useSesion.js';
+import useSimulacion from './hooks/useSimulacion.js';
 
 /*
  * Duración mínima del estado "leyendo". El lector físico tarda en resolver una
@@ -114,11 +116,28 @@ function Panel({ rol }) {
   /* A quién le toca apoyar la huella en el simulador. Vive aquí, no en
      PantallaEnVivo: el simulador ahora se monta desde el header. */
   const [seleccionado, setSeleccionado] = useState('');
+  /* Reloj del servidor en simulación; null en cualquier otro entorno, y
+     entonces nada de simulación se monta ni cambia de dónde sale la hora. */
+  const operaReloj = puedeOperarReloj(rol);
+  const { reloj, aplicar: aplicarReloj } = useSimulacion({ operaReloj });
+  const ahoraServidor = reloj?.ahora ?? null;
+  const diaServidor = claveDelDia(reloj);
+  /* Sube cada vez que se mueve el reloj: las listas de hoy se vuelven a pedir. */
+  const [versionReloj, setVersionReloj] = useState(0);
   const consultaEstado = useCallback((signal) => {
     // Cada entrada a una sección vuelve a consultar el reloj y los cupos del servidor.
     return obtenerEstadoPantalla({ signal });
   }, [seccionActiva]);
   const { datos: pantalla, cargando: cargandoEstado, error: errorEstado, recargar: recargarEstado } = useConsultaApi(consultaEstado);
+
+  /* Un reloj movido cambia turno, cupo y marcaciones de hoy: todo se relee
+     del servidor, que es quien decide qué comida rige. */
+  function manejarCambioReloj(estado, { movido }) {
+    aplicarReloj(estado);
+    if (!movido) return;
+    setVersionReloj((version) => version + 1);
+    recargarEstado({ conservar: true });
+  }
   const turno = pantalla?.fuera_de_horario ? 'Fuera de horario' : pantalla?.comida ?? 'Consultando…';
 
   useEffect(() => {
@@ -145,6 +164,8 @@ function Panel({ rol }) {
    * gauge.
    */
   const marcando = useRef(false);
+  /* En simulación la hora provisoria de la tarjeta es la del servidor. */
+  const conHora = () => (ahoraServidor ? { ahora: ahoraServidor } : {});
   async function manejarMarcacion(personaId) {
     if (marcando.current) return;
     marcando.current = true;
@@ -153,7 +174,7 @@ function Panel({ rol }) {
     try {
       const persona = estado.personal.find(({ id }) => id === personaId);
       const [evento] = await Promise.all([
-        marcarAsistencia(personaId, { persona, metodo: 'biometrico' }),
+        marcarAsistencia(personaId, { persona, metodo: 'biometrico', ...conHora() }),
         esperar(MS_LECTURA),
       ]);
       despachar({ tipo: 'MARCACION', evento });
@@ -182,7 +203,7 @@ function Panel({ rol }) {
     setLeyendo(true);
     try {
       const [evento] = await Promise.all([
-        marcarAsistencia(null, { metodo: 'biometrico' }),
+        marcarAsistencia(null, { metodo: 'biometrico', ...conHora() }),
         esperar(MS_LECTURA),
       ]);
       despachar({ tipo: 'MARCACION', evento });
@@ -206,7 +227,7 @@ function Panel({ rol }) {
     setErrorMarcacion('');
     try {
       const persona = estado.personal.find(({ id }) => id === personaId);
-      const evento = await marcarAsistencia(personaId, { persona, metodo: 'manual' });
+      const evento = await marcarAsistencia(personaId, { persona, metodo: 'manual', ...conHora() });
       despachar({ tipo: 'MARCACION', evento });
       recargarEstado({ conservar: true });
     } catch (error) {
@@ -235,7 +256,7 @@ function Panel({ rol }) {
         onCambiarSeccion={manejarCambiarSeccion}
       />
 
-      <Header seccion={seccion} turno={turno}>
+      <Header seccion={seccion} turno={turno} simulacion={reloj}>
         {esPantallaEnVivo ? (
           <SimuladorLector
             personal={estado.personal}
@@ -245,6 +266,8 @@ function Panel({ rol }) {
             onSimularFalla={manejarFallaBiometrica}
             leyendo={leyendo}
             error={errorMarcacion}
+            reloj={operaReloj ? reloj : null}
+            onCambioReloj={manejarCambioReloj}
           />
         ) : null}
       </Header>
@@ -286,6 +309,8 @@ function Panel({ rol }) {
               turno={turno}
               personaSeleccionada={estado.personal.find(({ id }) => id === Number(seleccionado)) ?? null}
               onMarcarManual={puedeMarcarManual(rol) ? manejarMarcacionManual : null}
+              fechaServidor={reloj ? diaServidor : undefined}
+              versionReloj={versionReloj}
             />
           ) : null}
 
@@ -295,9 +320,13 @@ function Panel({ rol }) {
             />
           ) : null}
 
-          {permitida && seccionActiva === 'historial' ? <Historial personal={estado.personal} /> : null}
+          {/* `key` con el día del servidor: si el reloj de simulación cambia de
+              día, se vuelven a montar con su nuevo "hoy". */}
+          {permitida && seccionActiva === 'historial'
+            ? <Historial key={diaServidor} personal={estado.personal} ahora={ahoraServidor} /> : null}
 
-          {permitida && seccionActiva === 'reportes' ? <Reportes /> : null}
+          {permitida && seccionActiva === 'reportes'
+            ? <Reportes key={diaServidor} ahora={ahoraServidor} /> : null}
         </div>
       </main>
     </div>
