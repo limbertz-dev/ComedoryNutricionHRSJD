@@ -70,7 +70,7 @@ function formatoFechaLargo(valor) {
  * el calendario de Historial de comidas—, para no tener que dar doce clics en
  * la flechita cuando el informe que se busca es de hace un año.
  */
-function SelectorFecha({ valor, etiqueta, onCambiar, limiteMin, limiteMax }) {
+function SelectorFecha({ valor, etiqueta, onCambiar, limiteMin, limiteMax, hoy }) {
   const [abierto, setAbierto] = useState(false);
   const [vista, setVista] = useState('dias');
   const [mesVisible, setMesVisible] = useState(() => inicioDelMes(fechaDesdeValor(valor)));
@@ -120,7 +120,7 @@ function SelectorFecha({ valor, etiqueta, onCambiar, limiteMin, limiteMax }) {
 
   const enMeses = vista === 'meses';
   const dias = diasDeCalendario(mesVisible);
-  const hoyValor = valorFecha(new Date());
+  const hoyValor = valorFecha(hoy ?? new Date());
 
   return (
     <div className="order-calendar-picker" ref={contenedorRef}>
@@ -248,8 +248,8 @@ function SelectorFecha({ valor, etiqueta, onCambiar, limiteMin, limiteMax }) {
  * rápido no dispara nada por sí solo, para no relanzar la consulta con cada
  * clic mientras se sigue ajustando el rango.
  */
-export default function FiltroRangoFechas({ fechaInicio, fechaFin, onActualizar }) {
-  const [hoy] = useState(() => new Date());
+export default function FiltroRangoFechas({ fechaInicio, fechaFin, onActualizar, hoy: hoyInicial = null }) {
+  const [hoy] = useState(() => hoyInicial ?? new Date());
   const [desde, setDesde] = useState(() => fechaInicio ?? valorFecha(inicioDelMes(hoy)));
   const [hasta, setHasta] = useState(() => fechaFin ?? valorFecha(hoy));
 
@@ -304,8 +304,8 @@ export default function FiltroRangoFechas({ fechaInicio, fechaFin, onActualizar 
       </div>
 
       <form className="report-filter" onSubmit={enviar}>
-        <SelectorFecha valor={desde} etiqueta="FECHA INICIAL" limiteMax={hasta} onCambiar={setDesde} />
-        <SelectorFecha valor={hasta} etiqueta="FECHA FINAL" limiteMin={desde} onCambiar={setHasta} />
+        <SelectorFecha valor={desde} etiqueta="FECHA INICIAL" limiteMax={hasta} onCambiar={setDesde} hoy={hoyInicial} />
+        <SelectorFecha valor={hasta} etiqueta="FECHA FINAL" limiteMin={desde} onCambiar={setHasta} hoy={hoyInicial} />
         <button type="submit">Actualizar informe</button>
       </form>
     </div>
