@@ -2,7 +2,12 @@
 
     comedorback/.venv/Scripts/python scripts/preparar_simulacion.py        (pide confirmación)
     comedorback/.venv/Scripts/python scripts/preparar_simulacion.py --si   (sin preguntar)
-    ... --semana-origen 2026-08-24 --dias 28 --demo bd_turnos_demo --sim bd_nutricion_sim
+    ... --semana-origen 2026-08-03 --dias 49 --demo bd_turnos_demo --sim bd_nutricion_sim
+
+Los valores por defecto reproducen la semana de simulación acordada: la del
+03/08/2026 (lunes) pasa al 21-27/09/2026, con 72 candidatos crudos. El
+escenario demo (scripts/demo_reloj.py: usuario 2040, almuerzo del 24/09)
+depende de ella; cambiarlos cambia el escenario.
 
 Pasos:
 
@@ -392,10 +397,10 @@ def main() -> None:
     parser.add_argument(
         "--semana-origen",
         type=date.fromisoformat,
-        default=date(2026, 8, 24),
-        help="primer día (lunes) de la semana real a desplazar",
+        default=date(2026, 8, 3),
+        help="primer día (lunes) de la semana real a desplazar (por defecto %(default)s)",
     )
-    parser.add_argument("--dias", type=int, default=28, help="días hacia adelante")
+    parser.add_argument("--dias", type=int, default=49, help="días hacia adelante (por defecto %(default)s)")
     args = parser.parse_args()
 
     if args.dias <= 0 or args.dias % 7:
