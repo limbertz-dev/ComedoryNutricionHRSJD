@@ -7,3 +7,9 @@ alembic==1.19.2
 pymysql==1.2.0
 cryptography==50.0.1
 pydantic-settings==2.15.0
+# Autenticación
+bcrypt==5.0.0
+PyJWT==2.15.0
+# Tests (python -m pytest, contra bd_nutricion_test)
+pytest==9.1.1
+httpx==0.28.1
