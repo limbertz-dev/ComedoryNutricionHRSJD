@@ -1,4 +1,5 @@
 import Boton from '../ui/Boton.jsx';
+import ControlesReloj from './ControlesReloj.jsx';
 import { IconoAlerta, IconoHuella } from '../ui/Iconos.jsx';
 import './SimuladorLector.css';
 
@@ -13,6 +14,9 @@ import './SimuladorLector.css';
  *
  * Elige a quién "apoya la huella" y dispara exactamente la misma marcación
  * que enviará el lector real (POST /asistencias con metodo 'biometrico').
+ *
+ * Con `reloj` (solo en simulación y para quien puede moverlo) suma los
+ * controles del reloj del servidor; sin él, esos controles no existen.
  */
 export default function SimuladorLector({
   personal,
@@ -22,6 +26,8 @@ export default function SimuladorLector({
   onSimularFalla,
   leyendo,
   error,
+  reloj = null,
+  onCambioReloj,
 }) {
   const sinPadron = personal.length === 0;
   const personaId = Number(seleccionado);
@@ -78,6 +84,8 @@ export default function SimuladorLector({
       >
         Falla biométrica
       </Boton>
+
+      <ControlesReloj reloj={reloj} onCambio={onCambioReloj} />
 
       {/* Solo el error de verdad se asoma acá: los rechazos de negocio (sin
           cupo, ya marcó, fuera de horario) ya se leen en el escenario, con su

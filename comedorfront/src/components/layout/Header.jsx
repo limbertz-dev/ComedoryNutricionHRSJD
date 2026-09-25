@@ -1,4 +1,5 @@
 import { IconoCalendario, IconoReloj } from '../ui/Iconos.jsx';
+import { textoDelReloj } from '../../simulacion.js';
 import './Header.css';
 
 /* Fecha corta, como en el panel original: "mié., 03 sept. 2026". */
@@ -18,9 +19,13 @@ const FORMATO_FECHA = new Intl.DateTimeFormat('es-BO', {
  * misma fila: es donde Control Biométrico monta su simulador de lector, como
  * una herramienta más de la barra y no como una franja aparte que empuje el
  * resto de la pantalla hacia abajo.
+ *
+ * `simulacion` es el reloj del servidor cuando la API corre en simulación, y
+ * null en cualquier otro entorno. Con él aparece la franja SIMULACIÓN y la
+ * fecha es la del servidor; sin él, el header es el de siempre.
  */
-export default function Header({ seccion, turno, children }) {
-  const fecha = FORMATO_FECHA.format(new Date());
+export default function Header({ seccion, turno, simulacion = null, children }) {
+  const fecha = FORMATO_FECHA.format(simulacion ? simulacion.ahora : new Date());
 
   return (
     <header className="header">
@@ -32,6 +37,13 @@ export default function Header({ seccion, turno, children }) {
       {children ? <div className="header__herramientas">{children}</div> : null}
 
       <div className="header__contexto">
+        {simulacion ? (
+          <span className="header__pastilla header__pastilla--simulacion" role="status">
+            <strong>Simulación</strong>
+            {textoDelReloj(simulacion)}
+          </span>
+        ) : null}
+
         <span className="header__pastilla header__pastilla--turno">
           <IconoReloj tamano={18} />
           Turno {turno}

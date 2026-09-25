@@ -101,6 +101,10 @@ function FiltroComida({ activo, onCambiar }) {
  * Este puesto de control opera siempre sobre el turno en vivo de hoy: no
  * hay selector de fecha, ni falta hace, porque acá lo que importa es lo que
  * está pasando ahora mismo frente al lector.
+ *
+ * En simulación, `fechaServidor` es el día del reloj del servidor
+ * ("YYYY-MM-DD") y `versionReloj` cambia cada vez que alguien mueve ese
+ * reloj; fuera de simulación no llegan y todo sigue como siempre.
  */
 export default function PantallaEnVivo({
   evento,
@@ -109,6 +113,8 @@ export default function PantallaEnVivo({
   turno,
   personaSeleccionada,
   onMarcarManual,
+  fechaServidor,
+  versionReloj = 0,
 }) {
   /*
    * Última marcación ya conocida al entrar en la sección. El evento vive en
@@ -180,6 +186,15 @@ export default function PantallaEnVivo({
     recargarMarcaciones({ conservar: true });
     setIdSeleccionado(null);
   }, [idEvento, recargarMarcaciones]);
+
+  /* Mover el reloj de simulación cambia el día o la franja: la lista se
+     vuelve a pedir, sin vaciarse mientras llega. */
+  const versionRecargada = useRef(versionReloj);
+  useEffect(() => {
+    if (versionRecargada.current === versionReloj) return;
+    versionRecargada.current = versionReloj;
+    recargarMarcaciones({ conservar: true });
+  }, [versionReloj, recargarMarcaciones]);
 
   /*
    * Mientras esa consulta viaja, la marcación recién enviada se muestra al
@@ -259,9 +274,9 @@ export default function PantallaEnVivo({
   const usuarioIdConsultar = personaMostrada?.id;
   const consultarDia = useCallback(
     (signal) => usuarioIdConsultar
-      ? obtenerDiaPersonal(usuarioIdConsultar, { signal })
+      ? obtenerDiaPersonal(usuarioIdConsultar, { fecha: fechaServidor, signal })
       : Promise.resolve(null),
-    [usuarioIdConsultar],
+    [usuarioIdConsultar, fechaServidor],
   );
   const { datos: dia, cargando: cargandoDia, error: errorDia, recargar: recargarDia } = useConsultaApi(consultarDia);
 
