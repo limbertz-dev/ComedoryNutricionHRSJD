@@ -106,7 +106,6 @@ export default function Login() {
           {fase === 'cambio' ? (
             <CambioObligatorio
               usuario={usuarioDeSesion || usuario.trim()}
-              contrasenaActual={contrasena}
               onCambiar={cambiarPassword}
               onVolver={() => {
                 setContrasena('');
@@ -176,39 +175,31 @@ export default function Login() {
 }
 
 /**
- * Contraseña temporal: no se entra al sistema sin cambiarla. Si la clave
- * actual se acaba de teclear en el Login no se vuelve a pedir; tras un F5 o un
- * 428 desde otra sección, sí.
+ * Contraseña temporal: no se entra al sistema sin cambiarla. La identidad ya
+ * viaja en el header con el temporal del 428, así que nunca se pide la actual.
  */
-function CambioObligatorio({ usuario, contrasenaActual, onCambiar, onVolver }) {
-  const [actual, setActual] = useState('');
+function CambioObligatorio({ usuario, onCambiar, onVolver }) {
   const [nueva, setNueva] = useState('');
   const [confirmacion, setConfirmacion] = useState('');
   const [visible, setVisible] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
-  const pedirActual = !contrasenaActual;
 
   async function manejarEnvio(evento) {
     evento.preventDefault();
     if (enviando) return;
-    const claveActual = pedirActual ? actual : contrasenaActual;
-    if (!usuario || !claveActual || !nueva) {
-      setError(pedirActual ? 'Complete la contraseña temporal y la nueva.' : 'Ingrese la contraseña nueva.');
+    if (!nueva) {
+      setError('Ingrese la contraseña nueva.');
       return;
     }
     if (nueva !== confirmacion) {
       setError('La confirmación no coincide con la contraseña nueva.');
       return;
     }
-    if (nueva === claveActual) {
-      setError('La contraseña nueva debe ser distinta de la temporal.');
-      return;
-    }
     setEnviando(true);
     setError('');
     try {
-      const resultado = await onCambiar({ usuario, actual: claveActual, nueva });
+      const resultado = await onCambiar({ usuario, nueva });
       if (resultado.tipo === 'credencial' || resultado.tipo === 'bloqueada') setError(resultado.detalle);
       else if (resultado.tipo === 'cambio') setError('El servidor sigue pidiendo el cambio de contraseña.');
     } catch (fallo) {
@@ -231,22 +222,6 @@ function CambioObligatorio({ usuario, contrasenaActual, onCambiar, onVolver }) {
           texto={error || `La contraseña de ${usuario || 'este usuario'} es temporal.`}
         />
 
-        {pedirActual ? (
-          <div className="login__grupo">
-            <label htmlFor="cambio-actual">Contraseña temporal</label>
-            <CampoContrasena
-              id="cambio-actual"
-              placeholder="La contraseña que le entregaron"
-              autoComplete="current-password"
-              valor={actual}
-              onCambiar={setActual}
-              visible={visible}
-              onAlternar={() => setVisible((v) => !v)}
-              autoFocus
-            />
-          </div>
-        ) : null}
-
         <div className="login__grupo">
           <label htmlFor="cambio-nueva">Contraseña nueva</label>
           <CampoContrasena
@@ -257,7 +232,7 @@ function CambioObligatorio({ usuario, contrasenaActual, onCambiar, onVolver }) {
             onCambiar={setNueva}
             visible={visible}
             onAlternar={() => setVisible((v) => !v)}
-            autoFocus={!pedirActual}
+            autoFocus
           />
         </div>
 
