@@ -448,7 +448,7 @@ function horaLegible(fecha) {
  * registro a mano de una ración se queda en 'manual', que es el valor por
  * omisión aquí.
  */
-export async function marcarAsistencia(personaId, { persona, metodo = 'manual', signal } = {}) {
+export async function marcarAsistencia(personaId, { persona, metodo = 'manual', ahora = new Date(), signal } = {}) {
   try {
     const fallaBiometrica = personaId === null && metodo === 'biometrico';
     if (!fallaBiometrica && (!Number.isInteger(personaId) || personaId <= 0)) {
@@ -473,8 +473,9 @@ export async function marcarAsistencia(personaId, { persona, metodo = 'manual', 
     return {
       ...respuesta,
       id: (secuenciaEvento += 1),
-      // La respuesta actual no trae hora: esta es la hora de recepción local.
-      hora: horaLegible(new Date()),
+      // La respuesta actual no trae hora: esta es la hora de recepción local,
+      // o la del reloj del servidor cuando App la conoce (simulación).
+      hora: horaLegible(ahora),
       persona: ficha
         ? { ...ficha, nombre: respuesta.nombre || ficha.nombre }
         : { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar', legajo: '—' },
@@ -1169,4 +1170,161 @@ export async function obtenerDiaPersonal(usuarioId, { fecha, signal } = {}) {
     desplazamiento += pagina.datos.length;
   } while (desplazamiento < pagina.total);
   return null;
+}
+
+/*
+ * --- Simulación (contrato real comedorback/app/api/simulacion.py) ---
+ * GET  /salud → {entorno, reloj: {ahora, real, simulado}, ...}; sin token.
+ *               Responde 503 con el mismo cuerpo si la base está incompleta.
+ * Solo con ENTORNO=simulacion y rol de jefatura (en otro entorno, 404):
+ * GET    /simulacion/reloj                → EstadoReloj
+ * PUT    /simulacion/reloj {momento, congelar} → EstadoReloj
+ * POST   /simulacion/reloj/avanzar {dias?, horas?, minutos?} → EstadoReloj
+ * POST   /simulacion/reloj/proxima-franja → {comida_id, comida, inicio, reloj}
+ *                                          | 409 si no hay franja hoy ni mañana
+ * DELETE /simulacion/reloj                → EstadoReloj (vuelve a la hora real)
+ * EstadoReloj = {ahora, real, simulado, congelado}
+ *
+ * Las horas del servidor son locales y sin zona. Se leen como hora de pared
+ * (año, mes, día, hora…) y nunca se convierten de zona: lo que se muestra es
+ * exactamente la hora que ve el servidor.
+ */
+const FECHA_HORA_SERVIDOR = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/;
+
+/** "2026-08-10T12:05:30.123" → Date local con esa misma hora de pared. */
+export function fechaHoraDelServidor(texto) {
+  const partes = typeof texto === 'string' ? FECHA_HORA_SERVIDOR.exec(texto) : null;
+  if (!partes) return null;
+  const [anio, mes, dia, hora, minuto, segundo = '0'] = partes.slice(1);
+  const momento = new Date(Number(anio), Number(mes) - 1, Number(dia),
+    Number(hora), Number(minuto), Number(segundo));
+  return Number.isNaN(momento.getTime()) ? null : momento;
+}
+
+/** Valor de un <input type="datetime-local">: "2026-08-10T12:05". */
+export function valorFechaHoraLocal(momento) {
+  const dos = (numero) => String(numero).padStart(2, '0');
+  return `${fechaArchivo(momento)}T${dos(momento.getHours())}:${dos(momento.getMinutes())}`;
+}
+
+function adaptarReloj(dato, { conCongelado = true } = {}) {
+  const ahora = fechaHoraDelServidor(dato?.ahora);
+  const real = fechaHoraDelServidor(dato?.real);
+  if (!ahora || !real || typeof dato.simulado !== 'boolean'
+    || (conCongelado && typeof dato.congelado !== 'boolean')) {
+    throw new Error('La API devolvió un reloj inválido.');
+  }
+  return {
+    ahora,
+    real,
+    simulado: dato.simulado,
+    // /salud no informa si el reloj está congelado: null es "no se sabe".
+    congelado: typeof dato.congelado === 'boolean' ? dato.congelado : null,
+  };
+}
+
+/**
+ * GET /salud: en qué entorno corre la API y qué hora ve. `simulacion` es
+ * true solo con entorno 'simulacion'; en cualquier otro caso (o si la API
+ * todavía no informa el entorno) no hay nada de simulación que mostrar.
+ * `reloj` es null fuera de simulación.
+ */
+export async function obtenerSalud({ signal } = {}) {
+  let datos;
+  try {
+    datos = await solicitarApi('/salud', { signal, manejoPropio: true });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    // Con 503 la API responde igual, solo avisa que a la base le falta algo.
+    if (error.status !== 503 || !error.datos) {
+      throw new Error(`No se pudo consultar el estado de la API. ${error.message}`);
+    }
+    datos = error.datos;
+  }
+  const entorno = typeof datos?.entorno === 'string' ? datos.entorno : null;
+  const simulacion = entorno === 'simulacion';
+  return {
+    entorno,
+    simulacion,
+    reloj: simulacion ? adaptarReloj(datos.reloj, { conCongelado: false }) : null,
+  };
+}
+
+async function operarReloj(ruta, opciones, accion) {
+  try {
+    return adaptarReloj(await solicitarApi(ruta, opciones));
+  } catch (error) {
+    if (opciones.signal?.aborted) throw error;
+    throw new Error(`No se pudo ${accion}. ${error.message}`);
+  }
+}
+
+const cuerpoJson = (datos) => ({
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(datos),
+});
+
+/** GET /simulacion/reloj: la hora que ve el sistema, con `congelado`. */
+export function obtenerReloj({ signal } = {}) {
+  return operarReloj('/simulacion/reloj', { signal }, 'consultar el reloj');
+}
+
+/**
+ * PUT /simulacion/reloj. `momento` es el valor de un datetime-local
+ * ("2026-08-10T12:05"): hora local del servidor, sin zona.
+ */
+export async function fijarReloj({ momento, congelar = false, signal } = {}) {
+  if (typeof momento !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(momento)) {
+    throw new Error('Indique la fecha y la hora a fijar.');
+  }
+  return operarReloj('/simulacion/reloj', {
+    method: 'PUT', ...cuerpoJson({ momento: `${momento}:00`, congelar: congelar === true }), signal,
+  }, 'fijar el reloj');
+}
+
+/** POST /simulacion/reloj/avanzar: al menos uno de días, horas o minutos. */
+export async function avanzarReloj({ dias = 0, horas = 0, minutos = 0, signal } = {}) {
+  const cuanto = { dias, horas, minutos };
+  if (Object.values(cuanto).some((valor) => !Number.isInteger(valor) || valor < 0)
+    || Object.values(cuanto).every((valor) => valor === 0)) {
+    throw new Error('Indique cuánto avanzar el reloj.');
+  }
+  const cuerpo = Object.fromEntries(Object.entries(cuanto).filter(([, valor]) => valor > 0));
+  return operarReloj('/simulacion/reloj/avanzar', { method: 'POST', ...cuerpoJson(cuerpo), signal },
+    'avanzar el reloj');
+}
+
+/**
+ * POST /simulacion/reloj/proxima-franja. El 409 no es una falla: es la
+ * respuesta a "no hay ninguna franja hoy ni mañana", y se devuelve como
+ * `{ tipo: 'sin_franja', detalle }` para que la pantalla lo muestre como
+ * mensaje. Lo demás llega como `{ tipo: 'ok', comidaId, comida, inicio, reloj }`.
+ */
+export async function saltarAProximaFranja({ signal } = {}) {
+  let datos;
+  try {
+    datos = await solicitarApi('/simulacion/reloj/proxima-franja', { method: 'POST', signal });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error.status === 409) {
+      return { tipo: 'sin_franja', detalle: detalleDe(error.datos, 'No hay ninguna franja de comida hoy ni mañana.') };
+    }
+    throw new Error(`No se pudo saltar a la próxima franja. ${error.message}`);
+  }
+  const inicio = fechaHoraDelServidor(datos?.inicio);
+  if (!Number.isInteger(datos?.comida_id) || typeof datos.comida !== 'string' || !inicio) {
+    throw new Error('No se pudo saltar a la próxima franja. La API devolvió una franja inválida.');
+  }
+  let reloj;
+  try {
+    reloj = adaptarReloj(datos.reloj);
+  } catch (error) {
+    throw new Error(`No se pudo saltar a la próxima franja. ${error.message}`);
+  }
+  return { tipo: 'ok', comidaId: datos.comida_id, comida: datos.comida, inicio, reloj };
+}
+
+/** DELETE /simulacion/reloj: el sistema vuelve a la hora real. */
+export function volverARelojReal({ signal } = {}) {
+  return operarReloj('/simulacion/reloj', { method: 'DELETE', signal }, 'volver a la hora real');
 }
