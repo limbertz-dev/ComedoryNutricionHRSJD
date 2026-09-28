@@ -1142,7 +1142,7 @@ async function consultarHistorial(ruta, parametros, signal, mensual = false) {
     };
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new Error(`No se pudo cargar el historial. ${error.message}`);
+    throw new Error(`No se pudo cargar el historial. ${error.message}`, { cause: error });
   }
 }
 
@@ -1159,17 +1159,24 @@ export function obtenerHistorialMensualPersonal({
   return consultarHistorial('/historial/mensual', { gestion, mes: mesIndice + 1, limite, desplazamiento }, signal, true);
 }
 
-/** El endpoint diario no filtra por usuario: busca la ficha entre sus páginas. */
+/**
+ * GET /pantalla/dia-personal: la ficha del día de una persona, con la misma
+ * forma que una fila de /historial/diario pero abierta también a la cocinera.
+ * Sin `fecha`, el servidor usa su hoy. Devuelve null si ese día no figura
+ * (`datos` vacío) o si la persona no existe (404).
+ */
 export async function obtenerDiaPersonal(usuarioId, { fecha, signal } = {}) {
-  let desplazamiento = 0;
-  let pagina;
-  do {
-    pagina = await obtenerHistorialDiarioPersonal({ fecha, limite: 200, desplazamiento, signal });
-    const persona = pagina.datos.find(({ id }) => id === usuarioId);
-    if (persona) return persona;
-    desplazamiento += pagina.datos.length;
-  } while (desplazamiento < pagina.total);
-  return null;
+  const parametros = { persona_id: usuarioId };
+  if (fecha !== undefined && fecha !== null) {
+    parametros.fecha = typeof fecha === 'string' ? fecha : fechaArchivo(fecha);
+  }
+  try {
+    const pagina = await consultarHistorial('/pantalla/dia-personal', parametros, signal);
+    return pagina.datos[0] ?? null;
+  } catch (error) {
+    if (error.cause?.status === 404) return null;
+    throw error;
+  }
 }
 
 /*
