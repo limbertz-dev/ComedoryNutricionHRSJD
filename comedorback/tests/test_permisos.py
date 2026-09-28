@@ -18,11 +18,13 @@ TODOS = {"jefa", "cocinera", "sistemas"}
 MATRIZ = [
     ("GET", "/pantalla/estado", None, TODOS),
     ("GET", "/pantalla/ultimas-marcaciones", None, TODOS),
+    ("GET", "/pantalla/dia-personal?persona_id=1", None, TODOS),
     ("POST", "/asistencias", {"metodo": "biometrico"}, TODOS),
     ("POST", "/asistencias", {"metodo": "manual", "usuario_id": 1}, JEFATURA),
-    ("GET", "/personal", None, JEFATURA),
-    ("GET", "/personal/1", None, JEFATURA),
-    ("GET", "/personal/1/derecho", None, JEFATURA),
+    # Padrón: la cocinera lo lee para operar el lector.
+    ("GET", "/personal", None, TODOS),
+    ("GET", "/personal/1", None, TODOS),
+    ("GET", "/personal/1/derecho", None, TODOS),
     ("GET", "/historial/diario", None, JEFATURA),
     ("GET", "/historial/mensual", None, JEFATURA),
     ("GET", "/reportes/periodos", None, JEFATURA),

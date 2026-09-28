@@ -6,9 +6,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.consultas import historial as consultas_historial
 from app.consultas import pantalla as consultas
+from app.core import reloj
 from app.core.db import SesionDep
+from app.esquemas.historial import ComensalDelDia, ComidaListada, HistorialDiario
 from app.esquemas.pantalla import EstadoPantalla, Marcacion
+from app.modelos.heredados import Comensal
 
 router = APIRouter(prefix="/pantalla", tags=["pantalla en vivo"])
 
@@ -71,3 +75,36 @@ def ultimas_marcaciones(
             sesion, fecha=fecha, comida_id=comida_id, limite=limite
         )
     ]
+
+
+@router.get(
+    "/dia-personal",
+    response_model=HistorialDiario,
+    summary="Ficha del día de una persona",
+)
+def dia_personal(
+    sesion: SesionDep,
+    persona_id: Annotated[int, Query(gt=0, description="users.id, no personas.id")],
+    fecha: Annotated[date | None, Query(description="Por defecto, hoy")] = None,
+) -> HistorialDiario:
+    """La tira del día que la pantalla muestra tras una marcación.
+
+    Misma forma y mismas reglas que GET /historial/diario, acotada a una
+    persona, para que la cocinera la vea sin abrir el historial completo.
+    `datos` trae su ficha, o viene vacío si ese día no tenía derecho ni
+    recibió ración (tampoco aparecería en el historial).
+    """
+    if sesion.get(Comensal, persona_id) is None:
+        raise HTTPException(status_code=404, detail="No existe ese comensal")
+    fecha = fecha or reloj.hoy()
+    total, comidas, datos = consultas_historial.historial_diario(
+        sesion, fecha, limite=1, usuario_id=persona_id
+    )
+    return HistorialDiario(
+        fecha=fecha,
+        total=total,
+        limite=1,
+        desplazamiento=0,
+        comidas=[ComidaListada(**asdict(c)) for c in comidas],
+        datos=[ComensalDelDia(**asdict(d)) for d in datos],
+    )

@@ -5,9 +5,11 @@ dice qué roles lo abren):
 
   · jefa       la jefatura de nutrición. Todo lo operativo: padrón,
                historial, informes, pantalla y marcación, también la manual.
-  · cocinera   el personal frente al lector. Solo mira la pantalla en vivo
-               (GET /pantalla/*) y marca con el biométrico. Ni padrón, ni
-               informes, ni registro manual.
+  · cocinera   el personal frente al lector. Mira la pantalla en vivo
+               (GET /pantalla/*), consulta el padrón en solo lectura (GET
+               /personal/*) para operar el lector y marca con el biométrico.
+               Ni escrituras en el padrón, ni historial, ni informes, ni
+               registro manual.
   · sistemas   soporte técnico. Todo lo de la jefa y, además, lo de
                administración (cuentas de usuario) cuando exista.
 
@@ -48,7 +50,8 @@ ACCESO: dict[str, Regla] = {
     # Las tres pueden llegar al endpoint; el método lo filtra
     # `exigir_metodo_marcacion`.
     "asistencias": Regla(completo=frozenset(ROLES)),
-    "personal": Regla(completo=JEFATURA),
+    # La cocinera lee el padrón para operar el lector; escribirlo, no.
+    "personal": Regla(completo=JEFATURA, lectura=frozenset({"cocinera"})),
     "historial": Regla(completo=JEFATURA),
     "reportes": Regla(completo=JEFATURA),
     # Solo existe con ENTORNO=simulacion (app/main.py).
