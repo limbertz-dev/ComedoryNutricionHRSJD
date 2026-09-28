@@ -88,6 +88,8 @@ export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, 
         valido,
         titulo: valido ? 'Marcación válida'
           : MOTIVOS_LEGIBLES[dato.motivo] ?? (dato.motivo || 'Marcación rechazada'),
+        motivo: dato.motivo ?? null,
+        dispositivo: dato.dispositivo ?? null,
         hora: horaDeMarcacion(dato.fecha_hora),
         // Sin comida: el lector no llegó a resolver ningún turno para esa hora
         // (fuera de horario) o la lectura es de una huella no reconocida.
@@ -1070,6 +1072,104 @@ export async function obtenerInformeRaciones({ desde, hasta, hoy = new Date(), s
     if (signal?.aborted) throw error;
     throw new Error(`No se pudo cargar el informe. ${error.message}`);
   }
+}
+
+/**
+ * Todo el cálculo de las tarjetas de Supervisión en un único adaptador.
+ *
+ * Devuelve [{ comidaId, comida, servidas, rechazos, rechazosTruncados, estado }].
+ *
+ * - servidas: /reportes/informe con desde = hasta = hoy del servidor.
+ * - rechazos: /pantalla/ultimas-marcaciones con comidaId y limite = 100.
+ *   Si vuelven 100 filas, rechazosTruncados = true y la UI muestra "100 o más".
+ * - estado: "En curso" solo para la comida de /pantalla/estado;
+ *   con fuera_de_horario, "Fuera de horario"; el resto "—".
+ */
+export async function obtenerResumenComidas({ fecha, hoy, signal } = {}) {
+  const diaStr = typeof fecha === 'string'
+    ? fecha
+    : fecha instanceof Date
+      ? fechaArchivo(fecha)
+      : hoy instanceof Date
+        ? fechaArchivo(hoy)
+        : typeof hoy === 'string'
+          ? hoy
+          : fechaArchivo(new Date());
+
+  const objetoHoy = hoy instanceof Date
+    ? hoy
+    : fecha instanceof Date
+      ? fecha
+      : new Date(`${diaStr}T12:00:00`);
+
+  const [estadoPantalla, informe, paginaHistorial] = await Promise.all([
+    obtenerEstadoPantalla({ fecha: diaStr, signal }),
+    obtenerInformeRaciones({ desde: diaStr, hasta: diaStr, hoy: objetoHoy, signal }),
+    obtenerHistorialDiarioPersonal({ fecha: diaStr, limite: 1, signal }),
+  ]);
+
+  const catalogoComidas = paginaHistorial?.comidas ?? [];
+  const filasInforme = informe?.filas ?? [];
+
+  return await Promise.all(
+    filasInforme.map(async (fila) => {
+      const etiquetaFila = (fila.tiempo ?? fila.etiqueta ?? '').trim();
+      const nombreNorm = etiquetaFila.toLowerCase();
+
+      const comidaEncontrada = catalogoComidas.find((c) =>
+        (c.nombre ?? c.etiqueta ?? '').trim().toLowerCase() === nombreNorm
+      );
+      const comidaId = comidaEncontrada
+        ? (comidaEncontrada.comida_id ?? comidaEncontrada.id ?? null)
+        : null;
+      const comida = etiquetaFila || (comidaEncontrada?.nombre ?? 'Comida');
+      const servidas = fila.total ?? 0;
+
+      let rechazos = 0;
+      let rechazosTruncados = false;
+
+      if (comidaId !== null) {
+        const marcaciones = await obtenerUltimasMarcaciones({
+          fecha: diaStr,
+          comidaId,
+          limite: 100,
+          signal,
+        });
+        const rechazadas = marcaciones.filter((m) => !m.valido);
+        rechazos = rechazadas.length;
+        rechazosTruncados = marcaciones.length >= 100;
+      }
+
+      let estado = '—';
+      const esComidaPantalla = Boolean(
+        (comidaId !== null && estadoPantalla?.comida_id != null && comidaId === estadoPantalla.comida_id)
+        || (estadoPantalla?.comida && nombreNorm === estadoPantalla.comida.trim().toLowerCase())
+      );
+      if (esComidaPantalla) {
+        estado = estadoPantalla?.fuera_de_horario ? 'Fuera de horario' : 'En curso';
+      }
+
+      return {
+        comidaId,
+        comida,
+        servidas,
+        rechazos,
+        rechazosTruncados,
+        estado,
+      };
+    })
+  );
+}
+
+/**
+ * Autoriza una ración manual para una lectura no identificada en Supervisión.
+ * Envía { usuario_id, metodo: 'manual' } sin parámetro momento.
+ */
+export async function autorizarMarcacionManual(usuarioId, { signal } = {}) {
+  if (!Number.isInteger(usuarioId) || usuarioId <= 0) {
+    throw new Error('Seleccione un comensal del padrón.');
+  }
+  return marcarAsistencia(usuarioId, { metodo: 'manual', signal });
 }
 
 /* ----------------------------- Historial nominal de la API */
