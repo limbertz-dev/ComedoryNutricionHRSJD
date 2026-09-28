@@ -33,11 +33,15 @@ export default function Supervision({
   personal = [],
   versionReloj = 0,
   onMarcacionExitosa,
+  cargandoInicial = true,
+  errorInicial = null,
+  resumenInicial = [],
+  marcacionesIniciales = [],
 }) {
-  const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState(null);
-  const [resumenComidas, setResumenComidas] = useState([]);
-  const [marcaciones, setMarcaciones] = useState([]);
+  const [cargando, setCargando] = useState(cargandoInicial);
+  const [error, setError] = useState(errorInicial);
+  const [resumenComidas, setResumenComidas] = useState(resumenInicial);
+  const [marcaciones, setMarcaciones] = useState(marcacionesIniciales);
 
   /* Filtros del feed */
   const [filtroComidaId, setFiltroComidaId] = useState(null);
