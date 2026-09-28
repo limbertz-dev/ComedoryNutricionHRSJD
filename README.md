@@ -19,6 +19,14 @@ Sistema de Comedor y Nutrición Hospitalaria, módulo Personal / Comensales: con
 
 La demo corre sobre copias: `bd_turnos_demo` (clon de `bd_proyecto_backend`) y `bd_nutricion_sim`. `bd_nutricion` y `bd_proyecto_backend` no se tocan, y la API normal (8000 / 5173) puede seguir corriendo al lado. Todo en PowerShell; usar una terminal aparte, porque las variables `$env:` quedan puestas en esa sesión.
 
+0. **`.env`** (una vez por clon o worktree): los scripts y la API leen las credenciales de MySQL de `comedorback/.env`, que no se versiona. En un clon o worktree nuevo no existe y nada arranca sin él:
+
+   ```powershell
+   Copy-Item comedorback\.env.example comedorback\.env
+   ```
+
+   Completar `DB_PASSWORD` y dejar `DB_NAME` / `DB_NAME_TURNOS` con las bases reales: `preparar_simulacion.py` lee de ahí cuál es el original, y las bases de simulación se eligen con `$env:` en el paso 2 (las variables de entorno pisan al `.env`).
+
 1. **Bases** (desde la raíz; destructivo solo para `*_demo` y `*_sim`):
 
    ```powershell
@@ -64,5 +72,16 @@ La demo corre sobre copias: `bd_turnos_demo` (clon de `bd_proyecto_backend`) y `
    ```
 
    El header muestra la franja SIMULACIÓN; jefa y sistemas mueven el reloj desde Control Biométrico (ver `comedorfront/README.md`).
+
+7. **Historial** (opcional, desde la raíz, con la API del paso 5 corriendo): `scripts/cargar_historial_sim.py` llena los días previos a la demo marcando POR LA API, como jefa y con método manual, así que valen las reglas de siempre (horario, duplicado, derecho). Por defecto marca el 80 % de los candidatos con derecho de cada día del 21 al 23/09, elegidos y fechados de forma determinista (misma base, mismos parámetros, mismas filas):
+
+   ```powershell
+   comedorback\.venv\Scripts\python scripts\cargar_historial_sim.py --api http://127.0.0.1:8001
+   ```
+
+   - `--api` hace falta: el valor por defecto del script es `8100`, no el `8001` de este runbook. Antes de marcar verifica con `/salud` que la API apunte a `bd_nutricion_sim` / `bd_turnos_demo`.
+   - La cuenta (`--usuario`, por defecto `jefa`) tiene que ser de jefatura y ya tener cambiada la clave temporal en el front (paso 6): un 428 aborta. La clave se pide por consola o se lee de `CARGA_HISTORIAL_CLAVE`; ni ella ni el token se imprimen.
+   - Nunca toca la demo en vivo (24-27/09) y se niega si el rango ya tiene raciones: para volver a cargarlo hay que regenerar con el paso 1, que borra todo lo marcado en la simulación.
+   - Otros parámetros: `--porcentaje`, `--desde`, `--hasta`, `--solo-programados` (ver su docstring). Termina comparando el CHECKSUM de `bd_proyecto_backend` antes y después.
 
 Para salir: "volver a la hora real" en el front (o `DELETE /simulacion/reloj`), o cerrar la API; al reiniciar vuelve sola a la hora real.
