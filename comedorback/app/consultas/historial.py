@@ -206,7 +206,10 @@ def historial_diario(
     limite: int = 50,
     desplazamiento: int = 0,
     momento: datetime | None = None,
+    usuario_id: int | None = None,
 ) -> tuple[int, list[ComidaListada], list[ComensalDelDia]]:
+    """`usuario_id` acota el universo a una sola persona: la ficha del día
+    que la pantalla muestra tras marcar, con las mismas reglas que la lista."""
     momento = momento or reloj.ahora()
 
     con_derecho = aplicar_reglas(
@@ -217,6 +220,9 @@ def historial_diario(
     con_racion = select(Asistencia.usuario_id.label("usuario_id")).where(
         Asistencia.fecha_comida == fecha
     )
+    if usuario_id is not None:
+        con_derecho = con_derecho.where(ComidaPorTurno.usuario_id == usuario_id)
+        con_racion = con_racion.where(Asistencia.usuario_id == usuario_id)
     total, usuarios = _pagina_de_usuarios(
         sesion, con_derecho, con_racion, limite, desplazamiento
     )
