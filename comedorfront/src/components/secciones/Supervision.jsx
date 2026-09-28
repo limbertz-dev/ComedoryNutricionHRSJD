@@ -19,6 +19,98 @@ const ETIQUETAS_MOTIVOS = {
 };
 
 /**
+ * Convierte el resultado devuelto por la API al autorizar una ración en el aviso
+ * correspondiente (éxito o rechazo del servidor).
+ */
+export function resolverAvisoAutorizacion(resultado) {
+  if (resultado?.valido) {
+    return {
+      tipo: 'exito',
+      titulo: resultado.titulo || 'Ración autorizada',
+      detalle: resultado.detalle || '',
+    };
+  }
+  return {
+    tipo: 'rechazo',
+    titulo: resultado?.titulo || 'Marcación rechazada',
+    detalle: resultado?.detalle || '',
+  };
+}
+
+/**
+ * Ejecuta la autorización manual gestionando estado, avisos y recarga:
+ * - Si es válido, emite aviso de éxito, limpia el comensal seleccionado y notifica éxito.
+ * - Si es rechazo del servidor (200 con valido: false), emite aviso de rechazo y NO limpia la selección.
+ * - En cualquier caso, recarga los datos desde la API.
+ */
+export async function ejecutarAutorizacionManual({
+  marcacion,
+  usuarioId,
+  autorizarFn = autorizarMarcacionManual,
+  cargarDatosFn,
+  setAvisoAccion,
+  setComensalElegido,
+  setAutorizandoId,
+  onMarcacionExitosa,
+}) {
+  if (!marcacion || marcacion.motivo === 'sin_derecho') {
+    // Regla obligatoria: sin_derecho no hace ninguna petición
+    return;
+  }
+  const idNumero = Number(usuarioId);
+  if (!Number.isInteger(idNumero) || idNumero <= 0) return;
+
+  setAutorizandoId?.(marcacion.id);
+  setAvisoAccion?.(null);
+  try {
+    const resultado = await autorizarFn(idNumero);
+    const aviso = resolverAvisoAutorizacion(resultado);
+    setAvisoAccion?.(aviso);
+
+    if (resultado?.valido) {
+      setComensalElegido?.((prev) => {
+        const copia = { ...prev };
+        delete copia[marcacion.id];
+        return copia;
+      });
+      onMarcacionExitosa?.();
+    }
+  } catch (err) {
+    setAvisoAccion?.({
+      tipo: 'error',
+      titulo: 'Error al autorizar',
+      detalle: err.message,
+    });
+  } finally {
+    setAutorizandoId?.(null);
+    await cargarDatosFn?.();
+  }
+}
+
+/**
+ * Programa el ciclo de vida del refresco de supervisión:
+ * - Realiza una carga inicial inmediata ({ esRefresco: false }).
+ * - Programa un refresco cada intervaloMs ({ esRefresco: true }) con AbortController nuevo.
+ * - Devuelve la función de limpieza que cancela el intervalo y aborta peticiones en vuelo.
+ */
+export function programarRefrescoSupervision({ cargarDatos, intervaloMs = 30000 }) {
+  let controlador = new AbortController();
+
+  cargarDatos({ signal: controlador.signal, esRefresco: false });
+
+  const intervalo = setInterval(() => {
+    controlador.abort();
+    controlador = new AbortController();
+    cargarDatos({ signal: controlador.signal, esRefresco: true });
+  }, intervaloMs);
+
+  return function cancelar() {
+    clearInterval(intervalo);
+    controlador.abort();
+  };
+}
+
+/**
  * Sección de Supervisión del Comedor (para jefa de nutrición y sistemas).
  *
  * Estructura en este orden exacto:
@@ -37,11 +129,17 @@ export default function Supervision({
   errorInicial = null,
   resumenInicial = [],
   marcacionesIniciales = [],
+  avisoAccionInicial = null,
+  fueraDeHorarioInicial = false,
 }) {
   const [cargando, setCargando] = useState(cargandoInicial);
+  const [actualizando, setActualizando] = useState(false);
   const [error, setError] = useState(errorInicial);
   const [resumenComidas, setResumenComidas] = useState(resumenInicial);
   const [marcaciones, setMarcaciones] = useState(marcacionesIniciales);
+  const [fueraDeHorario, setFueraDeHorario] = useState(
+    fueraDeHorarioInicial || Boolean(resumenInicial?.fueraDeHorario)
+  );
 
   /* Filtros del feed */
   const [filtroComidaId, setFiltroComidaId] = useState(null);
@@ -51,11 +149,15 @@ export default function Supervision({
   /* Comensal seleccionado para autorizar cada rechazo no_identificado { [marcacionId]: comensalId } */
   const [comensalElegido, setComensalElegido] = useState({});
   const [autorizandoId, setAutorizandoId] = useState(null);
-  const [errorAccion, setErrorAccion] = useState(null);
+  const [avisoAccion, setAvisoAccion] = useState(avisoAccionInicial);
 
-  const cargarDatos = useCallback(async (signal) => {
-    setCargando(true);
-    setError(null);
+  const cargarDatos = useCallback(async ({ signal, esRefresco = false } = {}) => {
+    if (!esRefresco) {
+      setCargando(true);
+      setError(null);
+    } else {
+      setActualizando(true);
+    }
     try {
       const [resumen, ultimas] = await Promise.all([
         obtenerResumenComidas({ fecha, hoy, signal }),
@@ -64,50 +166,50 @@ export default function Supervision({
       if (!signal?.aborted) {
         setResumenComidas(resumen);
         setMarcaciones(ultimas);
+        setFueraDeHorario(Boolean(resumen?.fueraDeHorario));
       }
     } catch (err) {
       if (!signal?.aborted) {
-        setError(err.message);
+        if (!esRefresco) {
+          setError(err.message);
+        } else {
+          setAvisoAccion({
+            tipo: 'error',
+            titulo: 'No se pudo actualizar',
+            detalle: err.message,
+          });
+        }
       }
     } finally {
       if (!signal?.aborted) {
-        setCargando(false);
+        if (!esRefresco) {
+          setCargando(false);
+        } else {
+          setActualizando(false);
+        }
       }
     }
   }, [fecha, hoy]);
 
   useEffect(() => {
-    const controlador = new AbortController();
-    cargarDatos(controlador.signal);
-    return () => controlador.abort();
+    return programarRefrescoSupervision({
+      cargarDatos,
+      intervaloMs: 30000,
+    });
   }, [cargarDatos, versionReloj]);
 
   /* Acción exclusiva de rechazos no identificados */
   async function manejarAutorizarManual(marcacion, usuarioId) {
-    if (!marcacion || marcacion.motivo === 'sin_derecho') {
-      // Regla obligatoria: sin_derecho no hace ninguna petición
-      return;
-    }
-    const idNumero = Number(usuarioId);
-    if (!Number.isInteger(idNumero) || idNumero <= 0) return;
-
-    setAutorizandoId(marcacion.id);
-    setErrorAccion(null);
-    try {
-      await autorizarMarcacionManual(idNumero);
-      // Tras autorizar, recargar datos desde el servidor para mostrar la hora que devuelve la API
-      await cargarDatos();
-      onMarcacionExitosa?.();
-      setComensalElegido((prev) => {
-        const copia = { ...prev };
-        delete copia[marcacion.id];
-        return copia;
-      });
-    } catch (err) {
-      setErrorAccion(err.message);
-    } finally {
-      setAutorizandoId(null);
-    }
+    await ejecutarAutorizacionManual({
+      marcacion,
+      usuarioId,
+      autorizarFn: autorizarMarcacionManual,
+      cargarDatosFn: () => cargarDatos({ esRefresco: true }),
+      setAvisoAccion,
+      setComensalElegido,
+      setAutorizandoId,
+      onMarcacionExitosa,
+    });
   }
 
   /* Agrupamiento de rechazos por motivo para la subsección (b) */
@@ -170,28 +272,104 @@ export default function Supervision({
   if (esVacioTotal) {
     return (
       <div className="supervision">
-        <p className="supervision__vacio" role="status">
-          No hay registros de supervisión para este día.
-        </p>
+        <div className="supervision__barra-superior">
+          <p className="supervision__vacio" role="status">
+            No hay registros de supervisión para este día.
+          </p>
+          <div className="supervision__acciones-barra">
+            <Boton
+              variante="secundario"
+              onClick={() => cargarDatos({ esRefresco: true })}
+              disabled={actualizando}
+            >
+              {actualizando ? 'Actualizando…' : 'Actualizar'}
+            </Boton>
+          </div>
+        </div>
+        {avisoAccion ? (
+          <div
+            className={`supervision__aviso-accion supervision__aviso-accion--${avisoAccion.tipo}`}
+            role={avisoAccion.tipo === 'exito' ? 'status' : 'alert'}
+          >
+            {avisoAccion.tipo === 'exito' ? (
+              <span className="supervision__aviso-icono" aria-hidden="true">
+                <IconoCheck tamano={18} />
+              </span>
+            ) : (
+              <span className="supervision__aviso-icono" aria-hidden="true">
+                <IconoAlerta tamano={18} />
+              </span>
+            )}
+            <div className="supervision__aviso-contenido">
+              <strong className="supervision__aviso-titulo">{avisoAccion.titulo}</strong>
+              {avisoAccion.detalle ? (
+                <p className="supervision__aviso-detalle">{avisoAccion.detalle}</p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              className="supervision__aviso-cerrar"
+              onClick={() => setAvisoAccion(null)}
+              aria-label="Cerrar aviso"
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   }
 
   return (
     <div className="supervision">
-      {/* Indicador de simulación si aplica; el reloj completo vive en el header */}
-      {simulacion ? (
-        <aside className="supervision__simulacion-aviso" role="status">
-          <Etiqueta tono="aviso">Modo simulación</Etiqueta>
-          <span>Supervisión basada en el reloj del servidor.</span>
-        </aside>
-      ) : null}
+      {/* Barra superior con simulación y botón de actualización visible */}
+      <div className="supervision__barra-superior">
+        {simulacion ? (
+          <aside className="supervision__simulacion-aviso" role="status">
+            <Etiqueta tono="aviso">Modo simulación</Etiqueta>
+            <span>Supervisión basada en el reloj del servidor.</span>
+          </aside>
+        ) : <div />}
 
-      {errorAccion ? (
-        <div className="supervision__error-accion" role="alert">
-          <IconoAlerta tamano={18} />
-          <span>{errorAccion}</span>
-          <button type="button" onClick={() => setErrorAccion(null)} aria-label="Cerrar error">×</button>
+        <div className="supervision__acciones-barra">
+          <Boton
+            variante="secundario"
+            onClick={() => cargarDatos({ esRefresco: true })}
+            disabled={actualizando}
+          >
+            {actualizando ? 'Actualizando…' : 'Actualizar'}
+          </Boton>
+        </div>
+      </div>
+
+      {avisoAccion ? (
+        <div
+          className={`supervision__aviso-accion supervision__aviso-accion--${avisoAccion.tipo}`}
+          role={avisoAccion.tipo === 'exito' ? 'status' : 'alert'}
+        >
+          {avisoAccion.tipo === 'exito' ? (
+            <span className="supervision__aviso-icono" aria-hidden="true">
+              <IconoCheck tamano={18} />
+            </span>
+          ) : (
+            <span className="supervision__aviso-icono" aria-hidden="true">
+              <IconoAlerta tamano={18} />
+            </span>
+          )}
+          <div className="supervision__aviso-contenido">
+            <strong className="supervision__aviso-titulo">{avisoAccion.titulo}</strong>
+            {avisoAccion.detalle ? (
+              <p className="supervision__aviso-detalle">{avisoAccion.detalle}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="supervision__aviso-cerrar"
+            onClick={() => setAvisoAccion(null)}
+            aria-label="Cerrar aviso"
+          >
+            ×
+          </button>
         </div>
       ) : null}
 
@@ -200,10 +378,17 @@ export default function Supervision({
           ----------------------------------------------------------- */}
       <section className="supervision__seccion" aria-label="Comidas del día">
         <header className="supervision__seccion-cabecera">
-          <h2 className="supervision__seccion-titulo">Comidas del día</h2>
-          <span className="supervision__seccion-ayuda">
-            Seleccione una comida para filtrar el hilo inferior
-          </span>
+          <div>
+            <h2 className="supervision__seccion-titulo">Comidas del día</h2>
+            <span className="supervision__seccion-ayuda">
+              Seleccione una comida para filtrar el hilo inferior
+            </span>
+          </div>
+          {fueraDeHorario ? (
+            <div className="supervision__aviso-fuera-horario">
+              <Etiqueta tono="aviso">Fuera de horario</Etiqueta>
+            </div>
+          ) : null}
         </header>
 
         {resumenComidas.length === 0 ? (
