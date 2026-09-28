@@ -11,7 +11,7 @@ from app.consultas import pantalla as consultas
 from app.core import reloj
 from app.core.db import SesionDep
 from app.esquemas.historial import ComensalDelDia, ComidaListada, HistorialDiario
-from app.esquemas.pantalla import EstadoPantalla, Marcacion
+from app.esquemas.pantalla import ComidasDelDia, EstadoPantalla, Marcacion
 from app.modelos.heredados import Comensal
 
 router = APIRouter(prefix="/pantalla", tags=["pantalla en vivo"])
@@ -75,6 +75,26 @@ def ultimas_marcaciones(
             sesion, fecha=fecha, comida_id=comida_id, limite=limite
         )
     ]
+
+
+@router.get(
+    "/comidas-del-dia",
+    response_model=ComidasDelDia,
+    summary="Las comidas del día, con su avance",
+)
+def comidas_del_dia(
+    sesion: SesionDep,
+    fecha: Annotated[
+        date | None,
+        Query(description="Fecha a consultar. Por defecto hoy."),
+    ] = None,
+) -> ComidasDelDia:
+    """Una fila por comida vigente: previstas, servidas, manuales y rechazos.
+
+    Solo lectura, para la supervisión del día. El estado de cada franja sale
+    del reloj del servidor: nunca se acepta hora del cliente.
+    """
+    return ComidasDelDia(**asdict(consultas.comidas_del_dia(sesion, fecha=fecha)))
 
 
 @router.get(
