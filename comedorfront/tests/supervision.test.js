@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import Header from '../src/components/layout/Header.jsx';
-import Supervision from '../src/components/secciones/Supervision.jsx';
+import Supervision, {
+  ejecutarAutorizacionManual,
+  programarRefrescoSupervision,
+} from '../src/components/secciones/Supervision.jsx';
 import {
   autorizarMarcacionManual,
   obtenerResumenComidas,
@@ -520,3 +523,265 @@ test('el header de vivo de la cocinera se dibuja igual que antes, y en supervisi
   // No renderiza la pastilla separada de fecha de calendario (no repite la fecha)
   assert.doesNotMatch(htmlSupervision, /2020/);
 });
+
+// -------------------------------------------------------------
+// 9. Respuesta de autorizar manual (éxito y rechazo de negocio)
+// -------------------------------------------------------------
+test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el rechazo y no el éxito, y conserva selección', async () => {
+  let recargado = false;
+  let exitoNotificado = false;
+  let comensalEstado = { 101: '42' };
+  let avisoRecibido = null;
+
+  const respuestaRechazo = {
+    valido: false,
+    motivo: 'duplicado',
+    titulo: 'Ya recibió su comida',
+    detalle: 'Comensal ya almorzó a las 12:15',
+  };
+
+  await ejecutarAutorizacionManual({
+    marcacion: { id: 101, motivo: 'no_identificado' },
+    usuarioId: 42,
+    autorizarFn: async () => respuestaRechazo,
+    cargarDatosFn: async () => { recargado = true; },
+    setAvisoAccion: (aviso) => { avisoRecibido = aviso; },
+    setComensalElegido: (fn) => { comensalEstado = fn(comensalEstado); },
+    setAutorizandoId: () => {},
+    onMarcacionExitosa: () => { exitoNotificado = true; },
+  });
+
+  // Emite aviso de rechazo con titulo y detalle del servidor
+  assert.deepEqual(avisoRecibido, {
+    tipo: 'rechazo',
+    titulo: 'Ya recibió su comida',
+    detalle: 'Comensal ya almorzó a las 12:15',
+  });
+  // NO limpia la selección del comensal
+  assert.equal(comensalEstado[101], '42');
+  // NO notifica marcación exitosa
+  assert.equal(exitoNotificado, false);
+  // Recarga siempre después
+  assert.equal(recargado, true);
+
+  // Render en UI: muestra aviso de rechazo y no el de éxito
+  const html = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      resumenInicial: [],
+      marcacionesIniciales: [{ id: 101, motivo: 'no_identificado', valido: false, hora: '12:00' }],
+      avisoAccionInicial: avisoRecibido,
+    })
+  );
+  assert.match(html, /Ya recibió su comida/);
+  assert.match(html, /Comensal ya almorzó a las 12:15/);
+  assert.match(html, /supervision__aviso-accion--rechazo/);
+  assert.doesNotMatch(html, /supervision__aviso-accion--exito/);
+});
+
+test('autorizar con respuesta { valido: true } muestra el éxito y limpia la selección', async () => {
+  let recargado = false;
+  let exitoNotificado = false;
+  let comensalEstado = { 101: '42' };
+  let avisoRecibido = null;
+
+  const respuestaExito = {
+    valido: true,
+    motivo: 'ok',
+    titulo: 'Ración autorizada',
+    detalle: 'Comensal habilitado para Almuerzo',
+  };
+
+  await ejecutarAutorizacionManual({
+    marcacion: { id: 101, motivo: 'no_identificado' },
+    usuarioId: 42,
+    autorizarFn: async () => respuestaExito,
+    cargarDatosFn: async () => { recargado = true; },
+    setAvisoAccion: (aviso) => { avisoRecibido = aviso; },
+    setComensalElegido: (fn) => { comensalEstado = fn(comensalEstado); },
+    setAutorizandoId: () => {},
+    onMarcacionExitosa: () => { exitoNotificado = true; },
+  });
+
+  // Emite aviso de éxito con titulo y detalle
+  assert.deepEqual(avisoRecibido, {
+    tipo: 'exito',
+    titulo: 'Ración autorizada',
+    detalle: 'Comensal habilitado para Almuerzo',
+  });
+  // Limpia la selección del comensal
+  assert.equal(comensalEstado[101], undefined);
+  // Notifica éxito
+  assert.equal(exitoNotificado, true);
+  // Recarga siempre después
+  assert.equal(recargado, true);
+
+  // Render en UI: muestra aviso de éxito y no el de rechazo
+  const html = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      resumenInicial: [],
+      marcacionesIniciales: [],
+      avisoAccionInicial: avisoRecibido,
+    })
+  );
+  assert.match(html, /Ración autorizada/);
+  assert.match(html, /Comensal habilitado para Almuerzo/);
+  assert.match(html, /supervision__aviso-accion--exito/);
+  assert.doesNotMatch(html, /supervision__aviso-accion--rechazo/);
+});
+
+// -------------------------------------------------------------
+// 10. Refresco automático y botón Actualizar
+// -------------------------------------------------------------
+test('refresco automático cada 30s programa carga inicial, refrescos y cancela al desmontar', () => {
+  const llamadas = [];
+  let limpiadoIntervaloId = null;
+  let intervalCallback = null;
+
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+
+  globalThis.setInterval = (fn, ms) => {
+    assert.equal(ms, 30000, 'El intervalo debe ser de 30 segundos');
+    intervalCallback = fn;
+    return 777;
+  };
+  globalThis.clearInterval = (id) => {
+    limpiadoIntervaloId = id;
+  };
+
+  try {
+    const cancelar = programarRefrescoSupervision({
+      cargarDatos: ({ signal, esRefresco }) => {
+        llamadas.push({ signal, esRefresco });
+      },
+      intervaloMs: 30000,
+    });
+
+    // 1. Carga inicial inmediata con esRefresco: false
+    assert.equal(llamadas.length, 1);
+    assert.equal(llamadas[0].esRefresco, false);
+    assert.equal(llamadas[0].signal.aborted, false);
+
+    // 2. Disparo de un tick del intervalo: debe abortar el anterior y llamar con esRefresco: true
+    intervalCallback();
+    assert.equal(llamadas.length, 2);
+    assert.equal(llamadas[1].esRefresco, true);
+    assert.equal(llamadas[0].signal.aborted, true, 'El controlador previo debe abortarse');
+    assert.equal(llamadas[1].signal.aborted, false);
+
+    // 3. Desmontar / cancelar: limpia intervalo y aborta el controlador activo
+    cancelar();
+    assert.equal(limpiadoIntervaloId, 777, 'Debe llamar a clearInterval con el ID del intervalo');
+    assert.equal(llamadas[1].signal.aborted, true, 'El controlador activo debe abortarse al cancelar');
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+test('botón Actualizar visible en la sección de Supervisión (vista normal y vacía)', () => {
+  // En vista con datos
+  const htmlConDatos = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      resumenInicial: [{ comidaId: 1, comida: 'Desayuno', servidas: 10, rechazos: 0, rechazosTruncados: false, estado: '—' }],
+      marcacionesIniciales: [],
+    })
+  );
+  assert.match(htmlConDatos, /Actualizar/);
+  assert.match(htmlConDatos, /supervision__acciones-barra/);
+
+  // En vista vacía
+  const htmlVacio = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      resumenInicial: [],
+      marcacionesIniciales: [],
+    })
+  );
+  assert.match(htmlVacio, /Actualizar/);
+  assert.match(htmlVacio, /No hay registros de supervisión para este día/);
+});
+
+// -------------------------------------------------------------
+// 11. Fuera de horario cuando comida es null
+// -------------------------------------------------------------
+test('cuando /pantalla/estado viene con fuera_de_horario=true y comida null, muestra aviso en cabecera de tarjetas', async () => {
+  globalThis.fetch = async (ruta) => {
+    const url = new URL(ruta);
+    if (url.pathname === '/pantalla/estado') {
+      return json({
+        momento: '2026-09-28T05:00:00',
+        fecha_comida: '2026-09-28',
+        comida_id: null,
+        comida: null,
+        fuera_de_horario: true,
+        cupo: null,
+        padron: 200,
+        totales_del_dia: { raciones_servidas: 0, lecturas: 0, aceptadas: 0, rechazadas: 0 },
+        por_categoria: [],
+      });
+    }
+    if (url.pathname === '/reportes/informe') {
+      return json({
+        tipo: 'informe',
+        gestion: 2026,
+        mes: 9,
+        desde: '2026-09-28',
+        hasta: '2026-09-28',
+        situacion: 'curso',
+        cerrado: false,
+        categorias: ['Planta'],
+        filas: [
+          { etiqueta: 'Desayuno', celdas: [0], total: 0, registrado: true },
+          { etiqueta: 'Almuerzo', celdas: [0], total: 0, registrado: true },
+        ],
+        totales_por_categoria: [0],
+        total_general: 0,
+        sin_clasificar: 0,
+        sin_coeficiente: 0,
+        grupos: [],
+      });
+    }
+    if (url.pathname === '/historial/diario') {
+      return json({
+        total: 0,
+        limite: 1,
+        desplazamiento: 0,
+        comidas: [
+          { comida_id: 1, codigo: 'DES', nombre: 'Desayuno' },
+          { comida_id: 2, codigo: 'ALM', nombre: 'Almuerzo' },
+        ],
+        datos: [],
+      });
+    }
+    if (url.pathname === '/pantalla/ultimas-marcaciones') {
+      return json([]);
+    }
+    throw new Error(`Ruta inesperada: ${url.pathname}`);
+  };
+
+  const resumen = await obtenerResumenComidas({ fecha: '2026-09-28' });
+  assert.equal(resumen.length, 2);
+  assert.equal(resumen[0].estado, '—');
+  assert.equal(resumen[1].estado, '—');
+  assert.equal(resumen.fueraDeHorario, true, 'El adaptador debe marcar fueraDeHorario como true');
+
+  // En el render del componente:
+  const html = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      resumenInicial: resumen,
+      marcacionesIniciales: [],
+      fueraDeHorarioInicial: resumen.fueraDeHorario,
+    })
+  );
+
+  assert.match(html, /Comidas del día/);
+  // Aviso "Fuera de horario" presente en la cabecera de las tarjetas
+  assert.match(html, /supervision__aviso-fuera-horario/);
+  assert.match(html, /Fuera de horario/);
+});
+
