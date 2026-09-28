@@ -38,17 +38,19 @@ const ACTIVA_JEFA = { fase: 'activa', rol: 'jefa', usuario: 'ntarifa', aviso: nu
 
 test('guardia por rol: cocinera 1 sección, jefa y sistemas 4, rol desconocido ninguna', () => {
   assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
-  assert.deepEqual(seccionesPermitidas('jefa'), ['vivo', 'dashboard', 'historial', 'reportes']);
-  assert.deepEqual(seccionesPermitidas('sistemas'), ['vivo', 'dashboard', 'historial', 'reportes']);
+  assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes']);
+  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes']);
   assert.deepEqual(seccionesPermitidas(' Jefa '), seccionesPermitidas('jefa'));
   for (const rol of ['nutricionista', '', null, undefined, 42]) {
     assert.deepEqual(seccionesPermitidas(rol), [], `rol ${rol} debe negarse por defecto`);
     assert.equal(seccionInicialDeRol(rol), null);
   }
-  for (const id of ['dashboard', 'historial', 'reportes', 'inexistente']) {
+  for (const id of ['supervision', 'dashboard', 'historial', 'reportes', 'inexistente']) {
     assert.equal(puedeVerSeccion('cocinera', id), false, `cocinera no ve ${id}`);
   }
   assert.equal(puedeVerSeccion('cocinera', 'vivo'), true);
+  assert.equal(puedeVerSeccion('jefa', 'vivo'), false);
+  assert.equal(puedeVerSeccion('jefa', 'supervision'), true);
   assert.equal(puedeVerSeccion('jefa', 'reportes'), true);
 });
 
@@ -62,9 +64,12 @@ test('el modo manual se oculta a la cocinera y solo a ella', () => {
 test('redirect cocinera: la sección que dejó la jefa en la PC compartida la manda a Control Biométrico', () => {
   assert.equal(resolverSeccionGuardada('cocinera', 'reportes'), 'vivo');
   assert.equal(resolverSeccionGuardada('cocinera', 'historial'), 'vivo');
+  assert.equal(resolverSeccionGuardada('cocinera', 'supervision'), 'vivo');
   assert.equal(resolverSeccionGuardada('cocinera', null), 'vivo');
   assert.equal(resolverSeccionGuardada('jefa', 'reportes'), 'reportes');
-  assert.equal(resolverSeccionGuardada('jefa', 'basura'), 'vivo');
+  assert.equal(resolverSeccionGuardada('jefa', 'vivo'), 'supervision');
+  assert.equal(resolverSeccionGuardada('sistemas', 'vivo'), 'supervision');
+  assert.equal(resolverSeccionGuardada('jefa', 'basura'), 'supervision');
   assert.equal(resolverSeccionGuardada('nutricionista', 'reportes'), null);
 });
 

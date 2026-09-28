@@ -2,6 +2,7 @@ import {
   IconoDashboard,
   IconoHistorial,
   IconoHuella,
+  IconoOjo,
   IconoReportes,
 } from './components/ui/Iconos.jsx';
 import { resolverSeccionGuardada, seccionInicialDeRol, seccionesPermitidas } from './permisos.js';
@@ -20,6 +21,13 @@ export const SECCIONES = [
     titulo: 'Control Biométrico',
     descripcion: 'Marcaciones en vivo',
     Icono: IconoHuella,
+  },
+  {
+    id: 'supervision',
+    etiqueta: 'Supervisión',
+    titulo: 'Supervisión del comedor',
+    descripcion: 'Control y supervisión del comedor',
+    Icono: IconoOjo,
   },
   {
     id: 'dashboard',
