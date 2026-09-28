@@ -4,6 +4,8 @@ import Header from './components/layout/Header.jsx';
 import Sidebar from './components/layout/Sidebar.jsx';
 import PantallaEnVivo from './components/secciones/PantallaEnVivo.jsx';
 import SimuladorLector from './components/secciones/SimuladorLector.jsx';
+import ControlesReloj from './components/secciones/ControlesReloj.jsx';
+import Supervision from './components/secciones/Supervision.jsx';
 import Dashboard from './components/secciones/Dashboard.jsx';
 import Reportes from './components/secciones/Reportes.jsx';
 import Historial from './components/secciones/Historial.jsx';
@@ -270,6 +272,9 @@ function Panel({ rol }) {
             onCambioReloj={manejarCambioReloj}
           />
         ) : null}
+        {permitida && seccionActiva === 'supervision' && operaReloj ? (
+          <ControlesReloj reloj={reloj} onCambio={manejarCambioReloj} />
+        ) : null}
       </Header>
 
       <main className={`app__main${esPantallaEnVivo ? ' app__main--sin-scroll' : ''}`}>
@@ -311,6 +316,18 @@ function Panel({ rol }) {
               onMarcarManual={puedeMarcarManual(rol) ? manejarMarcacionManual : null}
               fechaServidor={reloj ? diaServidor : undefined}
               versionReloj={versionReloj}
+            />
+          ) : null}
+
+          {permitida && seccionActiva === 'supervision' ? (
+            <Supervision
+              key={diaServidor}
+              fecha={reloj ? diaServidor : undefined}
+              hoy={ahoraServidor}
+              simulacion={reloj}
+              personal={estado.personal}
+              versionReloj={versionReloj}
+              onMarcacionExitosa={() => recargarEstado({ conservar: true })}
             />
           ) : null}
 
