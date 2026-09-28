@@ -1111,7 +1111,7 @@ export async function obtenerResumenComidas({ fecha, hoy, signal } = {}) {
   const catalogoComidas = paginaHistorial?.comidas ?? [];
   const filasInforme = informe?.filas ?? [];
 
-  return await Promise.all(
+  const resultado = await Promise.all(
     filasInforme.map(async (fila) => {
       const etiquetaFila = (fila.tiempo ?? fila.etiqueta ?? '').trim();
       const nombreNorm = etiquetaFila.toLowerCase();
@@ -1159,6 +1159,9 @@ export async function obtenerResumenComidas({ fecha, hoy, signal } = {}) {
       };
     })
   );
+
+  resultado.fueraDeHorario = Boolean(estadoPantalla?.fuera_de_horario);
+  return resultado;
 }
 
 /**
