@@ -41,25 +41,73 @@
   margin: 0;
 }
 
-.supervision__error-accion {
+.supervision__aviso-accion {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--e-3);
   padding: var(--e-3) var(--e-4);
-  background: var(--c-error-tenue);
-  border: 1px solid var(--c-error);
   border-radius: var(--r-sm);
-  color: var(--c-error);
   font-size: var(--t-sm);
+  animation: supervision-aparecer 0.2s ease;
 }
 
-.supervision__error-accion button {
+.supervision__aviso-accion--exito {
+  background: var(--c-exito-tenue);
+  border: 1px solid var(--c-exito);
+  color: var(--c-exito);
+}
+
+.supervision__aviso-accion--rechazo,
+.supervision__aviso-accion--error {
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  color: var(--c-error);
+}
+
+.supervision__aviso-icono {
+  display: inline-flex;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.supervision__aviso-contenido {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.supervision__aviso-titulo {
+  font-weight: 700;
+}
+
+.supervision__aviso-detalle {
+  margin: 0;
+  opacity: 0.95;
+}
+
+.supervision__aviso-cerrar {
   margin-left: auto;
   background: transparent;
   border: 0;
-  color: var(--c-error);
+  color: currentColor;
   font-size: 1.25rem;
+  line-height: 1;
   cursor: pointer;
+}
+
+.supervision__barra-superior {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  flex-wrap: wrap;
+}
+
+.supervision__acciones-barra {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  margin-left: auto;
 }
 
 .supervision__simulacion-aviso {
@@ -72,6 +120,11 @@
   border-radius: var(--r-md);
   color: var(--c-texto);
   font-size: var(--t-sm);
+}
+
+.supervision__aviso-fuera-horario {
+  display: flex;
+  align-items: center;
 }
 
 /* -------------------------------------------------------------
