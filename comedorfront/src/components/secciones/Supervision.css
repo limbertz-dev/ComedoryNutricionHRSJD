@@ -1,0 +1,514 @@
+/*
+ * Supervision.css — Estilos para la sección de Supervisión.
+ *
+ * Utiliza estrictamente la paleta de tokens.css:
+ * variables de superficie, acento, estados y tipografía Nunito.
+ */
+
+.supervision {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-6);
+  padding: 0 4px var(--e-7);
+}
+
+.supervision__estado,
+.supervision__vacio {
+  margin: var(--e-4) 0;
+  padding: var(--e-5);
+  background: var(--c-superficie);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-lg);
+  color: var(--c-texto-2);
+  font-size: var(--t-base);
+  text-align: center;
+}
+
+.supervision__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  padding: var(--e-4) var(--e-5);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  border-radius: var(--r-md);
+  color: var(--c-error);
+  font-weight: 600;
+}
+
+.supervision__error p {
+  margin: 0;
+}
+
+.supervision__error-accion {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  padding: var(--e-3) var(--e-4);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  border-radius: var(--r-sm);
+  color: var(--c-error);
+  font-size: var(--t-sm);
+}
+
+.supervision__error-accion button {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: var(--c-error);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.supervision__simulacion-aviso {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-3);
+  padding: var(--e-2) var(--e-4);
+  background: var(--c-aviso-tenue);
+  border: 1px solid var(--c-aviso);
+  border-radius: var(--r-md);
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+}
+
+/* -------------------------------------------------------------
+   Secciones y Cabeceras
+   ------------------------------------------------------------- */
+.supervision__seccion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+}
+
+.supervision__seccion-cabecera {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--e-4);
+  flex-wrap: wrap;
+}
+
+.supervision__seccion-titulo {
+  color: var(--c-texto);
+  font-size: var(--t-lg);
+  font-weight: 800;
+  margin: 0;
+}
+
+.supervision__seccion-ayuda {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------
+   (a) Tarjetas por comida del día
+   ------------------------------------------------------------- */
+.supervision__comidas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--e-4);
+}
+
+.supervision__tarjeta-comida {
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.supervision__tarjeta-comida:hover {
+  transform: translateY(-2px);
+  border-color: var(--c-borde-tarjeta-activo);
+  box-shadow: 0 4px 12px rgba(18, 35, 61, 0.05);
+}
+
+.supervision__tarjeta-comida--activa {
+  border-color: var(--c-acento);
+  background: var(--c-acento-tenue);
+  box-shadow: 0 0 0 2px var(--c-acento-claro);
+}
+
+.supervision__tarjeta-comida--sin-filtro {
+  cursor: default;
+  opacity: 0.9;
+}
+
+.supervision__tarjeta-comida--sin-filtro:hover {
+  transform: none;
+  border-color: var(--c-borde);
+  box-shadow: none;
+}
+
+.supervision__metricas-comida {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  margin: var(--e-3) 0 var(--e-2);
+  padding: var(--e-2) 0;
+  border-top: 1px solid var(--c-borde);
+  border-bottom: 1px solid var(--c-borde);
+}
+
+.supervision__metrica {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--e-1);
+}
+
+.supervision__metrica-rotulo {
+  color: var(--c-texto-3);
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.supervision__metrica-valor {
+  color: var(--c-texto);
+  font-size: var(--t-xl);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.supervision__metrica-valor--error {
+  color: var(--c-error);
+}
+
+.supervision__filtro-indicador {
+  display: block;
+  text-align: right;
+  font-size: var(--t-xs);
+  color: var(--c-texto-2);
+  font-weight: 600;
+}
+
+.supervision__nota-sin-filtro {
+  margin: 0;
+  text-align: right;
+  font-size: var(--t-xs);
+  color: var(--c-texto-3);
+}
+
+/* -------------------------------------------------------------
+   (b) Rechazos por revisar (agrupados por motivo)
+   ------------------------------------------------------------- */
+.supervision__grupos-rechazos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+}
+
+.supervision__grupo-motivo {
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  padding: var(--e-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-3);
+}
+
+.supervision__grupo-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--e-2);
+  border-bottom: 1px solid var(--c-borde-suave);
+}
+
+.supervision__grupo-titulo {
+  color: var(--c-texto);
+  font-size: var(--t-base);
+  font-weight: 800;
+  margin: 0;
+}
+
+.supervision__grupo-conteo {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  background: var(--c-superficie-2);
+  padding: var(--e-1) var(--e-3);
+  border-radius: var(--r-full);
+}
+
+.supervision__lista-rechazos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+}
+
+.supervision__fila-rechazo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  padding: var(--e-3);
+  border: 1px solid var(--c-borde-suave);
+  border-radius: var(--r-md);
+  background: var(--c-superficie-2);
+  flex-wrap: wrap;
+}
+
+.supervision__rechazo-info {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  min-width: 240px;
+  flex: 1;
+}
+
+.supervision__rechazo-icono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--c-error-tenue);
+  color: var(--c-error);
+  flex-shrink: 0;
+}
+
+.supervision__rechazo-nombre {
+  display: block;
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+  font-weight: 700;
+}
+
+.supervision__rechazo-meta {
+  margin: var(--e-1) 0 0;
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+}
+
+.supervision__rechazo-accion {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+}
+
+.supervision__autorizar-caja {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+}
+
+.supervision__select-padron {
+  padding: 8px 12px;
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-sm);
+  background: var(--c-superficie);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  max-width: 280px;
+}
+
+.supervision__sin-derecho-caja {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--e-1);
+}
+
+.supervision__nota-pendiente {
+  color: var(--c-texto-3);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.supervision__rechazo-inmutable {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------
+   (c) Feed de SOLO LECTURA
+   ------------------------------------------------------------- */
+.supervision__feed-filtros {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.supervision__chips-filtro {
+  display: inline-flex;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  padding: 3px;
+  gap: 3px;
+}
+
+.supervision__chip {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-texto-2);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.supervision__chip--activo {
+  background: var(--gradiente-pildora-activa);
+  color: #ffffff;
+}
+
+.supervision__select-filtro {
+  padding: 7px 12px;
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  background: var(--c-superficie);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.supervision__buscador {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  min-width: 220px;
+}
+
+.supervision__buscador-icono {
+  position: absolute;
+  left: 10px;
+  color: var(--c-texto-3);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.supervision__buscador-input {
+  width: 100%;
+  padding: 7px 30px 7px 32px;
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  background: var(--c-superficie);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+}
+
+.supervision__buscador-limpiar {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: 0;
+  color: var(--c-texto-3);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.supervision__conteo-feed {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 700;
+}
+
+.supervision__feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+}
+
+.supervision__feed-item {
+  display: flex;
+  align-items: center;
+  gap: var(--e-4);
+  padding: var(--e-3) var(--e-4);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  transition: background-color 0.15s ease;
+}
+
+.supervision__feed-item:hover {
+  background: var(--c-superficie-2);
+}
+
+.supervision__feed-icono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  flex-shrink: 0;
+}
+
+.supervision__feed-item--exito .supervision__feed-icono {
+  background: var(--c-exito-tenue);
+  color: var(--c-exito);
+}
+
+.supervision__feed-item--error .supervision__feed-icono {
+  background: var(--c-error-tenue);
+  color: var(--c-error);
+}
+
+.supervision__feed-cuerpo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.supervision__feed-cabecera {
+  display: flex;
+  align-items: baseline;
+  gap: var(--e-3);
+}
+
+.supervision__feed-nombre {
+  color: var(--c-texto);
+  font-size: var(--t-base);
+  font-weight: 700;
+}
+
+.supervision__feed-hora {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.supervision__feed-detalle {
+  display: flex;
+  align-items: center;
+  gap: var(--e-2);
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  flex-wrap: wrap;
+}
+
+.supervision__feed-dispositivo {
+  color: var(--c-texto-3);
+  font-family: monospace;
+}
+
+.supervision__feed-estado {
+  flex-shrink: 0;
+}

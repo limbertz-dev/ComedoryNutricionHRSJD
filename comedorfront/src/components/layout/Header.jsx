@@ -26,6 +26,7 @@ const FORMATO_FECHA = new Intl.DateTimeFormat('es-BO', {
  */
 export default function Header({ seccion, turno, simulacion = null, children }) {
   const fecha = FORMATO_FECHA.format(simulacion ? simulacion.ahora : new Date());
+  const esSupervision = seccion?.id === 'supervision';
 
   return (
     <header className="header">
@@ -40,7 +41,7 @@ export default function Header({ seccion, turno, simulacion = null, children }) 
         {simulacion ? (
           <span className="header__pastilla header__pastilla--simulacion" role="status">
             <strong>Simulación</strong>
-            {textoDelReloj(simulacion)}
+            {esSupervision ? `${textoDelReloj(simulacion)} · ${fecha}` : textoDelReloj(simulacion)}
           </span>
         ) : null}
 
@@ -49,10 +50,12 @@ export default function Header({ seccion, turno, simulacion = null, children }) 
           Turno {turno}
         </span>
 
-        <span className="header__pastilla">
-          <IconoCalendario tamano={18} />
-          {fecha}
-        </span>
+        {!esSupervision || !simulacion ? (
+          <span className="header__pastilla">
+            <IconoCalendario tamano={18} />
+            {fecha}
+          </span>
+        ) : null}
       </div>
     </header>
   );
