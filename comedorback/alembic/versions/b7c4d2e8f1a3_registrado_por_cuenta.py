@@ -1,6 +1,6 @@
 """quien registro cada racion manual, desde el token
 
-Revision ID: b7c4d2e8f1a60
+Revision ID: b7c4d2e8f1a3
 Revises: 7e2b9c4d1a60
 Create Date: 2026-09-28
 
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import mysql
 
-revision: str = "b7c4d2e8f1a60"
+revision: str = "b7c4d2e8f1a3"
 down_revision: Union[str, Sequence[str], None] = "7e2b9c4d1a60"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
