@@ -41,7 +41,7 @@ export default function Header({ seccion, turno, simulacion = null, children }) 
         {simulacion ? (
           <span className="header__pastilla header__pastilla--simulacion" role="status">
             <strong>Simulación</strong>
-            {esSupervision ? `${textoDelReloj(simulacion)} · ${fecha}` : textoDelReloj(simulacion)}
+            {textoDelReloj(simulacion)}
           </span>
         ) : null}
 
