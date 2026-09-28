@@ -36,7 +36,7 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | marcarAsistencia | GET /personal/{id} + POST /asistencias | metodo biometrico desde el simulador del lector, manual desde el registro a mano |
 | obtenerEstadoPantalla | GET /pantalla/estado | Comida vigente, cupo, totales del día y gráfico |
 | obtenerUltimasMarcaciones | GET /pantalla/ultimas-marcaciones | Lecturas guardadas de hoy, incluidos los rechazos |
-| obtenerDiaPersonal | GET /historial/diario | Detalle del día de un comensal bajo la marcación |
+| obtenerDiaPersonal | GET /pantalla/dia-personal | Detalle del día de un comensal bajo la marcación |
 | obtenerHistorialDiarioPersonal | GET /historial/diario | Historial diario, 50 registros por página |
 | obtenerHistorialMensualPersonal | GET /historial/mensual | Totales mensuales, 50 registros por página |
 | obtenerInformeRaciones | GET /reportes/informe | Informe de Estadística por rango de fechas (Reportes) |

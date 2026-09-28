@@ -281,16 +281,35 @@ test('historial mensual conserva servicio del backend', async () => {
   assert.equal(pagina.datos[0].servicio, 'COLOPROCTOLOGIA');
 });
 
-test('busca el historial del comensal más allá de la primera página sin inventar turno', async () => {
-  const offsets = [];
+test('la ficha del día sale de /pantalla/dia-personal con fecha solo si se pide', async () => {
+  const rutas = [];
   globalThis.fetch = async (ruta) => {
-    const offset = Number(new URL(ruta).searchParams.get('desplazamiento'));
-    offsets.push(offset);
-    return json({ total: 2, limite: 200, desplazamiento: offset, comidas: columnas, datos: [filaDiaria(offset + 1)] });
+    const url = new URL(ruta);
+    rutas.push(url.pathname + url.search);
+    return json({ total: 1, limite: 1, desplazamiento: 0, comidas: columnas,
+      datos: [filaDiaria(Number(url.searchParams.get('persona_id')))] });
   };
-  assert.equal((await obtenerDiaPersonal(2)).id, 2);
-  assert.deepEqual(offsets, [0, 1]);
+  const ficha = await obtenerDiaPersonal(2);
+  await obtenerDiaPersonal(2, { fecha: '2026-09-05' });
+  await obtenerDiaPersonal(2, { fecha: new Date(2026, 7, 27, 12) });
+  assert.deepEqual(rutas, [
+    '/pantalla/dia-personal?persona_id=2',
+    '/pantalla/dia-personal?persona_id=2&fecha=2026-09-05',
+    '/pantalla/dia-personal?persona_id=2&fecha=2026-08-27',
+  ]);
+  assert.equal(ficha.id, 2);
+  assert.equal(ficha.turno, null);
+  assert.deepEqual(ficha.comidas.map(c => [c.id, c.aplica, c.estado]),
+    [[1, true, true], [2, true, false], [3, true, null], [4, false, null]]);
+});
+
+test('la ficha del día es null si ese día no figura o la persona no existe', async () => {
+  globalThis.fetch = async () => json({ total: 0, limite: 1, desplazamiento: 0, comidas: columnas, datos: [] });
   assert.equal(await obtenerDiaPersonal(3), null);
+  globalThis.fetch = async () => json({ detail: 'No existe ese comensal' }, 404);
+  assert.equal(await obtenerDiaPersonal(999), null);
+  globalThis.fetch = async () => json({}, 503);
+  await assert.rejects(obtenerDiaPersonal(3), /HTTP 503/);
 });
 
 test('historial vacío no genera datos y estados desconocidos producen error', async () => {
