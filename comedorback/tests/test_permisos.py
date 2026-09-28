@@ -18,6 +18,7 @@ TODOS = {"jefa", "cocinera", "sistemas"}
 MATRIZ = [
     ("GET", "/pantalla/estado", None, TODOS),
     ("GET", "/pantalla/ultimas-marcaciones", None, TODOS),
+    ("GET", "/pantalla/comidas-del-dia", None, TODOS),
     ("GET", "/pantalla/dia-personal?persona_id=1", None, TODOS),
     ("POST", "/asistencias", {"metodo": "biometrico"}, TODOS),
     ("POST", "/asistencias", {"metodo": "manual", "usuario_id": 1}, JEFATURA),
