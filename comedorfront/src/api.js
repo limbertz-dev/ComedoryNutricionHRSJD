@@ -1621,3 +1621,345 @@ export async function reiniciarClaveCuenta(id, { signal } = {}) {
 export function volverARelojReal({ signal } = {}) {
   return operarReloj('/simulacion/reloj', { method: 'DELETE', signal }, 'volver a la hora real');
 }
+
+/* ------------------------------------------------------------------ *
+ * Reglas del sistema (R2): horarios de comida y derecho a comer
+ *
+ * GET  /cuentas → [CuentaLecturaApi] (para la jefa; sin cuentas sistemas)
+ * GET  /reglas/derecho → {vigente, versiones}
+ * GET  /reglas/derecho/novedades → [str]
+ * POST /reglas/derecho {vigente_desde, duracion_minima_horas,
+ *   novedades_que_anulan, excluir_enfermeria, motivo} → 201 VersionApi
+ * DELETE /reglas/derecho/{id} → 204 (solo programadas)
+ * GET  /reglas/horarios?fecha= → [HorarioApi]
+ * GET  /reglas/horarios/historial?comida_id= → [HorarioApi]
+ * POST /reglas/horarios {comida_id, hora_inicio, hora_fin,
+ *   vigente_desde, motivo} → 201
+ * DELETE /reglas/horarios/{horario_id} → 204 (solo programados)
+ *
+ * VersionApi = {id, vigente_desde, duracion_minima_horas,
+ *   novedades_que_anulan, excluir_enfermeria, motivo, creada_por|null,
+ *   creada, estado: programada|vigente|anterior}
+ * HorarioApi = {horario_id, comida_id, comida, hora_inicio, hora_fin,
+ *   cruza_medianoche, vigente_desde, vigente_hasta|null, motivo|null,
+ *   creada_por|null}
+ * CuentaLecturaApi = {id, username, nombre|null, rol, activo,
+ *   debe_cambiar, ultimo_ingreso|null}
+ *
+ * El backend decide y valida; acá solo se adapta snake_case, se valida
+ * la forma y se traducen los motivos a español claro. Cada cambio es una
+ * versión nueva con "vigente desde" de hoy o futura, nunca hacia atrás.
+ * ------------------------------------------------------------------ */
+
+/** Motivos del backend con el texto que lee jefatura y sistemas. */
+const MOTIVOS_REGLAS = {
+  vigencia_en_el_pasado: 'La fecha elegida ya pasó. Elija hoy o un día futuro.',
+  horario_invalido: 'El horario no es válido. Revise la hora de inicio y la de fin.',
+  solapa_con_otra_comida: 'Ese horario se cruza con otra comida. Elija horas que no se solapen.',
+  version_en_esa_fecha: 'Ya hay un cambio programado para esa fecha.',
+  comida_inexistente: 'Esa comida ya no existe. Actualice la lista.',
+  version_inexistente: 'Esa versión ya no existe. Actualice la lista.',
+  version_ya_vigente: 'Esa versión ya está vigente y no se puede eliminar.',
+  motivo_obligatorio: 'Escriba el motivo del cambio.',
+};
+
+/** Texto claro del motivo, o null si no es un motivo conocido. */
+function mensajeDeMotivoReglas(motivo) {
+  return typeof motivo === 'string' ? MOTIVOS_REGLAS[motivo] ?? null : null;
+}
+
+/** Hora de la API: "11:30" o "11:30:00". */
+const HORA_API = /^\d{2}:\d{2}(:\d{2})?$/;
+
+const ESTADOS_VERSION = ['programada', 'vigente', 'anterior'];
+
+function adaptarVersionDerecho(dato) {
+  if (!Number.isInteger(dato?.id) || dato.id <= 0
+    || typeof dato.vigente_desde !== 'string' || !FECHA_API.test(dato.vigente_desde)
+    || !Number.isInteger(dato.duracion_minima_horas) || dato.duracion_minima_horas < 1
+    || dato.duracion_minima_horas > 48
+    || !Array.isArray(dato.novedades_que_anulan)
+    || dato.novedades_que_anulan.some((novedad) => typeof novedad !== 'string' || novedad.length === 0)
+    || typeof dato.excluir_enfermeria !== 'boolean'
+    || typeof dato.motivo !== 'string' || dato.motivo.length === 0
+    || !(dato.creada_por === null || typeof dato.creada_por === 'string')
+    || typeof dato.creada !== 'string' || dato.creada.length === 0
+    || !ESTADOS_VERSION.includes(dato.estado)) {
+    throw new Error('La API devolvió una versión de derecho inválida.');
+  }
+  return {
+    id: dato.id,
+    vigenteDesde: dato.vigente_desde,
+    duracionMinimaHoras: dato.duracion_minima_horas,
+    novedadesQueAnulan: [...dato.novedades_que_anulan],
+    excluirEnfermeria: dato.excluir_enfermeria,
+    motivo: dato.motivo,
+    creadaPor: dato.creada_por,
+    creada: dato.creada,
+    estado: dato.estado,
+  };
+}
+
+function adaptarHorario(dato) {
+  if (!Number.isInteger(dato?.horario_id) || dato.horario_id <= 0
+    || !Number.isInteger(dato.comida_id) || dato.comida_id <= 0
+    || typeof dato.comida !== 'string' || dato.comida.length === 0
+    || typeof dato.hora_inicio !== 'string' || !HORA_API.test(dato.hora_inicio)
+    || typeof dato.hora_fin !== 'string' || !HORA_API.test(dato.hora_fin)
+    || typeof dato.cruza_medianoche !== 'boolean'
+    || typeof dato.vigente_desde !== 'string' || !FECHA_API.test(dato.vigente_desde)
+    || !(dato.vigente_hasta === null
+      || (typeof dato.vigente_hasta === 'string' && FECHA_API.test(dato.vigente_hasta)))
+    || !(dato.motivo === null || typeof dato.motivo === 'string')
+    || !(dato.creada_por === null || typeof dato.creada_por === 'string')) {
+    throw new Error('La API devolvió un horario inválido.');
+  }
+  return {
+    horarioId: dato.horario_id,
+    comidaId: dato.comida_id,
+    comida: dato.comida,
+    horaInicio: dato.hora_inicio,
+    horaFin: dato.hora_fin,
+    cruzaMedianoche: dato.cruza_medianoche,
+    vigenteDesde: dato.vigente_desde,
+    vigenteHasta: dato.vigente_hasta,
+    motivo: dato.motivo,
+    creadaPor: dato.creada_por,
+  };
+}
+
+function adaptarCuentaLectura(dato) {
+  if (!Number.isInteger(dato?.id) || dato.id <= 0
+    || typeof dato.username !== 'string' || dato.username.length === 0
+    || !(dato.nombre === null || typeof dato.nombre === 'string')
+    || !ROLES_CUENTA.includes(dato.rol)
+    || typeof dato.activo !== 'boolean'
+    || typeof dato.debe_cambiar !== 'boolean'
+    || !(dato.ultimo_ingreso === null || typeof dato.ultimo_ingreso === 'string')) {
+    throw new Error('La API devolvió una cuenta inválida.');
+  }
+  return {
+    id: dato.id,
+    username: dato.username,
+    nombre: dato.nombre,
+    rol: dato.rol,
+    activo: dato.activo,
+    debeCambiar: dato.debe_cambiar,
+    ultimoIngreso: dato.ultimo_ingreso,
+  };
+}
+
+/** GET /cuentas: cuentas para la vista de solo lectura de la jefa. */
+export async function obtenerCuentasLectura({ signal } = {}) {
+  try {
+    const cuentas = await solicitarApi('/cuentas', { signal });
+    if (!Array.isArray(cuentas)) {
+      throw new Error('La API devolvió una lista de cuentas inválida.');
+    }
+    return cuentas.map(adaptarCuentaLectura);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar las cuentas. ${error.message}`);
+  }
+}
+
+/** GET /reglas/derecho: versión vigente y todas las versiones. */
+export async function obtenerReglasDerecho({ signal } = {}) {
+  try {
+    const dato = await solicitarApi('/reglas/derecho', { signal });
+    if (!dato || typeof dato !== 'object' || !Array.isArray(dato.versiones)) {
+      throw new Error('La API devolvió reglas de derecho inválidas.');
+    }
+    return {
+      vigente: adaptarVersionDerecho(dato.vigente),
+      versiones: dato.versiones.map(adaptarVersionDerecho),
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar las reglas de derecho. ${error.message}`);
+  }
+}
+
+/** GET /reglas/derecho/novedades: novedades que se pueden marcar. */
+export async function obtenerNovedadesDisponibles({ signal } = {}) {
+  try {
+    const novedades = await solicitarApi('/reglas/derecho/novedades', { signal });
+    if (!Array.isArray(novedades)
+      || novedades.some((novedad) => typeof novedad !== 'string' || novedad.length === 0)) {
+      throw new Error('La API devolvió novedades inválidas.');
+    }
+    return [...novedades];
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar las novedades. ${error.message}`);
+  }
+}
+
+/**
+ * POST /reglas/derecho: programa una versión nueva. Guía local (rango
+ * 1–48 h, motivo de 10+ caracteres); el servidor valida y decide.
+ */
+export async function programarReglasDerecho({
+  vigenteDesde,
+  duracionMinimaHoras,
+  novedadesQueAnulan = [],
+  excluirEnfermeria = false,
+  motivo,
+} = {}, { signal } = {}) {
+  if (typeof vigenteDesde !== 'string' || !FECHA_API.test(vigenteDesde)) {
+    throw new Error('Elija desde qué fecha rige la versión.');
+  }
+  if (!Number.isInteger(duracionMinimaHoras) || duracionMinimaHoras < 1 || duracionMinimaHoras > 48) {
+    throw new Error('El turno mínimo es de 1 a 48 horas.');
+  }
+  if (!Array.isArray(novedadesQueAnulan)
+    || novedadesQueAnulan.some((novedad) => typeof novedad !== 'string' || novedad.length === 0)) {
+    throw new Error('Las novedades elegidas no son válidas.');
+  }
+  if (typeof excluirEnfermeria !== 'boolean') {
+    throw new Error('La exclusión de enfermería no es válida.');
+  }
+  const motivoLimpio = typeof motivo === 'string' ? motivo.trim() : '';
+  if (motivoLimpio.length < 10) {
+    throw new Error('Escriba el motivo del cambio (10 caracteres o más).');
+  }
+  try {
+    return adaptarVersionDerecho(await solicitarApi('/reglas/derecho', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        vigente_desde: vigenteDesde,
+        duracion_minima_horas: duracionMinimaHoras,
+        novedades_que_anulan: novedadesQueAnulan,
+        excluir_enfermeria: excluirEnfermeria,
+        motivo: motivoLimpio,
+      }),
+      signal,
+    }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
+    if (mensaje) throw new Error(mensaje);
+    throw new Error(`No se pudo programar la versión. ${error.message}`);
+  }
+}
+
+/** DELETE /reglas/derecho/{id}: elimina una versión programada. */
+export async function eliminarReglasDerechoProgramadas(id, { signal } = {}) {
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error('Versión inválida.');
+  }
+  try {
+    await solicitarApi(`/reglas/derecho/${id}`, { method: 'DELETE', signal });
+    return null;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
+    if (mensaje) throw new Error(mensaje);
+    throw new Error(`No se pudo eliminar la versión. ${error.message}`);
+  }
+}
+
+/**
+ * GET /reglas/horarios: horarios que rigen. Sin `fecha` el servidor usa
+ * su hoy; con ella ("YYYY-MM-DD"), los de ese día.
+ */
+export async function obtenerHorariosVigentes({ fecha, signal } = {}) {
+  if (fecha !== undefined && (typeof fecha !== 'string' || !FECHA_API.test(fecha))) {
+    throw new Error('Fecha inválida para consultar los horarios.');
+  }
+  try {
+    const horarios = await solicitarApi(
+      `/reglas/horarios${fecha === undefined ? '' : `?fecha=${fecha}`}`,
+      { signal },
+    );
+    if (!Array.isArray(horarios)) {
+      throw new Error('La API devolvió horarios inválidos.');
+    }
+    return horarios.map(adaptarHorario);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar los horarios. ${error.message}`);
+  }
+}
+
+/** GET /reglas/horarios/historial: versiones de una comida, con programadas. */
+export async function obtenerHistorialHorario(comidaId, { signal } = {}) {
+  if (!Number.isInteger(comidaId) || comidaId <= 0) {
+    throw new Error('Comida inválida.');
+  }
+  try {
+    const versiones = await solicitarApi(`/reglas/horarios/historial?comida_id=${comidaId}`, { signal });
+    if (!Array.isArray(versiones)) {
+      throw new Error('La API devolvió un historial de horarios inválido.');
+    }
+    return versiones.map(adaptarHorario);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
+    if (mensaje) throw new Error(mensaje);
+    throw new Error(`No se pudo cargar el historial del horario. ${error.message}`);
+  }
+}
+
+/**
+ * POST /reglas/horarios: programa un horario nuevo desde una fecha.
+ * Guía local (horas, fecha, motivo); el servidor valida y decide.
+ */
+export async function programarHorario({
+  comidaId,
+  horaInicio,
+  horaFin,
+  vigenteDesde,
+  motivo,
+} = {}, { signal } = {}) {
+  if (!Number.isInteger(comidaId) || comidaId <= 0) {
+    throw new Error('Comida inválida.');
+  }
+  if (typeof horaInicio !== 'string' || !HORA_API.test(horaInicio)
+    || typeof horaFin !== 'string' || !HORA_API.test(horaFin)) {
+    throw new Error('Escriba la hora de inicio y la de fin.');
+  }
+  if (typeof vigenteDesde !== 'string' || !FECHA_API.test(vigenteDesde)) {
+    throw new Error('Elija desde qué fecha rige el horario.');
+  }
+  const motivoLimpio = typeof motivo === 'string' ? motivo.trim() : '';
+  if (!motivoLimpio) {
+    throw new Error(MOTIVOS_REGLAS.motivo_obligatorio);
+  }
+  try {
+    return adaptarHorario(await solicitarApi('/reglas/horarios', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        comida_id: comidaId,
+        hora_inicio: horaInicio,
+        hora_fin: horaFin,
+        vigente_desde: vigenteDesde,
+        motivo: motivoLimpio,
+      }),
+      signal,
+    }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
+    if (mensaje) throw new Error(mensaje);
+    throw new Error(`No se pudo programar el horario. ${error.message}`);
+  }
+}
+
+/** DELETE /reglas/horarios/{horario_id}: elimina un horario programado. */
+export async function eliminarHorarioProgramado(horarioId, { signal } = {}) {
+  if (!Number.isInteger(horarioId) || horarioId <= 0) {
+    throw new Error('Horario inválido.');
+  }
+  try {
+    await solicitarApi(`/reglas/horarios/${horarioId}`, { method: 'DELETE', signal });
+    return null;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
+    if (mensaje) throw new Error(mensaje);
+    throw new Error(`No se pudo eliminar el horario. ${error.message}`);
+  }
+}
