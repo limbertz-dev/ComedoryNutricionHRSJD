@@ -6,7 +6,16 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 import app.modelos  # noqa: F401  registra las tablas propias en Base.metadata
-from app.api import asistencias, auth, historial, pantalla, personal, reportes, simulacion
+from app.api import (
+    admin,
+    asistencias,
+    auth,
+    historial,
+    pantalla,
+    personal,
+    reportes,
+    simulacion,
+)
 from app.core import reloj
 from app.core.autorizacion import ErrorAuth, requiere_rol
 from app.core.config import config
@@ -112,6 +121,7 @@ def crear_app(entorno: str = config.entorno) -> FastAPI:
         (asistencias, "asistencias"),
         (historial, "historial"),
         (reportes, "reportes"),
+        (admin, "admin"),
     ]
     # Solo en simulación: en producción y desarrollo /simulacion/* da 404.
     if entorno == "simulacion":
