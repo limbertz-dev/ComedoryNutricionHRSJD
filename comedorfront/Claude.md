@@ -45,10 +45,15 @@ Secciones del sidebar (`src/navegacion.js`):
 5. **Reportes** — formulario de Estadística por rango de fechas (`GET /reportes/informe`)
    con exportación a Excel y PDF. «Reportes de pacientes» queda como pendiente hasta que
    exista ese módulo.
-6. **Administración de cuentas** — solo para sistemas: tabla de cuentas
+6. **Reglas del sistema** — solo para sistemas: pestañas Horarios de comida y
+   Derecho a comer para programar cambios con «vigente desde» (hoy o futuro) y
+   motivo; solo se elimina lo programado (`GET|POST|DELETE /reglas/*`).
+7. **Administración de cuentas** — solo para sistemas: tabla de cuentas
    (usuario, nombre, rol, vínculo, estado, último ingreso) con «Reiniciar
    clave» y «Desactivar»/«Reactivar» con confirmación; «Nueva cuenta» desde el
    padrón o sin vínculo (`GET|POST /admin/*`, clave temporal de un solo uso).
+8. **Cuentas** — solo lectura para la jefa: usuario, nombre, rol, estado y
+   último ingreso, sin las cuentas de sistemas (`GET /cuentas`).
 
 El acceso es real (`POST /auth/login`, `GET /auth/yo`, `POST /auth/cambio-password`): la
 sesión vive en `src/sesion.js` + `src/hooks/useSesion.js`, `api.js` firma cada petición con
@@ -56,9 +61,11 @@ sesión vive en `src/sesion.js` + `src/hooks/useSesion.js`, `api.js` firma cada 
 cambio obligatorio de contraseña. Qué ve cada rol está solo en `src/permisos.js`: la
 cocinera ve solo Control Biométrico, sin el «Modo manual», en pantalla completa con su
 panel flotante de sesión (usuario, rol, simulador del lector, pantalla completa y cierre
-de sesión); la jefa ve Supervisión, Resumen, Historial y Reportes; sistemas suma
-Administración de cuentas; nadie ve Control Biométrico salvo la cocinera, y un rol
-desconocido no ve nada. Ninguna sección se monta sin pasar por esa guardia.
+de sesión); la jefa ve Supervisión, Resumen, Historial, Reportes y Cuentas (solo
+lectura); sistemas ve Supervisión, Resumen, Historial, Reportes, Reglas del
+sistema y Administración de cuentas; nadie ve Control Biométrico salvo la
+cocinera, y un rol desconocido no ve nada. Ninguna sección se monta sin pasar
+por esa guardia.
 
 ## Calidad visual (obligatorio, no negociable)
 

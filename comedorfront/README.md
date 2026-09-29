@@ -38,6 +38,15 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | desactivarCuenta | POST /admin/cuentas/{id}/desactivar | Da de baja la cuenta y cierra sus sesiones |
 | reactivarCuenta | POST /admin/cuentas/{id}/reactivar | Reactiva la cuenta |
 | reiniciarClaveCuenta | POST /admin/cuentas/{id}/reiniciar-clave | Clave temporal nueva, se muestra una sola vez |
+| obtenerCuentasLectura | GET /cuentas | Cuentas para la vista de solo lectura de la jefa (sin cuentas sistemas) |
+| obtenerReglasDerecho | GET /reglas/derecho | Versión vigente y todas las versiones de parámetros |
+| obtenerNovedadesDisponibles | GET /reglas/derecho/novedades | Tipos de novedad que se pueden marcar |
+| programarReglasDerecho | POST /reglas/derecho | Programa una versión nueva (201) |
+| eliminarReglasDerechoProgramadas | DELETE /reglas/derecho/{id} | Borra una versión programada (204) |
+| obtenerHorariosVigentes | GET /reglas/horarios?fecha= | Horario vigente de cada comida en esa fecha |
+| obtenerHistorialHorario | GET /reglas/horarios/historial?comida_id= | Todas las versiones de una comida |
+| programarHorario | POST /reglas/horarios | Programa un horario nuevo, cierra el anterior (201) |
+| eliminarHorarioProgramado | DELETE /reglas/horarios/{horario_id} | Borra un horario programado, reabre el anterior (204) |
 | obtenerPersonal | GET /personal | Reúne páginas de 200 comensales para el selector |
 | marcarAsistencia | GET /personal/{id} + POST /asistencias | metodo biometrico desde el simulador del lector, manual desde el registro a mano |
 | autorizarMarcacionManual | POST /asistencias | Autoriza una huella no reconocida con {usuario_id, metodo: 'manual'} sin momento; muestra la respuesta del servidor |
@@ -70,6 +79,14 @@ aparece «Desactivar». «Nueva cuenta» se crea desde el padrón (el usuario es
 login del sistema de turnos, en solo lectura) o sin vínculo (usuario y nombre
 a mano). La clave temporal se muestra una sola vez en el diálogo, con botón
 Copiar, y nunca se guarda en el navegador.
+
+Reglas del sistema (solo sistemas) edita horarios y parámetros del derecho
+con vigencia por fecha: dos pestañas, Horarios de comida y Derecho a comer.
+Horarios muestra lo que rige por comida, con «Programar cambio» («vigente
+desde» hoy o futuro, con motivo) e historial por comida; Derecho a comer
+lista las versiones (turno mínimo, novedades que anulan, enfermería) con la
+vigente marcada. Solo se puede eliminar lo programado, con confirmación; el
+pasado nunca se edita ni se borra.
 
 ## Modo simulación
 
@@ -123,8 +140,8 @@ solo olvida los tokens.
 | Rol | Secciones | Modo manual |
 |---|---|---|
 | cocinera | solo Control Biométrico, en pantalla completa | oculto |
-| jefa | Supervisión, Resumen, Historial y Reportes (sin Control Biométrico) | — |
-| sistemas | Supervisión, Resumen, Historial, Reportes y Administración (sin Control Biométrico) | — |
+| jefa | Supervisión, Resumen, Historial, Reportes y Cuentas (sin Control Biométrico) | — |
+| sistemas | Supervisión, Resumen, Historial, Reportes, Reglas del sistema y Administración (sin Control Biométrico) | — |
 | cualquier otro | ninguna («Sin permiso») | — |
 
 La cocinera no tiene sidebar ni header: Control Biométrico ocupa toda la
