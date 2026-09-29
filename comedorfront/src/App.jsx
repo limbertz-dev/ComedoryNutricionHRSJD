@@ -7,6 +7,7 @@ import PantallaEnVivo from './components/secciones/PantallaEnVivo.jsx';
 import SimuladorLector from './components/secciones/SimuladorLector.jsx';
 import ControlesReloj from './components/secciones/ControlesReloj.jsx';
 import Supervision from './components/secciones/Supervision.jsx';
+import Administracion from './components/secciones/Administracion.jsx';
 import Dashboard from './components/secciones/Dashboard.jsx';
 import Reportes from './components/secciones/Reportes.jsx';
 import Historial from './components/secciones/Historial.jsx';
@@ -81,7 +82,7 @@ export default function App() {
  * panel se desmonta entero, con todo lo que tenía cargado.
  */
 function PuertaDeSesion() {
-  const { fase, rol, logout } = useSesion();
+  const { fase, rol, usuario, logout } = useSesion();
 
   if (fase === 'verificando') {
     return <p className="app__verificando" role="status">Verificando sesión…</p>;
@@ -94,10 +95,10 @@ function PuertaDeSesion() {
       </main>
     );
   }
-  return <Panel rol={rol} />;
+  return <Panel rol={rol} usuario={usuario} />;
 }
 
-export function Panel({ rol }) {
+export function Panel({ rol, usuario = null }) {
   /* Persistida en localStorage: un F5 en Historial o Reportes no debe
      devolver forzadamente a Control Biométrico. Si lo guardado no le
      corresponde al rol, arranca en su primera sección. */
@@ -356,6 +357,8 @@ export function Panel({ rol }) {
 
           {permitida && seccionActiva === 'reportes'
             ? <Reportes key={diaServidor} ahora={ahoraServidor} /> : null}
+          {permitida && seccionActiva === 'admin'
+            ? <Administracion usuarioActual={usuario} /> : null}
         </div>
       </main>
     </div>

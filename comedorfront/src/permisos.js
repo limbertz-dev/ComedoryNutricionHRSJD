@@ -7,7 +7,7 @@
  */
 
 /** Ids de las secciones, en el orden del menú lateral. */
-export const IDS_SECCIONES = ['vivo', 'supervision', 'dashboard', 'historial', 'reportes'];
+export const IDS_SECCIONES = ['vivo', 'supervision', 'dashboard', 'historial', 'reportes', 'admin'];
 
 /*
  * La cocinera opera el lector: solo Control Biométrico y sin el «Modo
@@ -20,7 +20,7 @@ const SECCIONES_JEFATURA = ['supervision', 'dashboard', 'historial', 'reportes']
 const PERMISOS = {
   cocinera: { etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false, reloj: false },
   jefa: { etiqueta: 'Jefa de nutrición', secciones: SECCIONES_JEFATURA, marcacionManual: true, reloj: true },
-  sistemas: { etiqueta: 'Sistemas', secciones: SECCIONES_JEFATURA, marcacionManual: true, reloj: true },
+  sistemas: { etiqueta: 'Sistemas', secciones: [...SECCIONES_JEFATURA, 'admin'], marcacionManual: true, reloj: true },
 };
 
 const permisosDe = (rol) => (typeof rol === 'string' ? PERMISOS[rol.trim().toLowerCase()] : undefined);

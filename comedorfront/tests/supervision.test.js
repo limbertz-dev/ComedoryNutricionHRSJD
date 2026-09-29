@@ -71,7 +71,7 @@ test('permisos: cocinera sigue en [vivo], jefa y sistemas abren supervision y ya
 
   // Jefa y Sistemas abren 'supervision' y ya no 'vivo'
   assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes']);
-  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes']);
+  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'admin']);
   assert.equal(puedeVerSeccion('jefa', 'supervision'), true);
   assert.equal(puedeVerSeccion('jefa', 'vivo'), false);
   assert.equal(puedeVerSeccion('sistemas', 'supervision'), true);
