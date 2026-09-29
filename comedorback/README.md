@@ -22,12 +22,14 @@ Documentación automática de la API: `http://127.0.0.1:8000/docs`
 | `bd_nutricion` | `DB_NAME` | La base propia del comedor | Sí: la administra alembic |
 | `bd_proyecto_backend` | `DB_NAME_TURNOS` | La base del módulo de turnos (otro ingeniero) | **Nunca**: ni ALTER, ni CREATE, ni INSERT, ni FK que le apunte |
 
-`bd_nutricion` tiene exactamente **8 tablas + 9 vistas** (más `alembic_version`):
+`bd_nutricion` tiene exactamente **10 tablas + 9 vistas** (más `alembic_version`):
 
 - **Tablas propias:** `categorias_reporte`, `categoria_reporte_map`,
   `horarios_comida`, `coeficientes_racion`, `lecturas_biometricas`, `asistencias`.
 - **Tablas de la autenticación:** `usuarios_sistema`, `intentos_login`
   (ver [Autenticación y roles](#autenticación-y-roles)).
+- **Tablas de reglas versionadas:** `reglas_derecho`,
+  `reglas_derecho_novedad` (parámetros del derecho por fecha).
 - **Vistas del contrato de lectura** (`SQL SECURITY INVOKER`, leen
   `bd_proyecto_backend`): `v_comensales`, `v_categorias`, `v_servicios`,
   `v_comidas`, `v_usuario_servicios`, `v_turnos_asignados`, `v_turno_comida`,
@@ -73,7 +75,7 @@ columnas del formulario, vistas) → verificación de las tablas propias + 9 vis
 Es idempotente. **Borra todo lo que tenga `bd_nutricion`, asistencias incluidas**;
 sobre `bd_proyecto_backend` solo ejecuta los `SELECT` de las vistas.
 
-`GET /salud` responde `"estado": "ok"` con `tablas_propias: 6`,
+`GET /salud` responde `"estado": "ok"` con `tablas_propias: 10`,
 `vistas_contrato: 9` y la revisión de alembic, o **503** con la lista de lo que
 falta. Solo mira objetos de `bd_nutricion`: no lee la base de turnos.
 
@@ -87,7 +89,7 @@ alembic revision --autogenerate -m "descripción"
 ```
 
 La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
-`2555bc00750e` (head):
+`f13dd53094ae` (head):
 
 | Revisión | Qué hace |
 |---|---|
@@ -97,6 +99,7 @@ La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
 | `7e2b9c4d1a60` | `usuarios_sistema` e `intentos_login` (autenticación) |
 | `b7c4d2e8f1a3` | `asistencias.registrado_por_cuenta` (FK a `usuarios_sistema`, RESTRICT) y comentario LEGACY en `registrado_por` |
 | `2555bc00750e` | `usuarios_sistema`: `usuario_turnos_id` (UNIQUE, referencia lógica a `users.id`), `nombre` y `creada_por_cuenta`; `v_comensales` suma la columna `login` (`users.name`) |
+| `f13dd53094ae` | `reglas_derecho` + `reglas_derecho_novedad` (parámetros de derecho versionados, versión base 2000-01-01: 12 h, permiso/baja_medica/vacacion/licencia, enfermería excluida); `horarios_comida` suma `motivo` y `creada_por_cuenta`; índice (`comida_id`, `vigente_desde`) |
 
 Reemplaza a la cadena vieja `fa64a5d4e912 → … → f6a7b8c9d0e1`, que asumía las
 tablas heredadas copiadas en la misma base y le agregaba columnas a `comidas`.
@@ -116,7 +119,7 @@ python -m app.semillas     # las tres, idempotentes
 
 | Semilla | Qué carga |
 |---|---|
-| `app.semillas.horarios` | Franjas horarias de cada comida. **Provisionales**: confirmar con la jefa de nutrición |
+| `app.semillas.horarios` | Franjas horarias de cada comida (**provisionales**, solo el punto de partida): desde R2 se cambian desde «Reglas del sistema» |
 | `app.semillas.coeficientes` | Coeficientes de ración del formulario (0,15 · 0,50 · 0,05 · 0,30) |
 | `app.semillas.mapeo_categorias` | Categoría del hospital → columna del formulario. Decisión del hospital, a confirmar |
 
@@ -242,12 +245,26 @@ Todos exigen `Authorization: Bearer <access>` salvo `/salud`, `/auth/login` y
 | POST | `/admin/cuentas/{id}/desactivar` | Da de baja la cuenta y cierra sus sesiones |
 | POST | `/admin/cuentas/{id}/reactivar` | Reactiva la cuenta |
 | POST | `/admin/cuentas/{id}/reiniciar-clave` | 200 `{cuenta, clave_temporal}`; el próximo login da 428 |
+| GET | `/cuentas` | Cuentas en solo lectura (jefa y sistemas; la jefa no ve cuentas sistemas) |
+| GET | `/reglas/derecho` | Versión vigente de hoy + todas, nueva a vieja |
+| GET | `/reglas/derecho/novedades` | Tipos de novedad reales para la UI |
+| POST | `/reglas/derecho` | Programa una versión nueva. 201 |
+| DELETE | `/reglas/derecho/{id}` | Borra una versión programada. 204 |
+| GET | `/reglas/horarios?fecha=` | Horario vigente de cada comida en esa fecha (hoy por defecto) |
+| GET | `/reglas/horarios/historial?comida_id=` | Todas las versiones de una comida |
+| POST | `/reglas/horarios` | Programa un horario nuevo, cierra el anterior. 201 |
+| DELETE | `/reglas/horarios/{horario_id}` | Borra un horario programado, reabre el anterior. 204 |
 
 Las seis rutas `/admin/*` son solo para `sistemas`: jefa y cocinera reciben
 403. Los errores traen `motivo`: `username_en_uso`, `persona_ya_tiene_cuenta`,
 `persona_inexistente`, `cuenta_inexistente`, `login_invalido`,
 `rol_no_permitido`, `no_puede_desactivarse_a_si_misma`,
 `ultima_cuenta_sistemas`.
+
+Las rutas `/reglas/*` son solo para `sistemas`. Los errores traen `motivo`:
+`vigencia_en_el_pasado`, `horario_invalido`, `solapa_con_otra_comida`,
+`version_en_esa_fecha`, `comida_inexistente`, `version_inexistente`,
+`version_ya_vigente`, `motivo_obligatorio`.
 
 Los informes salen de la misma tabla, `asistencias`, con distinto
 agrupamiento: el total del registro diario y el del informe mensual tienen que
@@ -266,18 +283,24 @@ después `sin_derecho`. En el registro manual se invierten los dos últimos.
 
 Una asignación de turno da derecho sólo si cumple **las tres** condiciones:
 
-1. El turno dura **12 horas o más** (`turnos.duracion_horas`). Es política del
-   hospital y descarta 49 de los 76 turnos cargados. Enfermería queda fuera.
+1. El turno dura lo suficiente (`turnos.duracion_horas`). Es política del
+   hospital: 12 horas o más en la versión base (descarta 49 de los 76
+   turnos cargados).
 2. El turno tiene comidas mapeadas en `turno_comida`.
-3. No hay una novedad que lo anule (permiso, baja, vacación, licencia).
+3. No hay una novedad que lo anule (permiso, baja_medica, vacacion y licencia
+   en la versión base).
 
-La primera **habilita**, la segunda **otorga**: son cosas distintas. Un turno de
-12 horas sin filas en `turno_comida` sigue sin dar derecho, y es correcto.
+La primera **habilita**, la segunda **otorga**: son cosas distintas. Un turno
+largo sin filas en `turno_comida` sigue sin dar derecho, y es correcto.
 
-Las tres viven en `aplicar_reglas()` de `app/consultas/derecho.py`, sobre
-`v_comidas_por_turno`, que entrega el cruce sin reglas. Es el punto único por
-el que pasan la marcación, la pantalla y los dos historiales. Si la política
-cambia, se cambia ahí y los tres caminos quedan alineados.
+Los parámetros —turno mínimo, novedades que anulan y exclusión de
+enfermería— ya no están fijos en el código: se leen de la versión vigente
+según `fecha_turno`, resuelta en SQL dentro de `aplicar_reglas()`, que sigue
+siendo el punto único (`app/consultas/derecho.py`, sobre `v_comidas_por_turno`)
+por el que pasan la marcación, la pantalla y los dos historiales. El padrón
+y el conteo de la pantalla usan la versión vigente de hoy. Cada cambio crea
+una versión nueva con «vigente desde» (hoy o futura), nunca hacia atrás;
+solo se puede borrar una programada.
 
 ## Estructura
 
@@ -300,7 +323,7 @@ app/
    ├─ permisos.py       la matriz rol x recurso
    ├─ db.py             motor único, sesión, Base y BaseContrato
    └─ tablas_heredadas.py   lo que no administramos + la lista de vistas v_*
-alembic/                migraciones (base 4b5a9ed9330e, head 2555bc00750e)
+alembic/                migraciones (base 4b5a9ed9330e, head f13dd53094ae)
 tests/                  pytest, contra bd_nutricion_test
 ../scripts/recrear_bd_limpia.py   receta limpia de bd_nutricion
 ```
