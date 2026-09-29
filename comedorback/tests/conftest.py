@@ -77,6 +77,19 @@ def base_de_prueba():
 @pytest.fixture(autouse=True)
 def tablas_auth_limpias():
     with SesionLocal() as sesion:
+        # R2 deja solo la versión base (2000-01-01): los tests que asumen
+        # 12 h y enfermería excluida no se enteran de versiones de otro test.
+        sesion.execute(
+            text(
+                "DELETE FROM reglas_derecho_novedad WHERE regla_id IN "
+                "(SELECT id FROM reglas_derecho WHERE vigente_desde != '2000-01-01')"
+            )
+        )
+        sesion.execute(
+            text("DELETE FROM reglas_derecho WHERE vigente_desde != '2000-01-01'")
+        )
+        sesion.execute(text("UPDATE reglas_derecho SET creada_por_cuenta = NULL"))
+        sesion.execute(text("UPDATE horarios_comida SET creada_por_cuenta = NULL"))
         sesion.execute(text("DELETE FROM intentos_login"))
         # creada_por_cuenta se apunta a sí misma (RESTRICT): se suelta
         # primero o el DELETE reventaría por la FK.
