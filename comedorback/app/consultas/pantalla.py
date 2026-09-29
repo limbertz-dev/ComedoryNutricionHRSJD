@@ -11,7 +11,7 @@ informe dicen cosas distintas del mismo día.
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.orm import Session, aliased
@@ -76,6 +76,35 @@ class Estado:
     padron: int
     totales_del_dia: TotalesDia
     por_categoria: list[ConsumoCategoria] = field(default_factory=list)
+
+
+# Motivos que una lectura rechazada puede traer ya resuelta a una comida.
+# Van siempre los tres, en cero si no hay casos: el front no adivina claves.
+MOTIVOS_POR_COMIDA: tuple[str, ...] = (
+    "no_identificado",
+    "sin_derecho",
+    "duplicado",
+)
+
+
+@dataclass
+class ComidaDelDia:
+    comida_id: int
+    comida: str
+    hora_inicio: time
+    hora_fin: time
+    estado: str
+    previstas: int
+    servidas: int
+    manuales: int
+    rechazos_por_motivo: dict[str, int]
+
+
+@dataclass
+class ResumenComidas:
+    fecha: date
+    comidas: list[ComidaDelDia]
+    rechazos_sin_comida: int
 
 
 def _cupo(sesion: Session, comida: ComidaEnCurso) -> Cupo:
@@ -186,6 +215,37 @@ def estado(
     )
 
 
+def _franja_vigente(hora, dia):
+    """El predicado que une una lectura con el horario que la cubre.
+
+    Punto único: lo usan tanto `ultimas_marcaciones` como `comidas_del_dia`,
+    así la resolución lectura→comida es la misma en los dos lados.
+    `hora` y `dia` son expresiones sobre la marca temporal de la lectura.
+    """
+    cruza_medianoche = HorarioComida.hora_fin < HorarioComida.hora_inicio
+    dentro_normal = and_(
+        ~cruza_medianoche,
+        HorarioComida.hora_inicio <= hora,
+        hora < HorarioComida.hora_fin,
+    )
+    dentro_cruzada = and_(
+        cruza_medianoche,
+        or_(
+            HorarioComida.hora_inicio <= hora,
+            hora < HorarioComida.hora_fin,
+        ),
+    )
+    return and_(
+        HorarioComida.activo == 1,
+        HorarioComida.vigente_desde <= dia,
+        or_(
+            HorarioComida.vigente_hasta.is_(None),
+            HorarioComida.vigente_hasta >= dia,
+        ),
+        or_(dentro_normal, dentro_cruzada),
+    )
+
+
 def ultimas_marcaciones(
     sesion: Session,
     fecha: date | None = None,
@@ -202,19 +262,7 @@ def ultimas_marcaciones(
     comida_asistencia = aliased(Comida, name="comida_asistencia")
     comida_horario = aliased(Comida, name="comida_horario")
     hora_lectura = func.time(LecturaBiometrica.fecha_hora)
-    cruza_medianoche = HorarioComida.hora_fin < HorarioComida.hora_inicio
-    dentro_normal = and_(
-        ~cruza_medianoche,
-        HorarioComida.hora_inicio <= hora_lectura,
-        hora_lectura < HorarioComida.hora_fin,
-    )
-    dentro_cruzada = and_(
-        cruza_medianoche,
-        or_(
-            HorarioComida.hora_inicio <= hora_lectura,
-            hora_lectura < HorarioComida.hora_fin,
-        ),
-    )
+    dia_lectura = func.date(LecturaBiometrica.fecha_hora)
     comida_resuelta_id = func.coalesce(
         Asistencia.comida_id, HorarioComida.comida_id
     )
@@ -255,17 +303,7 @@ def ultimas_marcaciones(
         .outerjoin(comida_asistencia, comida_asistencia.id == Asistencia.comida_id)
         .outerjoin(
             HorarioComida,
-            and_(
-                HorarioComida.activo == 1,
-                HorarioComida.vigente_desde
-                <= func.date(LecturaBiometrica.fecha_hora),
-                or_(
-                    HorarioComida.vigente_hasta.is_(None),
-                    HorarioComida.vigente_hasta
-                    >= func.date(LecturaBiometrica.fecha_hora),
-                ),
-                or_(dentro_normal, dentro_cruzada),
-            ),
+            _franja_vigente(hora_lectura, dia_lectura),
         )
         .outerjoin(comida_horario, comida_horario.id == HorarioComida.comida_id)
         .where(func.date(LecturaBiometrica.fecha_hora) == dia)
@@ -303,3 +341,143 @@ def ultimas_marcaciones(
         .limit(limite)
     )
     return [Marcacion(**fila) for fila in sesion.execute(ordenadas).mappings().all()]
+
+
+def _horarios_vigentes(
+    sesion: Session, dia: date
+) -> list[tuple[int, str, time, time]]:
+    """Una fila por comida que rige ese día, en orden cronológico.
+
+    Si una comida tiene más de un horario vigente, el de `vigente_desde` más
+    reciente (la misma regla que `resolver_comida_en_curso`).
+    """
+    filas = sesion.execute(
+        select(
+            HorarioComida.comida_id,
+            Comida.nombre,
+            HorarioComida.hora_inicio,
+            HorarioComida.hora_fin,
+        )
+        .join(Comida, Comida.id == HorarioComida.comida_id)
+        .where(HorarioComida.activo == 1)
+        .where(HorarioComida.vigente_desde <= dia)
+        .where(
+            or_(
+                HorarioComida.vigente_hasta.is_(None),
+                HorarioComida.vigente_hasta >= dia,
+            )
+        )
+        .order_by(HorarioComida.vigente_desde.desc())
+    ).all()
+    vigentes: dict[int, tuple[int, str, time, time]] = {}
+    for comida_id, nombre, inicio, fin in filas:
+        vigentes.setdefault(comida_id, (comida_id, nombre, inicio, fin))
+    return sorted(vigentes.values(), key=lambda fila: (fila[2], fila[0]))
+
+
+def _servidas_por_comida(
+    sesion: Session, dia: date
+) -> tuple[dict[int, int], dict[int, int]]:
+    """Raciones y manuales por comida, por `fecha_comida`, todos los métodos."""
+    servidas: dict[int, int] = {}
+    manuales: dict[int, int] = {}
+    for comida_id, total, a_mano in sesion.execute(
+        select(
+            Asistencia.comida_id,
+            func.count(),
+            func.sum(case((Asistencia.metodo == "manual", 1), else_=0)),
+        )
+        .where(Asistencia.fecha_comida == dia)
+        .group_by(Asistencia.comida_id)
+    ).all():
+        servidas[comida_id] = total
+        manuales[comida_id] = int(a_mano or 0)
+    return servidas, manuales
+
+
+def _rechazos_por_comida(
+    sesion: Session, dia: date
+) -> tuple[dict[tuple[int, str], int], int]:
+    """Rechazos del día del reloj, resueltos a comida como `ultimas_marcaciones`.
+
+    Devuelve ((comida_id, motivo) → cantidad, rechazos_sin_comida). Sin tope.
+    """
+    hora_lectura = func.time(LecturaBiometrica.fecha_hora)
+    dia_lectura = func.date(LecturaBiometrica.fecha_hora)
+    comida_resuelta_id = func.coalesce(
+        Asistencia.comida_id, HorarioComida.comida_id
+    )
+    motivo_presentado = case(
+        (LecturaBiometrica.usuario_id.is_(None), literal("no_identificado")),
+        else_=LecturaBiometrica.motivo,
+    )
+    rechazos: dict[tuple[int, str], int] = {}
+    sin_comida = 0
+    for comida_id, motivo, cantidad in sesion.execute(
+        select(
+            comida_resuelta_id.label("comida_id"),
+            motivo_presentado.label("motivo"),
+            func.count(func.distinct(LecturaBiometrica.id)),
+        )
+        .select_from(LecturaBiometrica)
+        .outerjoin(Asistencia, Asistencia.lectura_id == LecturaBiometrica.id)
+        .outerjoin(HorarioComida, _franja_vigente(hora_lectura, dia_lectura))
+        .where(func.date(LecturaBiometrica.fecha_hora) == dia)
+        .where(LecturaBiometrica.resultado == "rechazada")
+        .group_by(comida_resuelta_id, motivo_presentado)
+    ).all():
+        if comida_id is None or motivo not in MOTIVOS_POR_COMIDA:
+            # `fuera_horario` no resuelve por construcción. Un motivo fuera
+            # del trío con comida solo aparece si un horario se vigenteó
+            # hacia atrás; igual se mide, acá, en vez de esconderse.
+            sin_comida += cantidad
+        else:
+            clave = (comida_id, motivo)
+            rechazos[clave] = rechazos.get(clave, 0) + cantidad
+    return rechazos, sin_comida
+
+
+def _estado_franja(dia: date, inicio: time, fin: time, ahora: datetime) -> str:
+    """Dónde está la franja respecto al reloj: pendiente | en_curso | cerrada."""
+    abre = datetime.combine(dia, inicio)
+    cierra = datetime.combine(dia, fin)
+    if fin < inicio:
+        cierra += timedelta(days=1)
+    if ahora < abre:
+        return "pendiente"
+    if ahora < cierra:
+        return "en_curso"
+    return "cerrada"
+
+
+def comidas_del_dia(
+    sesion: Session, fecha: date | None = None
+) -> ResumenComidas:
+    """Una fila por comida vigente del día, para la supervisión.
+
+    Solo lectura: previstas (derecho), servidas y manuales (asistencias por
+    `fecha_comida`) y rechazos del día del reloj resueltos con la misma
+    lógica de franja que `ultimas_marcaciones`, sin tope.
+    """
+    dia = fecha or reloj.hoy()
+    servidas, manuales = _servidas_por_comida(sesion, dia)
+    rechazos, sin_comida = _rechazos_por_comida(sesion, dia)
+    ahora = reloj.ahora()
+    comidas = [
+        ComidaDelDia(
+            comida_id=comida_id,
+            comida=nombre,
+            hora_inicio=inicio,
+            hora_fin=fin,
+            estado=_estado_franja(dia, inicio, fin, ahora),
+            previstas=contar_personas_con_derecho(sesion, comida_id, dia),
+            servidas=servidas.get(comida_id, 0),
+            manuales=manuales.get(comida_id, 0),
+            rechazos_por_motivo={
+                motivo: rechazos.get((comida_id, motivo), 0)
+                for motivo in MOTIVOS_POR_COMIDA
+            },
+        )
+        for comida_id, nombre, inicio, fin in _horarios_vigentes(sesion, dia)
+    ]
+    return ResumenComidas(fecha=dia, comidas=comidas, rechazos_sin_comida=sin_comida)

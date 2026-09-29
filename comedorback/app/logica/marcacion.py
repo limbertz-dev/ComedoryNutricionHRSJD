@@ -179,7 +179,7 @@ def registrar_marcacion(
     momento: datetime | None = None,
     dispositivo: str = "lector-comedor-01",
     metodo: str = "biometrico",
-    registrado_por: int | None = None,
+    registrado_por_cuenta: int | None = None,
 ) -> Resultado:
     """Aplica las reglas y, si pasan todas, registra la ración."""
     momento = momento or reloj.ahora()
@@ -288,7 +288,7 @@ def registrar_marcacion(
         metodo=metodo,
         lectura_id=lectura_id,
         fecha_hora=momento,
-        registrado_por=registrado_por,
+        registrado_por_cuenta=registrado_por_cuenta,
     )
     sesion.add(asistencia)
 

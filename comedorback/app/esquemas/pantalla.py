@@ -1,6 +1,7 @@
 """Formas del estado de la pantalla en vivo."""
 
-from datetime import date, datetime
+from datetime import date, datetime, time
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -65,3 +66,31 @@ class Marcacion(BaseModel):
     motivo: str | None = None
     valido: bool = Field(description="True si resultado == 'aceptada'")
     dispositivo: str
+
+
+class ComidaDelDia(BaseModel):
+    comida_id: int
+    comida: str
+    hora_inicio: time
+    hora_fin: time
+    estado: Literal["pendiente", "en_curso", "cerrada"] = Field(
+        description="Dónde está la franja respecto al reloj del servidor"
+    )
+    previstas: int = Field(description="Personas distintas con derecho, según aplicar_reglas")
+    servidas: int = Field(description="Raciones por fecha_comida, todos los métodos")
+    manuales: int = Field(description="De las servidas, las registradas a mano")
+    rechazos_por_motivo: dict[str, int] = Field(
+        description="Siempre no_identificado, sin_derecho y duplicado, en 0 si no hay casos"
+    )
+
+
+class ComidasDelDia(BaseModel):
+    fecha: date = Field(
+        description="Día consultado. Las raciones suman por fecha_comida; los rechazos, por día del reloj"
+    )
+    comidas: list[ComidaDelDia] = Field(
+        description="Una fila por comida vigente, en orden cronológico"
+    )
+    rechazos_sin_comida: int = Field(
+        description="Rechazos del día que no resuelven a ninguna comida (fuera_horario, no_identificado fuera de franja)"
+    )

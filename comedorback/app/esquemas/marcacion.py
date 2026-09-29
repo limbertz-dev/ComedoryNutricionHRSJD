@@ -38,7 +38,11 @@ class SolicitudMarcacion(BaseModel):
         ),
     )
     registrado_por: int | None = Field(
-        default=None, description="Quién la registró, cuando es manual"
+        default=None,
+        description=(
+            "DEPRECADO: se ignora. Quién registra sale del token "
+            "(asistencias.registrado_por_cuenta)."
+        ),
     )
     @model_validator(mode="after")
     def validar_usuario_para_metodo(self) -> "SolicitudMarcacion":
