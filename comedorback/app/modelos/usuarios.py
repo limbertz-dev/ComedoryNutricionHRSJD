@@ -10,7 +10,16 @@ bitácora.
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum as SAEnum, Index, Integer, String, func
+from sqlalchemy import (
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.mysql import TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,7 +36,10 @@ class UsuarioSistema(Base):
     __tablename__ = "usuarios_sistema"
     __table_args__ = opciones(
         "Cuentas propias del comedor. NO son los users de la base de turnos. "
-        "La clave se guarda solo como hash bcrypt."
+        "La clave se guarda solo como hash bcrypt.",
+        UniqueConstraint(
+            "usuario_turnos_id", name="uq_usuarios_sistema_usuario_turnos_id"
+        ),
     )
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
@@ -50,6 +62,25 @@ class UsuarioSistema(Base):
         comment=(
             "Va dentro de cada token. Cambiar la clave la incrementa y "
             "anula todas las sesiones abiertas."
+        ),
+    )
+    usuario_turnos_id: Mapped[int | None] = mapped_column(
+        ID,
+        comment=(
+            "users.id del padron al que esta vinculada la cuenta, sin FK. "
+            "NULL = cuenta sin vinculo, creada a mano."
+        ),
+    )
+    nombre: Mapped[str | None] = mapped_column(
+        String(100),
+        comment="Nombre a mano, solo para las cuentas sin vinculo.",
+    )
+    creada_por_cuenta: Mapped[int | None] = mapped_column(
+        ID,
+        ForeignKey("usuarios_sistema.id", ondelete="RESTRICT"),
+        comment=(
+            "usuarios_sistema.id de la cuenta root que la creo. FK interna: "
+            "las cuentas se dan de baja, no se borran."
         ),
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -10,8 +10,8 @@ dice qué roles lo abren):
                /personal/*) para operar el lector y marca con el biométrico.
                Ni escrituras en el padrón, ni historial, ni informes, ni
                registro manual.
-  · sistemas   soporte técnico. Todo lo de la jefa y, además, lo de
-               administración (cuentas de usuario) cuando exista.
+  · sistemas   soporte técnico. Todo lo de la jefa y, además, la
+               administración de cuentas de usuario.
 
 La matriz se aplica en app/main.py, router por router, con `requiere_rol`
 (app/core/autorizacion.py). La regla fina de la marcación (manual solo
@@ -54,6 +54,9 @@ ACCESO: dict[str, Regla] = {
     "personal": Regla(completo=JEFATURA, lectura=frozenset({"cocinera"})),
     "historial": Regla(completo=JEFATURA),
     "reportes": Regla(completo=JEFATURA),
+    # Administración de cuentas: solo root. Sin lectura parcial: jefa y
+    # cocinera reciben 403 en todo /admin/*.
+    "admin": Regla(completo=ADMINISTRACION),
     # Solo existe con ENTORNO=simulacion (app/main.py).
     "simulacion": Regla(completo=JEFATURA),
 }
