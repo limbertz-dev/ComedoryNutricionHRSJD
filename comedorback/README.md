@@ -46,9 +46,9 @@ una migración nueva y el resto del código no se entera. Se mapean en
 alembic nunca las toma por tablas.
 
 Las columnas propias que guardan un id de la base de turnos (`usuario_id`,
-`comida_id`, `categoria_id`, `servicio_id`, `turno_asignado_id`,
-`registrado_por`) son referencias **lógicas, sin FK**: una FK entre bases le
-impediría al otro ingeniero borrar un usuario o migrar su propio esquema.
+`comida_id`, `categoria_id`, `servicio_id`, `turno_asignado_id`) son
+referencias **lógicas, sin FK**: una FK entre bases le
+impediría al otro ingeniero borrar un usuario o migrar su propio esquema. `registrado_por` queda como LEGACY (un `users.id`, NULL en filas nuevas): quién registra una ración manual sale del token y se guarda en `registrado_por_cuenta` (FK a `usuarios_sistema`), y el campo `registrado_por` del cuerpo del POST está deprecado y se ignora.
 
 `v_comensales` entrega una fila por `users.id` (LEFT JOIN a `personas` y
 `categorias`, `tiene_ficha = 0` si no hay ficha), toma la ficha de menor id si
@@ -84,7 +84,7 @@ alembic revision --autogenerate -m "descripción"
 ```
 
 La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
-`7e2b9c4d1a60` (head):
+`b7c4d2e8f1a3` (head):
 
 | Revisión | Qué hace |
 |---|---|
@@ -92,6 +92,7 @@ La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
 | `ff4ddf3c8a18` | Las 6 columnas del formulario de Estadística (`categorias_reporte`) |
 | `0c294cd98c3a` | Las 9 vistas `v_*`; el nombre de la base de turnos sale de `DB_NAME_TURNOS` |
 | `7e2b9c4d1a60` | `usuarios_sistema` e `intentos_login` (autenticación) |
+| `b7c4d2e8f1a3` | `asistencias.registrado_por_cuenta` (FK a `usuarios_sistema`, RESTRICT) y comentario LEGACY en `registrado_por` |
 
 Reemplaza a la cadena vieja `fa64a5d4e912 → … → f6a7b8c9d0e1`, que asumía las
 tablas heredadas copiadas en la misma base y le agregaba columnas a `comidas`.
@@ -219,6 +220,7 @@ Todos exigen `Authorization: Bearer <access>` salvo `/salud`, `/auth/login` y
 | GET | `/auth/yo` | `{id, username, rol, debe_cambiar}` de la sesión |
 | GET | `/pantalla/estado` | Todo lo que la pantalla en vivo necesita para pintarse |
 | GET | `/pantalla/ultimas-marcaciones` | Hilo del lector, incluidos los rechazos |
+| GET | `/pantalla/comidas-del-dia` | Una fila por comida vigente del día: horario, estado (pendiente/en_curso/cerrada según el reloj del servidor), previstas, servidas, manuales y rechazos_por_motivo; más rechazos_sin_comida |
 | GET | `/personal` | Padrón paginado, con búsqueda y filtros |
 | GET | `/personal/{usuario_id}` | Ficha de un comensal |
 | GET | `/personal/{usuario_id}/derecho` | A qué comidas tiene derecho en una fecha |
@@ -282,7 +284,7 @@ app/
    ├─ permisos.py       la matriz rol x recurso
    ├─ db.py             motor único, sesión, Base y BaseContrato
    └─ tablas_heredadas.py   lo que no administramos + la lista de vistas v_*
-alembic/                migraciones (base 4b5a9ed9330e, head 7e2b9c4d1a60)
+alembic/                migraciones (base 4b5a9ed9330e, head b7c4d2e8f1a3)
 tests/                  pytest, contra bd_nutricion_test
 ../scripts/recrear_bd_limpia.py   receta limpia de bd_nutricion
 ```
