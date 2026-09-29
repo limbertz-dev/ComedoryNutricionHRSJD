@@ -12,7 +12,7 @@ from sqlalchemy import func, select, text
 from app.consultas.derecho import aplicar_reglas
 from app.core import reloj
 from app.core.db import SesionLocal
-from app.modelos.heredados import Comida, ComidaPorTurno, NovedadLaboral
+from app.modelos.heredados import Comensal, Comida, ComidaPorTurno, NovedadLaboral
 from app.semillas import horarios as semilla_horarios
 from conftest import encabezado, ingresar
 
@@ -149,12 +149,31 @@ def _comidas() -> dict[str, tuple[int, str]]:
     return {codigo: (i, nombre) for i, codigo, nombre in filas}
 
 
-def _enfermeria_con_turno_largo() -> tuple[int, date]:
+def _usuario_enfermeria() -> int:
+    """Algún usuario del padrón con categoría de enfermería."""
     with SesionLocal() as sesion:
         fila = sesion.execute(
-            select(ComidaPorTurno.usuario_id, ComidaPorTurno.fecha_turno)
+            select(Comensal.usuario_id)
+            .where(Comensal.categoria.ilike("%enfermer%"))
+            .order_by(Comensal.usuario_id)
+            .limit(1)
+        ).first()
+    if fila is None:
+        pytest.skip("el padrón de pruebas no tiene usuarios de enfermería")
+    return fila.usuario_id
+
+
+def _turno_largo_limpio(usuario_id: int) -> tuple[date, date]:
+    """(fecha_turno, fecha_comida) de un turno largo, limpio y mapeado.
+
+    Prefiere dia_relativo 0 para que el derecho caiga en el propio día;
+    si solo hay guardias con corrimiento, se usa su fecha_comida.
+    """
+    with SesionLocal() as sesion:
+        fila = sesion.execute(
+            select(ComidaPorTurno.fecha_turno, ComidaPorTurno.fecha_comida)
+            .where(ComidaPorTurno.usuario_id == usuario_id)
             .where(ComidaPorTurno.duracion_horas >= 12)
-            .where(ComidaPorTurno.categoria.ilike("%enfermer%"))
             .where(
                 ~select(NovedadLaboral.id)
                 .where(
@@ -166,12 +185,15 @@ def _enfermeria_con_turno_largo() -> tuple[int, date]:
                 )
                 .exists()
             )
-            .order_by(ComidaPorTurno.fecha_turno.desc())
+            .order_by(
+                ComidaPorTurno.dia_relativo.asc(),
+                ComidaPorTurno.fecha_turno.desc(),
+            )
             .limit(1)
         ).first()
     if fila is None:
-        pytest.skip("nadie de enfermería con turno largo y sin novedad")
-    return fila.usuario_id, fila.fecha_turno
+        pytest.skip("enfermería sin turno largo y limpio en pruebas")
+    return fila.fecha_turno, fila.fecha_comida
 
 
 def _derecho_hoy_count(usuario_id: int, fecha: date) -> int:
@@ -374,11 +396,14 @@ def test_vigente_sigue_al_reloj(cliente, root):
 
 
 def test_padron_y_derecho_incluyen_enfermeria_hoy(cliente, root):
-    usuario, dia = _enfermeria_con_turno_largo()
+    usuario = _usuario_enfermeria()
+    dia, fecha_comida = _turno_largo_limpio(usuario)
     hoy = _fijar(dia)
     assert cliente.get(f"/personal/{usuario}", headers=root).status_code == 404
     r = cliente.get(
-        f"/personal/{usuario}/derecho", params={"fecha": hoy.isoformat()}, headers=root
+        f"/personal/{usuario}/derecho",
+        params={"fecha": fecha_comida.isoformat()},
+        headers=root,
     )
     assert r.status_code == 200, r.text
     assert r.json() == []
@@ -396,7 +421,9 @@ def test_padron_y_derecho_incluyen_enfermeria_hoy(cliente, root):
     assert r.status_code == 201, r.text
     assert cliente.get(f"/personal/{usuario}", headers=root).status_code == 200
     r = cliente.get(
-        f"/personal/{usuario}/derecho", params={"fecha": hoy.isoformat()}, headers=root
+        f"/personal/{usuario}/derecho",
+        params={"fecha": fecha_comida.isoformat()},
+        headers=root,
     )
     assert r.status_code == 200, r.text
     assert len(r.json()) > 0
@@ -411,7 +438,7 @@ def test_padron_y_derecho_incluyen_enfermeria_hoy(cliente, root):
                 )
             )
         ).scalar_one()
-        manana = sesion.execute(
+        hay_ayer = sesion.execute(
             select(ComidaPorTurno.fecha_turno)
             .where(
                 ComidaPorTurno.usuario_id == usuario,
@@ -419,7 +446,7 @@ def test_padron_y_derecho_incluyen_enfermeria_hoy(cliente, root):
             )
             .limit(1)
         ).first()
-    if manana is not None:
+    if hay_ayer is not None:
         assert ayer == 0
 
 
@@ -460,7 +487,16 @@ def test_horario_nuevo_no_cambia_dia_anterior(cliente, root, con_horarios):
             "/reglas/horarios", params={"fecha": ayer.isoformat()}, headers=root
         ).json()
     }
-    assert despues_ayer[almuerzo_id] == antes_ayer[almuerzo_id]
+    # Ayer resuelve a la MISMA versión y el MISMO horario; lo único que
+    # cambia es el cierre: vigente_hasta pasa de None a ayer (hoy − 1).
+    assert despues_ayer[almuerzo_id]["horario_id"] == antes_ayer[almuerzo_id]["horario_id"]
+    assert despues_ayer[almuerzo_id]["hora_inicio"] == antes_ayer[almuerzo_id]["hora_inicio"]
+    assert despues_ayer[almuerzo_id]["hora_fin"] == antes_ayer[almuerzo_id]["hora_fin"]
+    assert (
+        despues_ayer[almuerzo_id]["vigente_desde"]
+        == antes_ayer[almuerzo_id]["vigente_desde"]
+    )
+    assert despues_ayer[almuerzo_id]["vigente_hasta"] == ayer.isoformat()
     hoy_almuerzo = {
         c["comida_id"]: c
         for c in cliente.get(
