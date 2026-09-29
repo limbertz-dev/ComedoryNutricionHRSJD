@@ -108,6 +108,67 @@ export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, 
   }
 }
 
+/** Estados de una comida del día según GET /pantalla/comidas-del-dia. */
+const ESTADOS_COMIDA_DEL_DIA = ['pendiente', 'en_curso', 'cerrada'];
+
+/**
+ * GET /pantalla/comidas-del-dia: las comidas del día con su estado, servidas
+ * y rechazos por motivo. Sin `fecha` el servidor usa su hoy; con ella se
+ * consulta ese día. No acepta hora: el estado lo decide el backend.
+ */
+export async function obtenerComidasDelDia({ fecha, signal } = {}) {
+  try {
+    const ruta = fecha === undefined || fecha === null
+      ? '/pantalla/comidas-del-dia'
+      : `/pantalla/comidas-del-dia?fecha=${formatearFechaEstado(fecha)}`;
+    return adaptarComidasDelDia(await solicitarApi(ruta, { signal }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar las comidas del día. ${error.message}`);
+  }
+}
+
+function adaptarComidasDelDia(dato) {
+  if (!dato || typeof dato !== 'object' || typeof dato.fecha !== 'string' || !Array.isArray(dato.comidas)
+    || !Number.isInteger(dato.rechazos_sin_comida) || dato.rechazos_sin_comida < 0) {
+    throw new Error('La API devolvió comidas del día inválidas.');
+  }
+  return {
+    fecha: dato.fecha,
+    comidas: dato.comidas.map((comida) => {
+      const rechazos = comida?.rechazos_por_motivo;
+      if (!Number.isInteger(comida?.comida_id) || typeof comida.comida !== 'string' || comida.comida.length === 0
+        || !ESTADOS_COMIDA_DEL_DIA.includes(comida.estado)
+        || (comida.hora_inicio != null && typeof comida.hora_inicio !== 'string')
+        || (comida.hora_fin != null && typeof comida.hora_fin !== 'string')
+        || (comida.previstas !== null && (!Number.isInteger(comida.previstas) || comida.previstas < 0))
+        || !Number.isInteger(comida.servidas) || comida.servidas < 0
+        || !Number.isInteger(comida.manuales) || comida.manuales < 0
+        || !Number.isInteger(rechazos?.no_identificado) || rechazos.no_identificado < 0
+        || !Number.isInteger(rechazos?.sin_derecho) || rechazos.sin_derecho < 0
+        || !Number.isInteger(rechazos?.duplicado) || rechazos.duplicado < 0) {
+        throw new Error('La API devolvió una comida del día inválida.');
+      }
+      return {
+        comidaId: comida.comida_id,
+        comida: comida.comida,
+        horaInicio: comida.hora_inicio ?? null,
+        horaFin: comida.hora_fin ?? null,
+        estado: comida.estado,
+        previstas: comida.previstas,
+        servidas: comida.servidas,
+        manuales: comida.manuales,
+        rechazos: {
+          noIdentificado: rechazos.no_identificado,
+          sinDerecho: rechazos.sin_derecho,
+          duplicado: rechazos.duplicado,
+        },
+      };
+    }),
+    rechazosSinComida: dato.rechazos_sin_comida,
+  };
+}
+
 /** Una sola consulta devuelve años y meses; las selecciones siguientes son locales. */
 export async function obtenerPeriodos({ signal } = {}) {
   try {

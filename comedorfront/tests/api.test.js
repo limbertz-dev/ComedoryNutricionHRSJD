@@ -1,7 +1,7 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { obtenerPersonal, marcarAsistencia, simularMarcacion, obtenerEstadoPantalla,
-  obtenerUltimasMarcaciones,
+  obtenerUltimasMarcaciones, obtenerComidasDelDia,
   obtenerHistorialDiarioPersonal, obtenerHistorialMensualPersonal, obtenerDiaPersonal,
   obtenerPeriodos, obtenerGestiones, obtenerMesesDeGestion,
   obtenerRegistroDiario, obtenerInformeMensual, obtenerResumenGestion,
@@ -543,4 +543,69 @@ test('el aviso de coeficientes también sale en el informe por rango', async () 
   const notas = notasDeInforme(informe);
   assert.equal(notas.length, 2);
   assert.match(notas[1], /sin coeficiente asignado/);
+});
+
+test('las comidas del día llegan en camelCase con estado, servidas y rechazos por motivo', async () => {
+  const rutas = [];
+  globalThis.fetch = async (ruta) => {
+    rutas.push(new URL(ruta).pathname + new URL(ruta).search);
+    assert.equal(new URL(ruta).pathname, '/pantalla/comidas-del-dia');
+    return json({
+      fecha: '2026-09-28',
+      comidas: [
+        {
+          comida_id: 1, comida: 'Desayuno', hora_inicio: '07:00', hora_fin: '09:00',
+          estado: 'cerrada', previstas: 120, servidas: 118, manuales: 2,
+          rechazos_por_motivo: { no_identificado: 1, sin_derecho: 0, duplicado: 3 },
+        },
+        {
+          comida_id: 2, comida: 'Almuerzo', hora_inicio: '12:00', hora_fin: '14:00',
+          estado: 'en_curso', previstas: null, servidas: 60, manuales: 0,
+          rechazos_por_motivo: { no_identificado: 0, sin_derecho: 2, duplicado: 0 },
+        },
+      ],
+      rechazos_sin_comida: 4,
+    });
+  };
+  const dia = await obtenerComidasDelDia();
+  const delDia = await obtenerComidasDelDia({ fecha: '2026-09-01' });
+  assert.deepEqual(rutas, ['/pantalla/comidas-del-dia', '/pantalla/comidas-del-dia?fecha=2026-09-01']);
+  assert.equal(dia.fecha, '2026-09-28');
+  assert.equal(dia.comidas.length, 2);
+  assert.deepEqual(dia.comidas[0], {
+    comidaId: 1, comida: 'Desayuno', horaInicio: '07:00', horaFin: '09:00',
+    estado: 'cerrada', previstas: 120, servidas: 118, manuales: 2,
+    rechazos: { noIdentificado: 1, sinDerecho: 0, duplicado: 3 },
+  });
+  assert.equal(dia.comidas[1].estado, 'en_curso');
+  assert.equal(dia.comidas[1].previstas, null);
+  assert.equal(dia.rechazosSinComida, 4);
+  assert.equal(delDia.fecha, '2026-09-28');
+});
+
+test('las comidas del día con forma inválida se rechazan con error', async () => {
+  globalThis.fetch = async () => json({ fecha: '2026-09-28', comidas: [], rechazos_sin_comida: 0 });
+  assert.deepEqual((await obtenerComidasDelDia()).comidas, []);
+  globalThis.fetch = async () => json({ comidas: [] });
+  await assert.rejects(obtenerComidasDelDia(), /comidas del día inválidas/);
+  globalThis.fetch = async () => json({
+    fecha: '2026-09-28',
+    comidas: [{
+      comida_id: 2, comida: 'Almuerzo', estado: 'sirviendo', previstas: null,
+      servidas: 60, manuales: 0,
+      rechazos_por_motivo: { no_identificado: 0, sin_derecho: 0, duplicado: 0 },
+    }],
+    rechazos_sin_comida: 0,
+  });
+  await assert.rejects(obtenerComidasDelDia(), /comida del día inválida/);
+  globalThis.fetch = async () => json({
+    fecha: '2026-09-28',
+    comidas: [{
+      comida_id: 2, comida: 'Almuerzo', estado: 'en_curso', previstas: null,
+      servidas: 60, manuales: 0, rechazos_por_motivo: { no_identificado: 0, sin_derecho: 0 },
+    }],
+    rechazos_sin_comida: 0,
+  });
+  await assert.rejects(obtenerComidasDelDia(), /comida del día inválida/);
+  await assert.rejects(obtenerComidasDelDia({ fecha: '01-09-2026' }), /Fecha inválida/);
 });
