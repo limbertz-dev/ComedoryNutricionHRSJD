@@ -32,6 +32,12 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | iniciarSesion | POST /auth/login | 200 guarda tokens; 401 credencial, 423 bloqueo con reintento_en, 428 cambio obligatorio |
 | cambiarContrasena | POST /auth/cambio-password + POST /auth/login | Cambio de contraseña temporal y reingreso con la nueva |
 | obtenerUsuarioActual | GET /auth/yo | Rol de la sesión guardada al abrir la app |
+| obtenerCuentas | GET /admin/cuentas | Todas las cuentas, con vínculo, nombre y último ingreso (Administración) |
+| buscarCandidatos | GET /admin/candidatos | Personas del padrón para vincular, búsqueda de 2+ letras |
+| crearCuenta | POST /admin/cuentas | Crea la cuenta desde el padrón {rol, usuario_turnos_id} o sin vínculo {rol, username, nombre}; 201 con clave_temporal |
+| desactivarCuenta | POST /admin/cuentas/{id}/desactivar | Da de baja la cuenta y cierra sus sesiones |
+| reactivarCuenta | POST /admin/cuentas/{id}/reactivar | Reactiva la cuenta |
+| reiniciarClaveCuenta | POST /admin/cuentas/{id}/reiniciar-clave | Clave temporal nueva, se muestra una sola vez |
 | obtenerPersonal | GET /personal | Reúne páginas de 200 comensales para el selector |
 | marcarAsistencia | GET /personal/{id} + POST /asistencias | metodo biometrico desde el simulador del lector, manual desde el registro a mano |
 | autorizarMarcacionManual | POST /asistencias | Autoriza una huella no reconocida con {usuario_id, metodo: 'manual'} sin momento; muestra la respuesta del servidor |
@@ -56,6 +62,14 @@ botón Actualizar con la hora del último refresco. «Autorizar» aparece solo e
 la huella no reconocida: abre el selector del padrón y envía
 autorizarMarcacionManual, mostrando el éxito o el rechazo que responda el
 servidor.
+
+Administración (solo sistemas) muestra la tabla de cuentas —usuario, nombre,
+rol, vínculo, estado y último ingreso— con «Reiniciar clave» y
+«Desactivar»/«Reactivar», cada acción con confirmación; en la propia cuenta no
+aparece «Desactivar». «Nueva cuenta» se crea desde el padrón (el usuario es el
+login del sistema de turnos, en solo lectura) o sin vínculo (usuario y nombre
+a mano). La clave temporal se muestra una sola vez en el diálogo, con botón
+Copiar, y nunca se guarda en el navegador.
 
 ## Modo simulación
 
@@ -110,7 +124,7 @@ solo olvida los tokens.
 |---|---|---|
 | cocinera | solo Control Biométrico, en pantalla completa | oculto |
 | jefa | Supervisión, Resumen, Historial y Reportes (sin Control Biométrico) | — |
-| sistemas | Supervisión, Resumen, Historial y Reportes (sin Control Biométrico) | — |
+| sistemas | Supervisión, Resumen, Historial, Reportes y Administración (sin Control Biométrico) | — |
 | cualquier otro | ninguna («Sin permiso») | — |
 
 La cocinera no tiene sidebar ni header: Control Biométrico ocupa toda la
