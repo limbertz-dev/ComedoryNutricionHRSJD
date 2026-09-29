@@ -42,6 +42,8 @@ def marcar(
         momento=solicitud.momento,
         dispositivo=solicitud.dispositivo,
         metodo=solicitud.metodo,
-        registrado_por=solicitud.registrado_por,
+        registrado_por_cuenta=(
+            usuario.id if solicitud.metodo == "manual" else None
+        ),
     )
     return RespuestaMarcacion(**vars(resultado))

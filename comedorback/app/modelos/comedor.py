@@ -271,6 +271,18 @@ class Asistencia(Base):
         DateTime, comment="Instante del reloj en que se marco."
     )
     registrado_por: Mapped[int | None] = mapped_column(
-        ID, comment="users.id de quien la registro a mano, sin FK."
+        ID,
+        comment=(
+            "LEGACY: users.id de quien la registro a mano, sin FK. Desde "
+            "registrado_por_cuenta queda en NULL para las filas nuevas."
+        ),
+    )
+    registrado_por_cuenta: Mapped[int | None] = mapped_column(
+        ID,
+        ForeignKey("usuarios_sistema.id", ondelete="RESTRICT"),
+        comment=(
+            "usuarios_sistema.id de quien la registro a mano, tomado del "
+            "token. FK interna: las cuentas se dan de baja, no se borran."
+        ),
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
