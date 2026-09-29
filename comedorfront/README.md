@@ -34,9 +34,11 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | obtenerUsuarioActual | GET /auth/yo | Rol de la sesión guardada al abrir la app |
 | obtenerPersonal | GET /personal | Reúne páginas de 200 comensales para el selector |
 | marcarAsistencia | GET /personal/{id} + POST /asistencias | metodo biometrico desde el simulador del lector, manual desde el registro a mano |
+| autorizarMarcacionManual | POST /asistencias | Autoriza una huella no reconocida con {usuario_id, metodo: 'manual'} sin momento; muestra la respuesta del servidor |
 | obtenerEstadoPantalla | GET /pantalla/estado | Comida vigente, cupo, totales del día y gráfico |
 | obtenerUltimasMarcaciones | GET /pantalla/ultimas-marcaciones | Lecturas guardadas de hoy, incluidos los rechazos |
 | obtenerDiaPersonal | GET /pantalla/dia-personal | Detalle del día de un comensal bajo la marcación |
+| obtenerComidasDelDia | GET /pantalla/comidas-del-dia | Comidas del día con estado, servidas y rechazos por motivo (pestañas de Supervisión) |
 | obtenerHistorialDiarioPersonal | GET /historial/diario | Historial diario, 50 registros por página |
 | obtenerHistorialMensualPersonal | GET /historial/mensual | Totales mensuales, 50 registros por página |
 | obtenerInformeRaciones | GET /reportes/informe | Informe de Estadística por rango de fechas (Reportes) |
@@ -47,16 +49,25 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | saltarAProximaFranja | POST /simulacion/reloj/proxima-franja | Salta al inicio de la próxima comida; 409 se muestra como mensaje |
 | volverARelojReal | DELETE /simulacion/reloj | Devuelve el sistema a la hora real |
 
+Supervisión (solo jefa y sistemas) muestra una pestaña por comida con su
+estado, raciones servidas y rechazos, y una tabla en vivo con las últimas 100
+marcaciones. Filtra por resultado y por nombre, se refresca cada 30 s y tiene
+botón Actualizar con la hora del último refresco. «Autorizar» aparece solo en
+la huella no reconocida: abre el selector del padrón y envía
+autorizarMarcacionManual, mostrando el éxito o el rechazo que responda el
+servidor.
+
 ## Modo simulación
 
 Solo cuando GET /salud responde `entorno: "simulacion"`. En cualquier otro
 entorno no se dibuja nada de esto y nunca se llama a /simulacion/*.
 
-- El header muestra la franja SIMULACIÓN con la hora del servidor, para todos
-  los roles.
-- Jefa y sistemas tienen además el reloj en el simulador del lector (Control
-  Biométrico): fijar fecha y hora, +15 min, próxima franja y volver a la hora
-  real. La cocinera no, porque el backend reserva /simulacion/* a jefatura.
+- El header muestra la franja SIMULACIÓN con la hora del servidor (jefa y
+  sistemas; la cocinera no tiene header en su pantalla completa).
+- Jefa y sistemas tienen además el reloj en el header de Supervisión: fijar
+  fecha y hora, +15 min, próxima franja y volver a la hora real. Ya no está en
+  Control Biométrico, que ahora solo ve la cocinera; el backend reserva
+  /simulacion/* a jefatura.
 - La fecha del header y el "hoy" de Control Biométrico, Historial y Reportes
   salen del reloj del servidor, nunca de la PC. Fuera de simulación siguen
   como siempre.
@@ -97,10 +108,17 @@ solo olvida los tokens.
 
 | Rol | Secciones | Modo manual |
 |---|---|---|
-| cocinera | Control Biométrico | oculto |
-| jefa | las cuatro | sí |
-| sistemas | las cuatro | sí |
+| cocinera | solo Control Biométrico, en pantalla completa | oculto |
+| jefa | Supervisión, Resumen, Historial y Reportes (sin Control Biométrico) | — |
+| sistemas | Supervisión, Resumen, Historial y Reportes (sin Control Biométrico) | — |
 | cualquier otro | ninguna («Sin permiso») | — |
+
+La cocinera no tiene sidebar ni header: Control Biométrico ocupa toda la
+ventana. Un botón flotante abajo a la derecha abre su panel de sesión: usuario
+y rol, el simulador del lector, «Pantalla completa» (si el navegador la
+soporta) y «Cerrar sesión». El «Modo manual» vive en Control Biométrico y
+sigue oculto para ella; jefa y sistemas autorizan desde Supervisión con
+«Autorizar».
 
 Los nombres de los campos del cuerpo de login y de cambio de contraseña no están en el
 contrato: viven solos en `cuerpoLogin` / `cuerpoCambio` de `src/api.js`.
