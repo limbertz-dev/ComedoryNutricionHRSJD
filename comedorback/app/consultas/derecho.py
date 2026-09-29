@@ -39,6 +39,10 @@ from app.modelos.reglas import ReglaDerecho, ReglaDerechoNovedad
 # `aplicar_reglas` ya no los usa: resuelve la versión vigente EN SQL.
 # Se conservan para documentar el punto de partida y para quien los importe.
 #
+# Un permiso, una baja, una vacación o una licencia anulan el derecho de esa
+# asignación. `devolucion_turno` NO está en la lista: es un cambio entre
+# compañeros, no una ausencia.
+#
 # PENDIENTE: cuando hay reemplazo (novedades_laborales.usuario_reemplazo_id),
 # el derecho debería pasar al que cubre el turno. No está implementado porque
 # primero hay que confirmar con el hospital cómo usan esa columna en la

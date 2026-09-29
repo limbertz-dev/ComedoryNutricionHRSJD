@@ -1,6 +1,6 @@
 """reglas de derecho versionadas y motivo en horarios
 
-Revision ID: d4e5f6a7b8c9
+Revision ID: f13dd53094ae
 Revises: 2555bc00750e
 Create Date: 2026-09-29
 
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import mysql
 
-revision: str = "d4e5f6a7b8c9"
+revision: str = "f13dd53094ae"
 down_revision: Union[str, Sequence[str], None] = "2555bc00750e"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
