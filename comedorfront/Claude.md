@@ -29,12 +29,20 @@ La referencia de endpoints, adaptadores y reglas de presentación es `README.md`
 
 Secciones del sidebar (`src/navegacion.js`):
 
-1. **Control Biométrico** — marcaciones en vivo. El simulador del lector vive en el header y
-   envía la misma marcación que el lector real (`POST /asistencias`, `metodo: 'biometrico'`);
-   el registro a mano usa `metodo: 'manual'`.
-2. **Resumen** — cupo del turno y consumo por categoría (`GET /pantalla/estado`).
-3. **Historial de comidas** — historial diario y mensual por comensal, paginado.
-4. **Reportes** — formulario de Estadística por rango de fechas (`GET /reportes/informe`)
+1. **Control Biométrico** — marcaciones en vivo, solo para la cocinera, en
+   pantalla completa sin sidebar ni header. El simulador del lector vive en su
+   panel flotante y envía la misma marcación que el lector real
+   (`POST /asistencias`, `metodo: 'biometrico'`); el registro a mano usa
+   `metodo: 'manual'`.
+2. **Supervisión del comedor** — tabla en vivo para jefa y sistemas: pestañas
+   por comida (estado, servidas, rechazos) y las últimas 100 marcaciones con
+   filtros por resultado y nombre, refresco cada 30 s y botón Actualizar.
+   «Autorizar» solo aparece en la huella no reconocida y envía
+   `autorizarMarcacionManual` (`POST /asistencias`, `metodo: 'manual'`). En
+   simulación, su header lleva los controles del reloj.
+3. **Resumen** — cupo del turno y consumo por categoría (`GET /pantalla/estado`).
+4. **Historial de comidas** — historial diario y mensual por comensal, paginado.
+5. **Reportes** — formulario de Estadística por rango de fechas (`GET /reportes/informe`)
    con exportación a Excel y PDF. «Reportes de pacientes» queda como pendiente hasta que
    exista ese módulo.
 
@@ -42,8 +50,10 @@ El acceso es real (`POST /auth/login`, `GET /auth/yo`, `POST /auth/cambio-passwo
 sesión vive en `src/sesion.js` + `src/hooks/useSesion.js`, `api.js` firma cada petición con
 `Authorization: Bearer` y convierte 401 en «Sesión expirada», 403 en «Sin permiso» y 428 en
 cambio obligatorio de contraseña. Qué ve cada rol está solo en `src/permisos.js`: la
-cocinera ve Control Biométrico sin el «Modo manual»; jefa y sistemas, todo; un rol
-desconocido, nada. Ninguna sección se monta sin pasar por esa guardia.
+cocinera ve solo Control Biométrico, sin el «Modo manual», en pantalla completa con su
+panel flotante de sesión (usuario, rol, simulador del lector, pantalla completa y cierre
+de sesión); jefa y sistemas ven Supervisión, Resumen, Historial y Reportes, sin Control
+Biométrico; un rol desconocido, nada. Ninguna sección se monta sin pasar por esa guardia.
 
 ## Calidad visual (obligatorio, no negociable)
 
