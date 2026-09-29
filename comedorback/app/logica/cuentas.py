@@ -24,6 +24,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core import seguridad
 from app.logica.autenticacion import fijar_clave, normalizar_username
 from app.modelos.heredados import Comensal
 from app.modelos.usuarios import IntentoLogin, UsuarioSistema
@@ -232,8 +233,12 @@ def _nueva_cuenta(
     nombre: str | None,
     creada_por: UsuarioSistema,
 ) -> tuple[UsuarioSistema, str]:
+    clave = clave_temporal()
     usuario = UsuarioSistema(
         username=username,
+        # El hash va en el INSERT: password_hash es NOT NULL y este flush
+        # tiene que salir para traducir el 1062, así que no puede esperar.
+        password_hash=seguridad.hashear_clave(clave),
         rol=rol,
         activo=1,
         debe_cambiar=1,
@@ -242,14 +247,13 @@ def _nueva_cuenta(
         nombre=nombre,
         creada_por_cuenta=creada_por.id,
     )
-    clave = clave_temporal()
     sesion.add(usuario)
     try:
         sesion.flush()
     except IntegrityError as error:
         sesion.rollback()
         raise _traducir_insercion(error) from error
-    fijar_clave(sesion, usuario, clave, temporal=True)
+    sesion.commit()
     return usuario, clave
 
 
