@@ -5,11 +5,14 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import Header from '../src/components/layout/Header.jsx';
 import Supervision, {
   ejecutarAutorizacionManual,
+  filtrarMarcaciones,
+  metodoDeMarcacion,
+  pestanaPorDefecto,
   programarRefrescoSupervision,
+  rechazosDeComida,
 } from '../src/components/secciones/Supervision.jsx';
 import {
   autorizarMarcacionManual,
-  obtenerResumenComidas,
   obtenerUltimasMarcaciones,
 } from '../src/api.js';
 import {
@@ -24,6 +27,38 @@ afterEach(() => {
 });
 
 const json = (datos, status = 200) => new Response(JSON.stringify(datos), { status });
+
+const diaFixture = (cambios = {}) => ({
+  fecha: '2026-09-28',
+  comidas: [
+    {
+      comidaId: 1, comida: 'Desayuno', horaInicio: '07:00', horaFin: '09:00',
+      estado: 'cerrada', previstas: 120, servidas: 118, manuales: 2,
+      rechazos: { noIdentificado: 1, sinDerecho: 0, duplicado: 3 },
+    },
+    {
+      comidaId: 2, comida: 'Almuerzo', horaInicio: '12:00', horaFin: '14:00',
+      estado: 'en_curso', previstas: null, servidas: 60, manuales: 0,
+      rechazos: { noIdentificado: 0, sinDerecho: 2, duplicado: 0 },
+    },
+  ],
+  rechazosSinComida: 4,
+  ...cambios,
+});
+
+const marcacionFixture = (cambios = {}) => ({
+  id: 701,
+  usuarioId: 1,
+  valido: true,
+  titulo: 'Marcación válida',
+  motivo: null,
+  dispositivo: 'lector-1',
+  hora: '12:05:00',
+  comidaId: 2,
+  comida: 'Almuerzo',
+  persona: { id: 1, nombre: 'Comensal Exito', categoria: 'Médico' },
+  ...cambios,
+});
 
 // -------------------------------------------------------------
 // 1. Permisos
@@ -109,184 +144,7 @@ test('obtenerUltimasMarcaciones conserva campos existentes y agrega aditivamente
 });
 
 // -------------------------------------------------------------
-// 3. Adaptador obtenerResumenComidas con catálogo real
-// -------------------------------------------------------------
-test('obtenerResumenComidas obtiene catalogo real de /historial/diario, une con /reportes/informe y consulta rechazos', async () => {
-  const peticiones = [];
-  globalThis.fetch = async (ruta) => {
-    const url = new URL(ruta);
-    peticiones.push({ pathname: url.pathname, searchParams: url.searchParams });
-
-    if (url.pathname === '/pantalla/estado') {
-      return json({
-        momento: '2026-09-28T12:45:00',
-        fecha_comida: '2026-09-28',
-        comida_id: 2,
-        comida: 'Almuerzo',
-        fuera_de_horario: false,
-        cupo: { previstas: 150, servidas: 80, restantes: 70, porcentaje: 53 },
-        padron: 200,
-        totales_del_dia: { raciones_servidas: 80, lecturas: 85, aceptadas: 80, rechazadas: 5 },
-        por_categoria: [],
-      });
-    }
-
-    if (url.pathname === '/reportes/informe') {
-      assert.equal(url.searchParams.get('desde'), '2026-09-28');
-      assert.equal(url.searchParams.get('hasta'), '2026-09-28');
-      return json({
-        tipo: 'informe',
-        gestion: 2026,
-        mes: 9,
-        desde: '2026-09-28',
-        hasta: '2026-09-28',
-        situacion: 'curso',
-        cerrado: false,
-        categorias: ['Planta'],
-        filas: [
-          { etiqueta: 'Desayuno', celdas: [20], total: 20, registrado: true },
-          { etiqueta: 'Almuerzo', celdas: [60], total: 60, registrado: true },
-          { etiqueta: 'Cena Especial', celdas: [0], total: 0, registrado: true }, // no existe en catálogo
-        ],
-        totales_por_categoria: [80],
-        total_general: 80,
-        sin_clasificar: 0,
-        sin_coeficiente: 0,
-        grupos: [],
-      });
-    }
-
-    if (url.pathname === '/historial/diario') {
-      return json({
-        total: 0,
-        limite: 1,
-        desplazamiento: 0,
-        comidas: [
-          { comida_id: 1, codigo: 'DES', nombre: 'Desayuno' },
-          { comida_id: 2, codigo: 'ALM', nombre: 'Almuerzo' },
-        ],
-        datos: [],
-      });
-    }
-
-    if (url.pathname === '/pantalla/ultimas-marcaciones') {
-      const cid = Number(url.searchParams.get('comida_id'));
-      assert.equal(url.searchParams.get('limite'), '100');
-      if (cid === 2) {
-        // Almuerzo tiene 3 rechazadas de 4 marcaciones
-        return json([
-          { id: 1, fecha_hora: '2026-09-28T12:00:00', usuario_id: 1, valido: true, resultado: 'aceptada' },
-          { id: 2, fecha_hora: '2026-09-28T12:01:00', usuario_id: null, valido: false, motivo: 'no_identificado' },
-          { id: 3, fecha_hora: '2026-09-28T12:02:00', usuario_id: 2, valido: false, motivo: 'sin_derecho' },
-          { id: 4, fecha_hora: '2026-09-28T12:03:00', usuario_id: 3, valido: false, motivo: 'duplicado' },
-        ]);
-      }
-      return json([]);
-    }
-
-    throw new Error(`Ruta no esperada: ${url.pathname}`);
-  };
-
-  const resumen = await obtenerResumenComidas({ fecha: '2026-09-28' });
-  assert.equal(resumen.length, 3);
-
-  // Desayuno
-  assert.deepEqual(resumen[0], {
-    comidaId: 1,
-    comida: 'Desayuno',
-    servidas: 20,
-    rechazos: 0,
-    rechazosTruncados: false,
-    estado: '—',
-  });
-
-  // Almuerzo: está en curso según /pantalla/estado
-  assert.deepEqual(resumen[1], {
-    comidaId: 2,
-    comida: 'Almuerzo',
-    servidas: 60,
-    rechazos: 3,
-    rechazosTruncados: false,
-    estado: 'En curso',
-  });
-
-  // Cena Especial: no encontrada en catálogo real -> comidaId = null, sin filtro supuesto
-  assert.deepEqual(resumen[2], {
-    comidaId: null,
-    comida: 'Cena Especial',
-    servidas: 0,
-    rechazos: 0,
-    rechazosTruncados: false,
-    estado: '—',
-  });
-});
-
-test('obtenerResumenComidas detecta rechazosTruncados=true si vuelven 100 filas y fuera_de_horario', async () => {
-  globalThis.fetch = async (ruta) => {
-    const url = new URL(ruta);
-    if (url.pathname === '/pantalla/estado') {
-      return json({
-        momento: '2026-09-28T15:00:00',
-        fecha_comida: '2026-09-28',
-        comida_id: 2,
-        comida: 'Almuerzo',
-        fuera_de_horario: true,
-        cupo: null,
-        padron: 200,
-        totales_del_dia: { raciones_servidas: 10, lecturas: 120, aceptadas: 10, rechazadas: 110 },
-        por_categoria: [],
-      });
-    }
-    if (url.pathname === '/reportes/informe') {
-      return json({
-        tipo: 'informe',
-        gestion: 2026,
-        mes: 9,
-        desde: '2026-09-28',
-        hasta: '2026-09-28',
-        situacion: 'curso',
-        cerrado: false,
-        categorias: ['Planta'],
-        filas: [{ etiqueta: 'Almuerzo', celdas: [10], total: 10, registrado: true }],
-        totales_por_categoria: [10],
-        total_general: 10,
-        sin_clasificar: 0,
-        sin_coeficiente: 0,
-        grupos: [],
-      });
-    }
-    if (url.pathname === '/historial/diario') {
-      return json({
-        total: 0,
-        limite: 1,
-        desplazamiento: 0,
-        comidas: [{ comida_id: 2, codigo: 'ALM', nombre: 'Almuerzo' }],
-        datos: [],
-      });
-    }
-    if (url.pathname === '/pantalla/ultimas-marcaciones') {
-      // 100 filas rechazadas
-      const filas = Array.from({ length: 100 }, (_, i) => ({
-        id: i + 1,
-        fecha_hora: '2026-09-28T12:00:00',
-        usuario_id: i + 1,
-        valido: false,
-        motivo: 'sin_derecho',
-      }));
-      return json(filas);
-    }
-    throw new Error(`Ruta inesperada: ${url.pathname}`);
-  };
-
-  const resumen = await obtenerResumenComidas({ fecha: '2026-09-28' });
-  assert.equal(resumen.length, 1);
-  assert.equal(resumen[0].rechazos, 100);
-  assert.equal(resumen[0].rechazosTruncados, true);
-  assert.equal(resumen[0].estado, 'Fuera de horario');
-});
-
-// -------------------------------------------------------------
-// 4. Autorizar no_identificado envía {usuario_id, metodo:'manual'} sin momento
+// 3. Autorizar no_identificado envía {usuario_id, metodo:'manual'} sin momento
 // -------------------------------------------------------------
 test('autorizar no_identificado envía {usuario_id, metodo: manual} sin momento', async () => {
   const peticiones = [];
@@ -324,30 +182,29 @@ test('autorizar no_identificado envía {usuario_id, metodo: manual} sin momento'
 });
 
 // -------------------------------------------------------------
-// 5. sin_derecho no hace ninguna petición
+// 4. sin_derecho: botón desactivado y ninguna petición
 // -------------------------------------------------------------
-test('sin_derecho no hace ninguna petición HTTP', async () => {
+test('sin_derecho muestra Autorizar desactivado y no hace ninguna petición HTTP', async () => {
   let llamadasFetch = 0;
   globalThis.fetch = async () => {
     llamadasFetch += 1;
     return json({});
   };
 
-  // Simulación del render con marcación sin_derecho
-  const marcacionSinDerecho = {
+  const marcacionSinDerecho = marcacionFixture({
     id: 55,
     dispositivo: 'lector-1',
-    hora: '12:40',
+    hora: '12:40:00',
     valido: false,
     motivo: 'sin_derecho',
     titulo: 'Sin derecho en este turno',
-    persona: { id: 10, nombre: 'Comensal Rechazado', categoria: 'Adm', legajo: 'ADM-10' },
-  };
+    persona: { id: 10, nombre: 'Comensal Rechazado', categoria: 'Adm' },
+  });
 
   const html = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
-      resumenInicial: [],
+      comidasIniciales: diaFixture(),
       marcacionesIniciales: [marcacionSinDerecho],
     })
   );
@@ -355,13 +212,14 @@ test('sin_derecho no hace ninguna petición HTTP', async () => {
   // El botón está desactivado con el texto requerido
   assert.match(html, /Requiere excepción de jefatura \(pendiente\)/);
   assert.match(html, /disabled/);
+  assert.match(html, /<span class="boton__texto">Autorizar<\/span>/);
 
   // No se realizó ninguna llamada a la API
   assert.equal(llamadasFetch, 0, 'No debe realizar ninguna petición HTTP');
 });
 
 // -------------------------------------------------------------
-// 6. Render de Supervisión en carga, vacío, error y simulación
+// 5. Render de Supervisión en carga, vacío, error y simulación
 // -------------------------------------------------------------
 test('render de Supervisión en carga, vacío, error y simulación', () => {
   // Estado CARGA
@@ -376,7 +234,7 @@ test('render de Supervisión en carga, vacío, error y simulación', () => {
   const htmlVacio = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
-      resumenInicial: [],
+      comidasIniciales: diaFixture({ comidas: [], rechazosSinComida: 0 }),
       marcacionesIniciales: [],
     })
   );
@@ -406,7 +264,7 @@ test('render de Supervisión en carga, vacío, error y simulación', () => {
     h(Supervision, {
       cargandoInicial: false,
       simulacion: reloj,
-      resumenInicial: [{ comidaId: 1, comida: 'Desayuno', servidas: 5, rechazos: 0, rechazosTruncados: false, estado: '—' }],
+      comidasIniciales: diaFixture(),
       marcacionesIniciales: [],
     })
   );
@@ -418,7 +276,7 @@ test('render de Supervisión en carga, vacío, error y simulación', () => {
     h(Supervision, {
       cargandoInicial: false,
       simulacion: null,
-      resumenInicial: [{ comidaId: 1, comida: 'Desayuno', servidas: 5, rechazos: 0, rechazosTruncados: false, estado: '—' }],
+      comidasIniciales: diaFixture(),
       marcacionesIniciales: [],
     })
   );
@@ -426,69 +284,253 @@ test('render de Supervisión en carga, vacío, error y simulación', () => {
 });
 
 // -------------------------------------------------------------
-// 7. Render de estructura, keys y feed de solo lectura
+// 6. Pestañas: Todas + una por comida, defecto en_curso
 // -------------------------------------------------------------
-test('render de Supervisión contiene tarjetas por comida, rechazos por revisar y feed de solo lectura con keys dispositivo-id', () => {
-  const resumen = [
-    { comidaId: 1, comida: 'Desayuno', servidas: 25, rechazos: 1, rechazosTruncados: false, estado: '—' },
-    { comidaId: 2, comida: 'Almuerzo', servidas: 90, rechazos: 100, rechazosTruncados: true, estado: 'En curso' },
-  ];
-  const marcaciones = [
-    {
-      id: 701,
-      dispositivo: 'lector-1',
-      hora: '12:05',
-      valido: true,
-      titulo: 'Marcación válida',
-      comidaId: 2,
-      comida: 'Almuerzo',
-      persona: { id: 1, nombre: 'Comensal Exito', categoria: 'Médico', legajo: 'M-1' },
-    },
-    {
-      id: 702,
-      dispositivo: 'lector-2',
-      hora: '12:10',
-      valido: false,
-      motivo: 'no_identificado',
-      titulo: 'Huella no reconocida',
-      comidaId: 2,
-      comida: 'Almuerzo',
-      persona: { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar', legajo: '—' },
-    },
-  ];
-
+test('pestañas muestran nombre, estado, servidas y rechazos; el punto verde marca la comida en curso', () => {
   const html = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
-      resumenInicial: resumen,
-      marcacionesIniciales: marcaciones,
-      personal: [{ id: 99, nombre: 'Ana Gomez', categoria: 'Bioquimica', legajo: 'B-99' }],
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: [],
     })
   );
 
-  // Subsección (a) Comidas del día
-  assert.match(html, /Comidas del día/);
-  assert.match(html, /Desayuno/);
-  assert.match(html, /Almuerzo/);
-  assert.match(html, /100 o más/); // rechazos truncados
+  // "Todas" + una por comida, en el orden recibido
+  assert.match(html, /<span class="supervision__pestana-nombre">Todas<\/span>/);
+  const posicionTodas = html.indexOf('>Todas<');
+  const posicionDesayuno = html.indexOf('>Desayuno<');
+  const posicionAlmuerzo = html.indexOf('>Almuerzo<');
+  assert.ok(posicionTodas < posicionDesayuno && posicionDesayuno < posicionAlmuerzo);
+
+  // Estados legibles
+  assert.match(html, /Cerrada/);
   assert.match(html, /En curso/);
+  assert.doesNotMatch(html, /en_curso/);
 
-  // Subsección (b) Rechazos por revisar (agrupados por motivo, con acción para no_identificado)
-  assert.match(html, /Rechazos por revisar/);
-  assert.match(html, /Huella no reconocida \(no identificado\)/);
-  assert.match(html, /Autorizar ración manual/);
-  assert.match(html, /Seleccione comensal del padrón/);
-  assert.match(html, /Ana Gomez/);
+  // Un solo punto verde: la comida en curso
+  assert.equal(html.match(/supervision__punto-curso/g).length, 1);
 
-  // Subsección (c) Hilo de marcaciones (feed de solo lectura)
-  assert.match(html, /Hilo de marcaciones/);
-  assert.match(html, /Comensal Exito/);
-  assert.match(html, /lector-1/);
-  assert.match(html, /lector-2/);
+  // Servidas y rechazos (suma de motivos) por comida
+  assert.match(html, />118</); // servidas del Desayuno
+  assert.match(html, />4</); // rechazos del Desayuno: 1 + 0 + 3
+  assert.match(html, />60</); // servidas del Almuerzo
+  assert.match(html, />2</); // rechazos del Almuerzo: 0 + 2 + 0
+
+  // Nota discreta de rechazos fuera de franja
+  assert.match(html, /4 rechazos fuera de franja/);
+});
+
+test('pestaña por defecto: la comida en curso, o Todas si no hay ninguna', () => {
+  assert.equal(pestanaPorDefecto(diaFixture().comidas), 2);
+  assert.equal(pestanaPorDefecto(diaFixture({ comidas: [] }).comidas), null);
+  const sinCurso = diaFixture({
+    comidas: [diaFixture().comidas[0]],
+    rechazosSinComida: 0,
+  });
+  assert.equal(pestanaPorDefecto(sinCurso.comidas), null);
+
+  // Con comida en curso, su pestaña abre seleccionada
+  const htmlCurso = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: [],
+    })
+  );
+  assert.match(htmlCurso, /<button[^>]*role="tab"[^>]*aria-selected="true"[^>]*>[\s\S]*?Almuerzo/);
+
+  // Sin comida en curso, abre "Todas"
+  const htmlTodas = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      comidasIniciales: sinCurso,
+      marcacionesIniciales: [],
+    })
+  );
+  assert.match(htmlTodas, /<button[^>]*role="tab"[^>]*aria-selected="true"[^>]*>[\s\S]*?Todas/);
+  assert.doesNotMatch(htmlTodas, /fuera de franja/);
+
+  // Suma de rechazos por motivo
+  assert.equal(rechazosDeComida(diaFixture().comidas[0]), 4);
+  assert.equal(rechazosDeComida(diaFixture().comidas[1]), 2);
 });
 
 // -------------------------------------------------------------
-// 8. Header en vivo (cocinera) intacto vs en supervisión
+// 7. Tabla: columnas, resultado, motivo, método y filas de rechazo
+// -------------------------------------------------------------
+test('la tabla muestra Hora, Comensal, Categoría, Comida, Resultado, Motivo, Método y Acción', () => {
+  const filas = [
+    marcacionFixture({}),
+    marcacionFixture({
+      id: 702, dispositivo: 'lector-2', hora: '12:10:00', valido: false,
+      motivo: 'no_identificado', titulo: 'Huella no reconocida',
+      persona: { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar' },
+    }),
+    marcacionFixture({
+      id: 703, dispositivo: 'registro-manual', hora: '12:15:00', valido: false,
+      motivo: 'sin_derecho', titulo: 'Sin derecho en este turno',
+      persona: { id: 10, nombre: 'Comensal Sin Derecho', categoria: 'Adm' },
+    }),
+    marcacionFixture({
+      id: 704, dispositivo: 'lector-1', hora: '12:20:00', valido: false,
+      motivo: 'duplicado', titulo: 'Ya recibió su comida',
+      persona: { id: 11, nombre: 'Comensal Duplicado', categoria: 'Planta' },
+    }),
+  ];
+  const html = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: filas,
+    })
+  );
+
+  // Cabeceras en orden
+  for (const columna of ['Hora', 'Comensal', 'Categoría', 'Comida', 'Resultado', 'Motivo', 'Método', 'Acción']) {
+    assert.match(html, new RegExp(`<th scope="col">${columna}</th>`));
+  }
+
+  // Insignias de resultado
+  assert.match(html, /etiqueta--exito[^>]*>\s*Aceptada/);
+  assert.match(html, /etiqueta--error[^>]*>\s*Rechazada/);
+
+  // Motivos legibles; la aceptada lleva guion
+  assert.match(html, /Huella no reconocida \(no identificado\)/);
+  assert.match(html, /Sin derecho en este turno/);
+  assert.match(html, /Ya recibió su comida \(duplicado\)/);
+  assert.match(html, /<td>—<\/td>/);
+
+  // Método: Manual solo para registro-manual, Lector el resto
+  assert.equal(html.match(/<td>Manual<\/td>/g).length, 1);
+  assert.equal(html.match(/<td>Lector<\/td>/g).length, 3);
+  assert.equal(metodoDeMarcacion({ dispositivo: 'registro-manual' }), 'Manual');
+  assert.equal(metodoDeMarcacion({ dispositivo: 'lector-1' }), 'Lector');
+
+  // Las tres rechazadas llevan fondo de rechazo
+  assert.equal(html.match(/supervision__fila--rechazada/g).length, 3);
+
+  // "Autorizar" solo en no_identificado (activa) y sin_derecho (desactivada)
+  assert.equal(html.match(/<span class="boton__texto">Autorizar<\/span>/g).length, 2);
+
+  // Sin aviso de truncado con pocas filas
+  assert.doesNotMatch(html, /Mostrando las últimas 100/);
+});
+
+test('con 100 filas avisa que muestra las últimas 100', () => {
+  const cien = Array.from({ length: 100 }, (_, i) => marcacionFixture({
+    id: 1000 + i,
+    persona: { id: 1000 + i, nombre: `Comensal ${1000 + i}`, categoria: 'Planta' },
+  }));
+  const htmlCien = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: cien,
+    })
+  );
+  assert.match(htmlCien, /Mostrando las últimas 100/);
+
+  const htmlNoventa = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: cien.slice(0, 99),
+    })
+  );
+  assert.doesNotMatch(htmlNoventa, /Mostrando las últimas 100/);
+});
+
+// -------------------------------------------------------------
+// 8. Filtros de resultado y búsqueda por nombre
+// -------------------------------------------------------------
+test('la barra trae segmentado, búsqueda, Actualizado y Actualizar; el filtrado es por resultado y nombre', () => {
+  const html = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: [marcacionFixture({})],
+      actualizadoInicial: new Date(2026, 8, 28, 9, 4, 7),
+    })
+  );
+  assert.match(html, /Filtrar por resultado/);
+  assert.match(html, />Aceptadas</);
+  assert.match(html, />Rechazadas</);
+  assert.match(html, /placeholder="Buscar por nombre…"/);
+  assert.match(html, /Actualizado 09:04:07/);
+  assert.match(html, /<span class="boton__texto">Actualizar<\/span>/);
+
+  const filas = [
+    marcacionFixture({ id: 1, valido: true, persona: { id: 1, nombre: 'Ana Gomez', categoria: 'Médico' } }),
+    marcacionFixture({ id: 2, valido: false, motivo: 'duplicado', persona: { id: 2, nombre: 'Luis Perez', categoria: 'Planta' } }),
+    marcacionFixture({ id: 3, valido: false, motivo: 'sin_derecho', persona: { id: 3, nombre: 'Ana Torres', categoria: 'Adm' } }),
+  ];
+  assert.deepEqual(filtrarMarcaciones(filas, { resultado: 'todas' }).map((m) => m.id), [1, 2, 3]);
+  assert.deepEqual(filtrarMarcaciones(filas, { resultado: 'aceptadas' }).map((m) => m.id), [1]);
+  assert.deepEqual(filtrarMarcaciones(filas, { resultado: 'rechazadas' }).map((m) => m.id), [2, 3]);
+  assert.deepEqual(filtrarMarcaciones(filas, { busqueda: 'ana' }).map((m) => m.id), [1, 3]);
+  assert.deepEqual(filtrarMarcaciones(filas, { resultado: 'rechazadas', busqueda: 'ana' }).map((m) => m.id), [3]);
+  assert.deepEqual(filtrarMarcaciones(filas, { busqueda: 'nadie' }), []);
+});
+
+// -------------------------------------------------------------
+// 9. Fila expandida: selector de comensal debajo de la marcación
+// -------------------------------------------------------------
+test('la fila expandida muestra el selector del padrón con Confirmar ración manual y Cancelar', () => {
+  const fila = marcacionFixture({
+    id: 702, dispositivo: 'lector-2', valido: false, motivo: 'no_identificado',
+    persona: { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar' },
+  });
+  const html = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: [fila],
+      personal: [{ id: 99, nombre: 'Ana Gomez', categoria: 'Bioquimica', legajo: 'B-99' }],
+      filaExpandidaInicial: 702,
+    })
+  );
+  assert.match(html, /supervision__fila-autorizar/);
+  assert.match(html, /Seleccione comensal del padrón/);
+  assert.match(html, /Ana Gomez/);
+  assert.match(html, /<span class="boton__texto">Confirmar ración manual<\/span>/);
+  assert.match(html, /<span class="boton__texto">Cancelar<\/span>/);
+
+  // Sin fila expandida no hay selector ni confirmación
+  const htmlCerrada = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: [fila],
+      personal: [{ id: 99, nombre: 'Ana Gomez', categoria: 'Bioquimica', legajo: 'B-99' }],
+    })
+  );
+  assert.doesNotMatch(htmlCerrada, /supervision__fila-autorizar/);
+  assert.doesNotMatch(htmlCerrada, /Confirmar ración manual/);
+});
+
+// -------------------------------------------------------------
+// 10. Actualizado: hora del servidor en simulación
+// -------------------------------------------------------------
+test('en simulación Actualizado usa la hora del reloj del servidor', () => {
+  const reloj = {
+    ahora: new Date(2020, 1, 3, 12, 30, 45),
+    real: new Date(2026, 8, 28, 9, 0),
+    simulado: true,
+    congelado: false,
+  };
+  const html = renderToStaticMarkup(
+    h(Supervision, {
+      cargandoInicial: false,
+      simulacion: reloj,
+      comidasIniciales: diaFixture(),
+      marcacionesIniciales: [marcacionFixture({})],
+    })
+  );
+  assert.match(html, /Actualizado 12:30:45/);
+});
+
+// -------------------------------------------------------------
+// 11. Header en vivo (cocinera) intacto vs en supervisión
 // -------------------------------------------------------------
 test('el header de vivo de la cocinera se dibuja igual que antes, y en supervision unifica fecha y hora del servidor', () => {
   const reloj = {
@@ -525,7 +567,7 @@ test('el header de vivo de la cocinera se dibuja igual que antes, y en supervisi
 });
 
 // -------------------------------------------------------------
-// 9. Respuesta de autorizar manual (éxito y rechazo de negocio)
+// 12. Respuesta de autorizar manual (éxito y rechazo de negocio)
 // -------------------------------------------------------------
 test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el rechazo y no el éxito, y conserva selección', async () => {
   let recargado = false;
@@ -540,7 +582,7 @@ test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el 
     detalle: 'Comensal ya almorzó a las 12:15',
   };
 
-  await ejecutarAutorizacionManual({
+  const resultado = await ejecutarAutorizacionManual({
     marcacion: { id: 101, motivo: 'no_identificado' },
     usuarioId: 42,
     autorizarFn: async () => respuestaRechazo,
@@ -551,6 +593,8 @@ test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el 
     onMarcacionExitosa: () => { exitoNotificado = true; },
   });
 
+  // Devuelve el resultado para que la tabla sepa si cerrar la fila
+  assert.equal(resultado, respuestaRechazo);
   // Emite aviso de rechazo con titulo y detalle del servidor
   assert.deepEqual(avisoRecibido, {
     tipo: 'rechazo',
@@ -568,7 +612,7 @@ test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el 
   const html = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
-      resumenInicial: [],
+      comidasIniciales: diaFixture(),
       marcacionesIniciales: [{ id: 101, motivo: 'no_identificado', valido: false, hora: '12:00' }],
       avisoAccionInicial: avisoRecibido,
     })
@@ -592,7 +636,7 @@ test('autorizar con respuesta { valido: true } muestra el éxito y limpia la sel
     detalle: 'Comensal habilitado para Almuerzo',
   };
 
-  await ejecutarAutorizacionManual({
+  const resultado = await ejecutarAutorizacionManual({
     marcacion: { id: 101, motivo: 'no_identificado' },
     usuarioId: 42,
     autorizarFn: async () => respuestaExito,
@@ -603,6 +647,8 @@ test('autorizar con respuesta { valido: true } muestra el éxito y limpia la sel
     onMarcacionExitosa: () => { exitoNotificado = true; },
   });
 
+  // Devuelve el resultado para que la tabla sepa si cerrar la fila
+  assert.equal(resultado, respuestaExito);
   // Emite aviso de éxito con titulo y detalle
   assert.deepEqual(avisoRecibido, {
     tipo: 'exito',
@@ -620,7 +666,7 @@ test('autorizar con respuesta { valido: true } muestra el éxito y limpia la sel
   const html = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
-      resumenInicial: [],
+      comidasIniciales: diaFixture(),
       marcacionesIniciales: [],
       avisoAccionInicial: avisoRecibido,
     })
@@ -632,7 +678,7 @@ test('autorizar con respuesta { valido: true } muestra el éxito y limpia la sel
 });
 
 // -------------------------------------------------------------
-// 10. Refresco automático y botón Actualizar
+// 13. Refresco automático y botón Actualizar
 // -------------------------------------------------------------
 test('refresco automático cada 30s programa carga inicial, refrescos y cancela al desmontar', () => {
   const llamadas = [];
@@ -686,102 +732,20 @@ test('botón Actualizar visible en la sección de Supervisión (vista normal y v
   const htmlConDatos = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
-      resumenInicial: [{ comidaId: 1, comida: 'Desayuno', servidas: 10, rechazos: 0, rechazosTruncados: false, estado: '—' }],
+      comidasIniciales: diaFixture(),
       marcacionesIniciales: [],
     })
   );
-  assert.match(htmlConDatos, /Actualizar/);
-  assert.match(htmlConDatos, /supervision__acciones-barra/);
+  assert.match(htmlConDatos, /<span class="boton__texto">Actualizar<\/span>/);
 
   // En vista vacía
   const htmlVacio = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
-      resumenInicial: [],
+      comidasIniciales: diaFixture({ comidas: [], rechazosSinComida: 0 }),
       marcacionesIniciales: [],
     })
   );
-  assert.match(htmlVacio, /Actualizar/);
+  assert.match(htmlVacio, /<span class="boton__texto">Actualizar<\/span>/);
   assert.match(htmlVacio, /No hay registros de supervisión para este día/);
 });
-
-// -------------------------------------------------------------
-// 11. Fuera de horario cuando comida es null
-// -------------------------------------------------------------
-test('cuando /pantalla/estado viene con fuera_de_horario=true y comida null, muestra aviso en cabecera de tarjetas', async () => {
-  globalThis.fetch = async (ruta) => {
-    const url = new URL(ruta);
-    if (url.pathname === '/pantalla/estado') {
-      return json({
-        momento: '2026-09-28T05:00:00',
-        fecha_comida: '2026-09-28',
-        comida_id: null,
-        comida: null,
-        fuera_de_horario: true,
-        cupo: null,
-        padron: 200,
-        totales_del_dia: { raciones_servidas: 0, lecturas: 0, aceptadas: 0, rechazadas: 0 },
-        por_categoria: [],
-      });
-    }
-    if (url.pathname === '/reportes/informe') {
-      return json({
-        tipo: 'informe',
-        gestion: 2026,
-        mes: 9,
-        desde: '2026-09-28',
-        hasta: '2026-09-28',
-        situacion: 'curso',
-        cerrado: false,
-        categorias: ['Planta'],
-        filas: [
-          { etiqueta: 'Desayuno', celdas: [0], total: 0, registrado: true },
-          { etiqueta: 'Almuerzo', celdas: [0], total: 0, registrado: true },
-        ],
-        totales_por_categoria: [0],
-        total_general: 0,
-        sin_clasificar: 0,
-        sin_coeficiente: 0,
-        grupos: [],
-      });
-    }
-    if (url.pathname === '/historial/diario') {
-      return json({
-        total: 0,
-        limite: 1,
-        desplazamiento: 0,
-        comidas: [
-          { comida_id: 1, codigo: 'DES', nombre: 'Desayuno' },
-          { comida_id: 2, codigo: 'ALM', nombre: 'Almuerzo' },
-        ],
-        datos: [],
-      });
-    }
-    if (url.pathname === '/pantalla/ultimas-marcaciones') {
-      return json([]);
-    }
-    throw new Error(`Ruta inesperada: ${url.pathname}`);
-  };
-
-  const resumen = await obtenerResumenComidas({ fecha: '2026-09-28' });
-  assert.equal(resumen.length, 2);
-  assert.equal(resumen[0].estado, '—');
-  assert.equal(resumen[1].estado, '—');
-  assert.equal(resumen.fueraDeHorario, true, 'El adaptador debe marcar fueraDeHorario como true');
-
-  // En el render del componente:
-  const html = renderToStaticMarkup(
-    h(Supervision, {
-      cargandoInicial: false,
-      resumenInicial: resumen,
-      marcacionesIniciales: [],
-      fueraDeHorarioInicial: resumen.fueraDeHorario,
-    })
-  );
-
-  assert.match(html, /Comidas del día/);
-  // Aviso "Fuera de horario" presente en la cabecera de las tarjetas
-  assert.match(html, /supervision__aviso-fuera-horario/);
-  assert.match(html, /Fuera de horario/);
-});
-

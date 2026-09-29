@@ -323,7 +323,6 @@ function Panel({ rol }) {
             <Supervision
               key={diaServidor}
               fecha={reloj ? diaServidor : undefined}
-              hoy={ahoraServidor}
               simulacion={reloj}
               personal={estado.personal}
               versionReloj={versionReloj}

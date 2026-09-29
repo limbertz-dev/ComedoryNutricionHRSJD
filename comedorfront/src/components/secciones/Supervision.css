@@ -1,14 +1,15 @@
 /*
  * Supervision.css — Estilos para la sección de Supervisión.
  *
- * Utiliza estrictamente la paleta de tokens.css:
- * variables de superficie, acento, estados y tipografía Nunito.
+ * Una sola tabla en vivo con pestañas por comida. Utiliza estrictamente la
+ * paleta de tokens.css: variables de superficie, acento, estados y
+ * tipografía Nunito.
  */
 
 .supervision {
   display: flex;
   flex-direction: column;
-  gap: var(--e-6);
+  gap: var(--e-4);
   padding: 0 4px var(--e-7);
 }
 
@@ -103,11 +104,9 @@
   flex-wrap: wrap;
 }
 
-.supervision__acciones-barra {
-  display: flex;
-  align-items: center;
-  gap: var(--e-3);
-  margin-left: auto;
+.supervision__barra-superior .supervision__vacio {
+  flex: 1;
+  margin: 0;
 }
 
 .supervision__simulacion-aviso {
@@ -122,274 +121,97 @@
   font-size: var(--t-sm);
 }
 
-.supervision__aviso-fuera-horario {
-  display: flex;
-  align-items: center;
-}
-
 /* -------------------------------------------------------------
-   Secciones y Cabeceras
+   Pestañas: "Todas" + una por comida del día
    ------------------------------------------------------------- */
-.supervision__seccion {
+.supervision__pestanas {
   display: flex;
-  flex-direction: column;
-  gap: var(--e-4);
-}
-
-.supervision__seccion-cabecera {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--e-4);
+  gap: var(--e-3);
   flex-wrap: wrap;
 }
 
-.supervision__seccion-titulo {
+.supervision__pestana {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--e-1);
+  min-width: 150px;
+  padding: var(--e-3) var(--e-4);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
   color: var(--c-texto);
-  font-size: var(--t-lg);
-  font-weight: 800;
-  margin: 0;
-}
-
-.supervision__seccion-ayuda {
-  color: var(--c-texto-2);
-  font-size: var(--t-sm);
-  font-weight: 600;
-}
-
-/* -------------------------------------------------------------
-   (a) Tarjetas por comida del día
-   ------------------------------------------------------------- */
-.supervision__comidas-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--e-4);
-}
-
-.supervision__tarjeta-comida {
+  font-family: var(--fuente);
   cursor: pointer;
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
-.supervision__tarjeta-comida:hover {
-  transform: translateY(-2px);
+.supervision__pestana:hover {
   border-color: var(--c-borde-tarjeta-activo);
-  box-shadow: 0 4px 12px rgba(18, 35, 61, 0.05);
 }
 
-.supervision__tarjeta-comida--activa {
+.supervision__pestana--activa {
   border-color: var(--c-acento);
   background: var(--c-acento-tenue);
   box-shadow: 0 0 0 2px var(--c-acento-claro);
 }
 
-.supervision__tarjeta-comida--sin-filtro {
-  cursor: default;
-  opacity: 0.9;
-}
-
-.supervision__tarjeta-comida--sin-filtro:hover {
-  transform: none;
-  border-color: var(--c-borde);
-  box-shadow: none;
-}
-
-.supervision__metricas-comida {
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  margin: var(--e-3) 0 var(--e-2);
-  padding: var(--e-2) 0;
-  border-top: 1px solid var(--c-borde);
-  border-bottom: 1px solid var(--c-borde);
-}
-
-.supervision__metrica {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--e-1);
-}
-
-.supervision__metrica-rotulo {
-  color: var(--c-texto-3);
-  font-size: var(--t-xs);
-  text-transform: uppercase;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.supervision__metrica-valor {
-  color: var(--c-texto);
-  font-size: var(--t-xl);
-  font-weight: 800;
-  line-height: 1;
-}
-
-.supervision__metrica-valor--error {
-  color: var(--c-error);
-}
-
-.supervision__filtro-indicador {
-  display: block;
-  text-align: right;
-  font-size: var(--t-xs);
-  color: var(--c-texto-2);
-  font-weight: 600;
-}
-
-.supervision__nota-sin-filtro {
-  margin: 0;
-  text-align: right;
-  font-size: var(--t-xs);
-  color: var(--c-texto-3);
-}
-
-/* -------------------------------------------------------------
-   (b) Rechazos por revisar (agrupados por motivo)
-   ------------------------------------------------------------- */
-.supervision__grupos-rechazos {
-  display: flex;
-  flex-direction: column;
-  gap: var(--e-4);
-}
-
-.supervision__grupo-motivo {
-  background: var(--c-superficie);
-  border: 1px solid var(--c-borde);
-  border-radius: var(--r-lg);
-  padding: var(--e-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--e-3);
-}
-
-.supervision__grupo-cabecera {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: var(--e-2);
-  border-bottom: 1px solid var(--c-borde-suave);
-}
-
-.supervision__grupo-titulo {
-  color: var(--c-texto);
+.supervision__pestana-nombre {
   font-size: var(--t-base);
   font-weight: 800;
-  margin: 0;
 }
 
-.supervision__grupo-conteo {
+.supervision__pestana-estado {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-2);
   color: var(--c-texto-2);
   font-size: var(--t-xs);
   font-weight: 700;
-  background: var(--c-superficie-2);
-  padding: var(--e-1) var(--e-3);
+}
+
+/* Punto verde: la comida está en curso ahora mismo. */
+.supervision__punto-curso {
+  width: 9px;
+  height: 9px;
   border-radius: var(--r-full);
+  background: var(--c-acento);
+  box-shadow: 0 0 0 3px var(--c-acento-claro);
 }
 
-.supervision__lista-rechazos {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--e-2);
-}
-
-.supervision__fila-rechazo {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--e-4);
-  padding: var(--e-3);
-  border: 1px solid var(--c-borde-suave);
-  border-radius: var(--r-md);
-  background: var(--c-superficie-2);
-  flex-wrap: wrap;
-}
-
-.supervision__rechazo-info {
-  display: flex;
-  align-items: center;
+.supervision__pestana-cifras {
+  display: inline-flex;
   gap: var(--e-3);
-  min-width: 240px;
-  flex: 1;
 }
 
-.supervision__rechazo-icono {
-  display: flex;
+.supervision__pestana-cifra {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-sm);
-  background: var(--c-error-tenue);
+  gap: 4px;
+  font-size: var(--t-sm);
+  font-weight: 800;
+}
+
+.supervision__pestana-cifra--exito {
+  color: var(--c-exito);
+}
+
+.supervision__pestana-cifra--error {
   color: var(--c-error);
-  flex-shrink: 0;
 }
 
-.supervision__rechazo-nombre {
-  display: block;
-  color: var(--c-texto);
-  font-size: var(--t-sm);
-  font-weight: 700;
-}
-
-.supervision__rechazo-meta {
-  margin: var(--e-1) 0 0;
-  color: var(--c-texto-2);
-  font-size: var(--t-xs);
-}
-
-.supervision__rechazo-accion {
-  display: flex;
-  align-items: center;
-  gap: var(--e-3);
-}
-
-.supervision__autorizar-caja {
-  display: flex;
-  align-items: center;
-  gap: var(--e-2);
-  flex-wrap: wrap;
-}
-
-.supervision__select-padron {
-  padding: 8px 12px;
-  border: 1px solid var(--c-borde-fuerte);
-  border-radius: var(--r-sm);
-  background: var(--c-superficie);
-  color: var(--c-texto);
-  font-family: var(--fuente);
-  font-size: var(--t-sm);
-  font-weight: 600;
-  max-width: 280px;
-}
-
-.supervision__sin-derecho-caja {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--e-1);
-}
-
-.supervision__nota-pendiente {
-  color: var(--c-texto-3);
-  font-size: var(--t-xs);
-  font-weight: 600;
-}
-
-.supervision__rechazo-inmutable {
+/* Nota discreta bajo las pestañas, solo si hay rechazos fuera de franja. */
+.supervision__nota-fuera-franja {
+  margin: 0;
   color: var(--c-texto-2);
   font-size: var(--t-sm);
   font-weight: 600;
 }
 
 /* -------------------------------------------------------------
-   (c) Feed de SOLO LECTURA
+   Barra: resultado, búsqueda, actualizado y actualización
    ------------------------------------------------------------- */
-.supervision__feed-filtros {
+.supervision__filtros {
   display: flex;
   align-items: center;
   gap: var(--e-3);
@@ -423,23 +245,12 @@
   color: #ffffff;
 }
 
-.supervision__select-filtro {
-  padding: 7px 12px;
-  border: 1px solid var(--c-borde-fuerte);
-  border-radius: var(--r-md);
-  background: var(--c-superficie);
-  color: var(--c-texto);
-  font-family: var(--fuente);
-  font-size: var(--t-sm);
-  font-weight: 600;
-}
-
 .supervision__buscador {
   position: relative;
   display: flex;
   align-items: center;
-  margin-left: auto;
   min-width: 220px;
+  flex: 1;
 }
 
 .supervision__buscador-icono {
@@ -472,96 +283,93 @@
   cursor: pointer;
 }
 
-.supervision__conteo-feed {
+.supervision__actualizado {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.supervision__nota-truncada {
+  margin: 0;
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------
+   Tabla de marcaciones
+   ------------------------------------------------------------- */
+.supervision__tabla-caja {
+  overflow-x: auto;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+}
+
+.supervision__tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+.supervision__tabla th,
+.supervision__tabla td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-borde);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.supervision__tabla thead th {
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.supervision__tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Fondo suave de rechazo para las filas rechazadas. */
+.supervision__fila--rechazada {
+  background: var(--c-error-tenue);
+}
+
+.supervision__fila--rechazada:hover {
+  background: var(--c-error-tenue);
+}
+
+/* Fila expandida con el selector de comensal, debajo de la marcación. */
+.supervision__fila-autorizar td {
+  background: var(--c-superficie-2);
+}
+
+.supervision__autorizar-caja {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.supervision__autorizar-etiqueta {
   color: var(--c-texto-2);
   font-size: var(--t-sm);
   font-weight: 700;
 }
 
-.supervision__feed {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--e-2);
-}
-
-.supervision__feed-item {
-  display: flex;
-  align-items: center;
-  gap: var(--e-4);
-  padding: var(--e-3) var(--e-4);
-  background: var(--c-superficie);
-  border: 1px solid var(--c-borde);
-  border-radius: var(--r-md);
-  transition: background-color 0.15s ease;
-}
-
-.supervision__feed-item:hover {
-  background: var(--c-superficie-2);
-}
-
-.supervision__feed-icono {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
+.supervision__select-padron {
+  padding: 8px 12px;
+  border: 1px solid var(--c-borde-fuerte);
   border-radius: var(--r-sm);
-  flex-shrink: 0;
-}
-
-.supervision__feed-item--exito .supervision__feed-icono {
-  background: var(--c-exito-tenue);
-  color: var(--c-exito);
-}
-
-.supervision__feed-item--error .supervision__feed-icono {
-  background: var(--c-error-tenue);
-  color: var(--c-error);
-}
-
-.supervision__feed-cuerpo {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.supervision__feed-cabecera {
-  display: flex;
-  align-items: baseline;
-  gap: var(--e-3);
-}
-
-.supervision__feed-nombre {
+  background: var(--c-superficie);
   color: var(--c-texto);
-  font-size: var(--t-base);
-  font-weight: 700;
-}
-
-.supervision__feed-hora {
-  color: var(--c-texto-2);
-  font-size: var(--t-xs);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
   font-weight: 600;
-}
-
-.supervision__feed-detalle {
-  display: flex;
-  align-items: center;
-  gap: var(--e-2);
-  color: var(--c-texto-2);
-  font-size: var(--t-xs);
-  flex-wrap: wrap;
-}
-
-.supervision__feed-dispositivo {
-  color: var(--c-texto-3);
-  font-family: monospace;
-}
-
-.supervision__feed-estado {
-  flex-shrink: 0;
+  max-width: 320px;
 }
