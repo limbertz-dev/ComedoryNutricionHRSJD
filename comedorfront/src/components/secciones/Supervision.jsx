@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Boton from '../ui/Boton.jsx';
 import Etiqueta from '../ui/Etiqueta.jsx';
-import Tarjeta from '../ui/Tarjeta.jsx';
 import { IconoBuscar, IconoCheck, IconoEquis, IconoAlerta } from '../ui/Iconos.jsx';
 import {
   autorizarMarcacionManual,
-  obtenerResumenComidas,
+  obtenerComidasDelDia,
   obtenerUltimasMarcaciones,
 } from '../../api.js';
 import './Supervision.css';
@@ -17,6 +16,46 @@ const ETIQUETAS_MOTIVOS = {
   fuera_horario: 'Fuera de horario',
   desconocido: 'Rechazo no clasificado',
 };
+
+const ETIQUETAS_ESTADO = {
+  pendiente: 'Pendiente',
+  en_curso: 'En curso',
+  cerrada: 'Cerrada',
+};
+
+/**
+ * Pestaña con la que abre la tabla: la comida en curso, o "Todas" (null) si
+ * ninguna lo está.
+ */
+export function pestanaPorDefecto(comidas = []) {
+  return comidas.find((comida) => comida.estado === 'en_curso')?.comidaId ?? null;
+}
+
+/** Rechazos de una comida: suma de no_identificado + sin_derecho + duplicado. */
+export function rechazosDeComida(comida) {
+  const rechazos = comida.rechazos;
+  return rechazos.noIdentificado + rechazos.sinDerecho + rechazos.duplicado;
+}
+
+const FORMATO_HORA = new Intl.DateTimeFormat('es-BO', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+/** "Actualizado HH:MM:SS": en simulación, la hora del reloj del servidor. */
+function horaCorta(fecha) {
+  return FORMATO_HORA.format(fecha);
+}
+
+/**
+ * Método de la marcación a partir del dispositivo que la registró: Manual si
+ * es un registro a mano, Lector en cualquier otro caso.
+ */
+export function metodoDeMarcacion(marcacion) {
+  return marcacion.dispositivo === 'registro-manual' ? 'Manual' : 'Lector';
+}
 
 /**
  * Convierte el resultado devuelto por la API al autorizar una ración en el aviso
@@ -42,6 +81,7 @@ export function resolverAvisoAutorizacion(resultado) {
  * - Si es válido, emite aviso de éxito, limpia el comensal seleccionado y notifica éxito.
  * - Si es rechazo del servidor (200 con valido: false), emite aviso de rechazo y NO limpia la selección.
  * - En cualquier caso, recarga los datos desde la API.
+ * Devuelve el resultado del servidor para que la tabla sepa si cerrar la fila.
  */
 export async function ejecutarAutorizacionManual({
   marcacion,
@@ -55,10 +95,10 @@ export async function ejecutarAutorizacionManual({
 }) {
   if (!marcacion || marcacion.motivo === 'sin_derecho') {
     // Regla obligatoria: sin_derecho no hace ninguna petición
-    return;
+    return undefined;
   }
   const idNumero = Number(usuarioId);
-  if (!Number.isInteger(idNumero) || idNumero <= 0) return;
+  if (!Number.isInteger(idNumero) || idNumero <= 0) return undefined;
 
   setAutorizandoId?.(marcacion.id);
   setAvisoAccion?.(null);
@@ -75,16 +115,37 @@ export async function ejecutarAutorizacionManual({
       });
       onMarcacionExitosa?.();
     }
+    return resultado;
   } catch (err) {
     setAvisoAccion?.({
       tipo: 'error',
       titulo: 'Error al autorizar',
       detalle: err.message,
     });
+    return undefined;
   } finally {
     setAutorizandoId?.(null);
     await cargarDatosFn?.();
   }
+}
+
+/**
+ * Filtrado local de la tabla por resultado y nombre del comensal.
+ */
+export function filtrarMarcaciones(marcaciones, { resultado = 'todas', busqueda = '' } = {}) {
+  const termino = busqueda.trim().toLowerCase();
+  return marcaciones.filter((m) => {
+    if (resultado === 'aceptadas' && !m.valido) {
+      return false;
+    }
+    if (resultado === 'rechazadas' && m.valido) {
+      return false;
+    }
+    if (termino && !(m.persona?.nombre ?? '').toLowerCase().includes(termino)) {
+      return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -113,45 +174,49 @@ export function programarRefrescoSupervision({ cargarDatos, intervaloMs = 30000 
 /**
  * Sección de Supervisión del Comedor (para jefa de nutrición y sistemas).
  *
- * Estructura en este orden exacto:
- * (a) Una tarjeta por comida del día.
- * (b) «Rechazos por revisar», agrupados por motivo (único lugar con acciones).
- * (c) Feed de SOLO LECTURA con filtros por comida y por resultado.
+ * Una sola tabla en vivo: arriba, las pestañas de las comidas del día
+ * ("Todas" + una por comida); debajo, la barra de filtros y la tabla de
+ * marcaciones de la pestaña activa. La única acción vive en la columna
+ * Acción, solo para huellas no identificadas.
  */
 export default function Supervision({
   fecha,
-  hoy,
   simulacion = null,
   personal = [],
   versionReloj = 0,
   onMarcacionExitosa,
   cargandoInicial = true,
   errorInicial = null,
-  resumenInicial = [],
+  comidasIniciales = null,
   marcacionesIniciales = [],
   avisoAccionInicial = null,
-  fueraDeHorarioInicial = false,
+  actualizadoInicial = null,
+  filaExpandidaInicial = null,
 }) {
   const [cargando, setCargando] = useState(cargandoInicial);
   const [actualizando, setActualizando] = useState(false);
   const [error, setError] = useState(errorInicial);
-  const [resumenComidas, setResumenComidas] = useState(resumenInicial);
+  const [dia, setDia] = useState(comidasIniciales);
   const [marcaciones, setMarcaciones] = useState(marcacionesIniciales);
-  const [fueraDeHorario, setFueraDeHorario] = useState(
-    fueraDeHorarioInicial || Boolean(resumenInicial?.fueraDeHorario)
-  );
+  const [actualizado, setActualizado] = useState(actualizadoInicial);
 
-  /* Filtros del feed */
-  const [filtroComidaId, setFiltroComidaId] = useState(null);
+  /* Pestaña activa: null es "Todas". Arranca en la comida en curso. */
+  const [pestana, setPestana] = useState(() => pestanaPorDefecto(comidasIniciales?.comidas ?? []));
+  const pestanaTocada = useRef(false);
+  const pestanaRef = useRef(pestana);
+  pestanaRef.current = pestana;
+
+  /* Filtros de la tabla */
   const [filtroResultado, setFiltroResultado] = useState('todas');
   const [busqueda, setBusqueda] = useState('');
 
-  /* Comensal seleccionado para autorizar cada rechazo no_identificado { [marcacionId]: comensalId } */
+  /* Fila con el selector de comensal abierto + comensal por fila */
+  const [filaExpandida, setFilaExpandida] = useState(filaExpandidaInicial);
   const [comensalElegido, setComensalElegido] = useState({});
   const [autorizandoId, setAutorizandoId] = useState(null);
   const [avisoAccion, setAvisoAccion] = useState(avisoAccionInicial);
 
-  const cargarDatos = useCallback(async ({ signal, esRefresco = false } = {}) => {
+  const cargarDatos = useCallback(async ({ signal, esRefresco = false, comidaId } = {}) => {
     if (!esRefresco) {
       setCargando(true);
       setError(null);
@@ -159,15 +224,20 @@ export default function Supervision({
       setActualizando(true);
     }
     try {
-      const [resumen, ultimas] = await Promise.all([
-        obtenerResumenComidas({ fecha, hoy, signal }),
-        obtenerUltimasMarcaciones({ fecha, limite: 100, signal }),
-      ]);
-      if (!signal?.aborted) {
-        setResumenComidas(resumen);
-        setMarcaciones(ultimas);
-        setFueraDeHorario(Boolean(resumen?.fueraDeHorario));
+      const diaServidor = await obtenerComidasDelDia({ fecha, signal });
+      if (signal?.aborted) return;
+      /* La pestaña por defecto sale de las comidas recién llegadas, salvo que
+         ya se haya elegido una a mano. */
+      let tab = comidaId !== undefined ? comidaId : pestanaRef.current;
+      if (comidaId === undefined && !pestanaTocada.current) {
+        tab = pestanaPorDefecto(diaServidor.comidas);
+        setPestana(tab);
       }
+      const ultimas = await obtenerUltimasMarcaciones({ fecha, limite: 100, comidaId: tab, signal });
+      if (signal?.aborted) return;
+      setDia(diaServidor);
+      setMarcaciones(ultimas);
+      setActualizado(new Date());
     } catch (err) {
       if (!signal?.aborted) {
         if (!esRefresco) {
@@ -189,7 +259,7 @@ export default function Supervision({
         }
       }
     }
-  }, [fecha, hoy]);
+  }, [fecha]);
 
   useEffect(() => {
     return programarRefrescoSupervision({
@@ -198,9 +268,16 @@ export default function Supervision({
     });
   }, [cargarDatos, versionReloj]);
 
+  function manejarPestana(comidaId) {
+    pestanaTocada.current = true;
+    setPestana(comidaId);
+    setFilaExpandida(null);
+    cargarDatos({ esRefresco: true, comidaId });
+  }
+
   /* Acción exclusiva de rechazos no identificados */
   async function manejarAutorizarManual(marcacion, usuarioId) {
-    await ejecutarAutorizacionManual({
+    const resultado = await ejecutarAutorizacionManual({
       marcacion,
       usuarioId,
       autorizarFn: autorizarMarcacionManual,
@@ -210,43 +287,14 @@ export default function Supervision({
       setAutorizandoId,
       onMarcacionExitosa,
     });
+    if (resultado?.valido) setFilaExpandida(null);
   }
 
-  /* Agrupamiento de rechazos por motivo para la subsección (b) */
-  const rechazos = useMemo(() => marcaciones.filter((m) => !m.valido), [marcaciones]);
-  const gruposRechazos = useMemo(() => {
-    const grupos = {};
-    for (const m of rechazos) {
-      const motivo = m.motivo || 'desconocido';
-      if (!grupos[motivo]) grupos[motivo] = [];
-      grupos[motivo].push(m);
-    }
-    return grupos;
-  }, [rechazos]);
-
-  /* Filtrado del feed de solo lectura (c) */
-  const marcacionesFiltradas = useMemo(() => {
-    const termino = busqueda.trim().toLowerCase();
-    return marcaciones.filter((m) => {
-      if (filtroComidaId !== null && m.comidaId !== filtroComidaId) {
-        return false;
-      }
-      if (filtroResultado === 'aceptadas' && !m.valido) {
-        return false;
-      }
-      if (filtroResultado === 'rechazadas' && m.valido) {
-        return false;
-      }
-      if (termino) {
-        const nombre = (m.persona?.nombre ?? '').toLowerCase();
-        const legajo = (m.persona?.legajo ?? '').toLowerCase();
-        if (!nombre.includes(termino) && !legajo.includes(termino)) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [marcaciones, filtroComidaId, filtroResultado, busqueda]);
+  /* Filtrado local sobre las filas de la pestaña activa */
+  const marcacionesFiltradas = useMemo(
+    () => filtrarMarcaciones(marcaciones, { resultado: filtroResultado, busqueda }),
+    [marcaciones, filtroResultado, busqueda],
+  );
 
   /* Estados puros: Carga, Error y Vacío */
   if (cargando) {
@@ -268,7 +316,8 @@ export default function Supervision({
     );
   }
 
-  const esVacioTotal = resumenComidas.length === 0 && marcaciones.length === 0;
+  const comidas = dia?.comidas ?? [];
+  const esVacioTotal = comidas.length === 0 && marcaciones.length === 0;
   if (esVacioTotal) {
     return (
       <div className="supervision">
@@ -276,62 +325,6 @@ export default function Supervision({
           <p className="supervision__vacio" role="status">
             No hay registros de supervisión para este día.
           </p>
-          <div className="supervision__acciones-barra">
-            <Boton
-              variante="secundario"
-              onClick={() => cargarDatos({ esRefresco: true })}
-              disabled={actualizando}
-            >
-              {actualizando ? 'Actualizando…' : 'Actualizar'}
-            </Boton>
-          </div>
-        </div>
-        {avisoAccion ? (
-          <div
-            className={`supervision__aviso-accion supervision__aviso-accion--${avisoAccion.tipo}`}
-            role={avisoAccion.tipo === 'exito' ? 'status' : 'alert'}
-          >
-            {avisoAccion.tipo === 'exito' ? (
-              <span className="supervision__aviso-icono" aria-hidden="true">
-                <IconoCheck tamano={18} />
-              </span>
-            ) : (
-              <span className="supervision__aviso-icono" aria-hidden="true">
-                <IconoAlerta tamano={18} />
-              </span>
-            )}
-            <div className="supervision__aviso-contenido">
-              <strong className="supervision__aviso-titulo">{avisoAccion.titulo}</strong>
-              {avisoAccion.detalle ? (
-                <p className="supervision__aviso-detalle">{avisoAccion.detalle}</p>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              className="supervision__aviso-cerrar"
-              onClick={() => setAvisoAccion(null)}
-              aria-label="Cerrar aviso"
-            >
-              ×
-            </button>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="supervision">
-      {/* Barra superior con simulación y botón de actualización visible */}
-      <div className="supervision__barra-superior">
-        {simulacion ? (
-          <aside className="supervision__simulacion-aviso" role="status">
-            <Etiqueta tono="aviso">Modo simulación</Etiqueta>
-            <span>Supervisión basada en el reloj del servidor.</span>
-          </aside>
-        ) : <div />}
-
-        <div className="supervision__acciones-barra">
           <Boton
             variante="secundario"
             onClick={() => cargarDatos({ esRefresco: true })}
@@ -340,375 +333,295 @@ export default function Supervision({
             {actualizando ? 'Actualizando…' : 'Actualizar'}
           </Boton>
         </div>
+        {avisoAccion ? <AvisoAccion aviso={avisoAccion} onCerrar={() => setAvisoAccion(null)} /> : null}
       </div>
+    );
+  }
 
-      {avisoAccion ? (
-        <div
-          className={`supervision__aviso-accion supervision__aviso-accion--${avisoAccion.tipo}`}
-          role={avisoAccion.tipo === 'exito' ? 'status' : 'alert'}
-        >
-          {avisoAccion.tipo === 'exito' ? (
-            <span className="supervision__aviso-icono" aria-hidden="true">
-              <IconoCheck tamano={18} />
-            </span>
-          ) : (
-            <span className="supervision__aviso-icono" aria-hidden="true">
-              <IconoAlerta tamano={18} />
-            </span>
-          )}
-          <div className="supervision__aviso-contenido">
-            <strong className="supervision__aviso-titulo">{avisoAccion.titulo}</strong>
-            {avisoAccion.detalle ? (
-              <p className="supervision__aviso-detalle">{avisoAccion.detalle}</p>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className="supervision__aviso-cerrar"
-            onClick={() => setAvisoAccion(null)}
-            aria-label="Cerrar aviso"
-          >
-            ×
-          </button>
-        </div>
+  const hayFiltros = filtroResultado !== 'todas' || busqueda.trim() !== '';
+  const textoActualizado = simulacion
+    ? `Actualizado ${horaCorta(simulacion.ahora)}`
+    : actualizado ? `Actualizado ${horaCorta(actualizado)}` : 'Actualizado —';
+
+  return (
+    <div className="supervision">
+      {simulacion ? (
+        <aside className="supervision__simulacion-aviso" role="status">
+          <Etiqueta tono="aviso">Modo simulación</Etiqueta>
+          <span>Supervisión basada en el reloj del servidor.</span>
+        </aside>
       ) : null}
 
-      {/* -----------------------------------------------------------
-          (a) Una tarjeta por comida del día
-          ----------------------------------------------------------- */}
-      <section className="supervision__seccion" aria-label="Comidas del día">
-        <header className="supervision__seccion-cabecera">
-          <div>
-            <h2 className="supervision__seccion-titulo">Comidas del día</h2>
-            <span className="supervision__seccion-ayuda">
-              Seleccione una comida para filtrar el hilo inferior
-            </span>
-          </div>
-          {fueraDeHorario ? (
-            <div className="supervision__aviso-fuera-horario">
-              <Etiqueta tono="aviso">Fuera de horario</Etiqueta>
-            </div>
-          ) : null}
-        </header>
+      {avisoAccion ? <AvisoAccion aviso={avisoAccion} onCerrar={() => setAvisoAccion(null)} /> : null}
 
-        {resumenComidas.length === 0 ? (
-          <p className="supervision__vacio">No hay comidas registradas para este día.</p>
-        ) : (
-          <div className="supervision__comidas-grid">
-            {resumenComidas.map((item) => {
-              const activa = filtroComidaId === item.comidaId && item.comidaId !== null;
-              return (
-                <Tarjeta
-                  key={item.comidaId ?? item.comida}
-                  titulo={item.comida}
-                  accesorio={
-                    <Etiqueta
-                      tono={
-                        item.estado === 'En curso'
-                          ? 'acento'
-                          : item.estado === 'Fuera de horario'
-                            ? 'aviso'
-                            : 'neutro'
-                      }
-                    >
-                      {item.estado}
-                    </Etiqueta>
-                  }
-                  className={`supervision__tarjeta-comida${activa ? ' supervision__tarjeta-comida--activa' : ''}${item.comidaId === null ? ' supervision__tarjeta-comida--sin-filtro' : ''}`}
-                  onClick={
-                    item.comidaId !== null
-                      ? () => setFiltroComidaId(activa ? null : item.comidaId)
-                      : undefined
-                  }
-                >
-                  <div className="supervision__metricas-comida">
-                    <div className="supervision__metrica">
-                      <span className="supervision__metrica-rotulo">Servidas</span>
-                      <strong className="supervision__metrica-valor">{item.servidas}</strong>
-                    </div>
-                    <div className="supervision__metrica">
-                      <span className="supervision__metrica-rotulo">Rechazos</span>
-                      <strong
-                        className={`supervision__metrica-valor${
-                          item.rechazos > 0 ? ' supervision__metrica-valor--error' : ''
-                        }`}
-                      >
-                        {item.rechazosTruncados ? '100 o más' : item.rechazos}
-                      </strong>
-                    </div>
-                  </div>
-                  {item.comidaId === null ? (
-                    <p className="supervision__nota-sin-filtro">Sin filtro disponible</p>
-                  ) : (
-                    <span className="supervision__filtro-indicador">
-                      {activa ? 'Filtrando este turno' : 'Clic para filtrar'}
-                    </span>
-                  )}
-                </Tarjeta>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* -----------------------------------------------------------
-          (b) «Rechazos por revisar», agrupados por motivo (con acciones)
-          ----------------------------------------------------------- */}
-      <section className="supervision__seccion" aria-label="Rechazos por revisar">
-        <header className="supervision__seccion-cabecera">
-          <div>
-            <h2 className="supervision__seccion-titulo">Rechazos por revisar</h2>
-            <p className="supervision__seccion-ayuda">
-              Resolución de excepciones y autorizaciones manuales
-            </p>
-          </div>
-          <Etiqueta tono={rechazos.length > 0 ? 'error' : 'neutro'}>
-            {rechazos.length} {rechazos.length === 1 ? 'rechazo' : 'rechazos'}
-          </Etiqueta>
-        </header>
-
-        {rechazos.length === 0 ? (
-          <p className="supervision__vacio" role="status">No hay rechazos por revisar.</p>
-        ) : (
-          <div className="supervision__grupos-rechazos">
-            {Object.entries(gruposRechazos).map(([motivo, lista]) => (
-              <article key={motivo} className="supervision__grupo-motivo">
-                <header className="supervision__grupo-cabecera">
-                  <h3 className="supervision__grupo-titulo">
-                    {ETIQUETAS_MOTIVOS[motivo] ?? motivo}
-                  </h3>
-                  <span className="supervision__grupo-conteo">
-                    {lista.length} {lista.length === 1 ? 'caso' : 'casos'}
-                  </span>
-                </header>
-
-                <ul className="supervision__lista-rechazos">
-                  {lista.map((reg) => {
-                    const reactKey = `${reg.dispositivo ?? 'disp'}-${reg.id}`;
-                    const esNoIdentificado = reg.motivo === 'no_identificado';
-                    const esSinDerecho = reg.motivo === 'sin_derecho';
-                    const comensalSel = comensalElegido[reg.id] ?? '';
-
-                    return (
-                      <li key={reactKey} className="supervision__fila-rechazo">
-                        <div className="supervision__rechazo-info">
-                          <span className="supervision__rechazo-icono" aria-hidden="true">
-                            <IconoEquis tamano={18} />
-                          </span>
-                          <div>
-                            <strong className="supervision__rechazo-nombre">
-                              {reg.persona?.nombre ?? 'Desconocido'}
-                            </strong>
-                            <p className="supervision__rechazo-meta">
-                              {reg.persona?.categoria ?? 'Sin clasificar'} · Legajo {reg.persona?.legajo ?? '—'} · {reg.hora} · {reg.comida ?? 'Sin comida'} · {reg.dispositivo ?? 'dispositivo'}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Único lugar con acciones del módulo */}
-                        <div className="supervision__rechazo-accion">
-                          {esNoIdentificado ? (
-                            <div className="supervision__autorizar-caja">
-                              <label className="solo-lectores" htmlFor={`select-${reg.id}`}>
-                                Asignar comensal
-                              </label>
-                              <select
-                                id={`select-${reg.id}`}
-                                className="supervision__select-padron"
-                                value={comensalSel}
-                                onChange={(e) =>
-                                  setComensalElegido({
-                                    ...comensalElegido,
-                                    [reg.id]: e.target.value,
-                                  })
-                                }
-                              >
-                                <option value="">Seleccione comensal del padrón…</option>
-                                {personal.map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.nombre} — {p.categoria} ({p.legajo})
-                                  </option>
-                                ))}
-                              </select>
-                              <Boton
-                                variante="primario"
-                                disabled={!comensalSel || autorizandoId === reg.id}
-                                onClick={() => manejarAutorizarManual(reg, comensalSel)}
-                              >
-                                {autorizandoId === reg.id ? 'Autorizando…' : 'Autorizar ración manual'}
-                              </Boton>
-                            </div>
-                          ) : esSinDerecho ? (
-                            <div className="supervision__sin-derecho-caja">
-                              <Boton
-                                variante="secundario"
-                                disabled={true}
-                                title="Requiere excepción de jefatura (pendiente)"
-                              >
-                                Autorizar ración manual
-                              </Boton>
-                              <span className="supervision__nota-pendiente">
-                                Requiere excepción de jefatura (pendiente)
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="supervision__rechazo-inmutable">
-                              {reg.titulo}
-                            </span>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* -----------------------------------------------------------
-          (c) Feed de SOLO LECTURA con filtros por comida y resultado
-          ----------------------------------------------------------- */}
-      <section className="supervision__seccion" aria-label="Hilo de marcaciones">
-        <header className="supervision__seccion-cabecera">
-          <div>
-            <h2 className="supervision__seccion-titulo">Hilo de marcaciones</h2>
-            <p className="supervision__seccion-ayuda">
-              Registro cronológico de lecturas biométricas y asistencias (solo lectura)
-            </p>
-          </div>
-          <span className="supervision__conteo-feed">
-            {marcacionesFiltradas.length} marcaciones
-          </span>
-        </header>
-
-        {/* Controles de filtro del feed */}
-        <div className="supervision__feed-filtros">
-          <div className="supervision__chips-filtro" role="tablist" aria-label="Filtrar por resultado">
+      {/* Pestañas: "Todas" + una por comida del día, en el orden recibido. */}
+      <div className="supervision__pestanas" role="tablist" aria-label="Filtrar por comida">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={pestana === null}
+          className={`supervision__pestana${pestana === null ? ' supervision__pestana--activa' : ''}`}
+          onClick={() => manejarPestana(null)}
+        >
+          <span className="supervision__pestana-nombre">Todas</span>
+        </button>
+        {comidas.map((comida) => {
+          const activa = pestana === comida.comidaId;
+          const enCurso = comida.estado === 'en_curso';
+          return (
             <button
+              key={comida.comidaId}
               type="button"
               role="tab"
-              aria-selected={filtroResultado === 'todas'}
-              className={`supervision__chip${filtroResultado === 'todas' ? ' supervision__chip--activo' : ''}`}
-              onClick={() => setFiltroResultado('todas')}
+              aria-selected={activa}
+              className={`supervision__pestana${activa ? ' supervision__pestana--activa' : ''}`}
+              onClick={() => manejarPestana(comida.comidaId)}
             >
-              Todas
+              <span className="supervision__pestana-nombre">{comida.comida}</span>
+              <span className="supervision__pestana-estado">
+                {enCurso ? <span className="supervision__punto-curso" aria-hidden="true" /> : null}
+                {ETIQUETAS_ESTADO[comida.estado] ?? comida.estado}
+              </span>
+              <span className="supervision__pestana-cifras">
+                <span className="supervision__pestana-cifra supervision__pestana-cifra--exito">
+                  <IconoCheck tamano={14} />
+                  {comida.servidas}
+                </span>
+                <span className="supervision__pestana-cifra supervision__pestana-cifra--error">
+                  <IconoEquis tamano={14} />
+                  {rechazosDeComida(comida)}
+                </span>
+              </span>
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filtroResultado === 'aceptadas'}
-              className={`supervision__chip${filtroResultado === 'aceptadas' ? ' supervision__chip--activo' : ''}`}
-              onClick={() => setFiltroResultado('aceptadas')}
-            >
-              Aceptadas
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={filtroResultado === 'rechazadas'}
-              className={`supervision__chip${filtroResultado === 'rechazadas' ? ' supervision__chip--activo' : ''}`}
-              onClick={() => setFiltroResultado('rechazadas')}
-            >
-              Rechazadas
-            </button>
-          </div>
+          );
+        })}
+      </div>
+      {(dia?.rechazosSinComida ?? 0) > 0 ? (
+        <p className="supervision__nota-fuera-franja" role="status">
+          {dia.rechazosSinComida === 1
+            ? '1 rechazo fuera de franja'
+            : `${dia.rechazosSinComida} rechazos fuera de franja`}
+        </p>
+      ) : null}
 
-          <div className="supervision__selector-comida">
-            <label htmlFor="filtro-comida-select" className="solo-lectores">
-              Filtrar por comida
-            </label>
-            <select
-              id="filtro-comida-select"
-              className="supervision__select-filtro"
-              value={filtroComidaId ?? ''}
-              onChange={(e) => setFiltroComidaId(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">Todas las comidas</option>
-              {resumenComidas
-                .filter((c) => c.comidaId !== null)
-                .map((c) => (
-                  <option key={c.comidaId} value={c.comidaId}>
-                    {c.comida}
-                  </option>
-                ))}
-            </select>
-          </div>
-
-          <div className="supervision__buscador">
-            <span className="supervision__buscador-icono" aria-hidden="true">
-              <IconoBuscar tamano={15} />
-            </span>
-            <input
-              type="text"
-              className="supervision__buscador-input"
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar por nombre o legajo…"
-              aria-label="Buscar en el hilo de marcaciones"
-            />
-            {busqueda ? (
-              <button
-                type="button"
-                className="supervision__buscador-limpiar"
-                onClick={() => setBusqueda('')}
-                aria-label="Limpiar búsqueda"
-              >
-                ×
-              </button>
-            ) : null}
-          </div>
+      {/* Barra: resultado, búsqueda por nombre, actualizado y actualización. */}
+      <div className="supervision__filtros">
+        <div className="supervision__chips-filtro" role="tablist" aria-label="Filtrar por resultado">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={filtroResultado === 'todas'}
+            className={`supervision__chip${filtroResultado === 'todas' ? ' supervision__chip--activo' : ''}`}
+            onClick={() => setFiltroResultado('todas')}
+          >
+            Todas
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={filtroResultado === 'aceptadas'}
+            className={`supervision__chip${filtroResultado === 'aceptadas' ? ' supervision__chip--activo' : ''}`}
+            onClick={() => setFiltroResultado('aceptadas')}
+          >
+            Aceptadas
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={filtroResultado === 'rechazadas'}
+            className={`supervision__chip${filtroResultado === 'rechazadas' ? ' supervision__chip--activo' : ''}`}
+            onClick={() => setFiltroResultado('rechazadas')}
+          >
+            Rechazadas
+          </button>
         </div>
 
-        {marcacionesFiltradas.length === 0 ? (
-          <p className="supervision__vacio" role="status">
-            No hay marcaciones que coincidan con los filtros seleccionados.
-          </p>
-        ) : (
-          <ul className="supervision__feed" aria-label="Lista de marcaciones registradas">
-            {marcacionesFiltradas.map((m) => {
-              const reactKey = `${m.dispositivo ?? 'disp'}-${m.id}`;
-              return (
-                <li
-                  key={reactKey}
-                  className={`supervision__feed-item supervision__feed-item--${
-                    m.valido ? 'exito' : 'error'
-                  }`}
-                >
-                  <span className="supervision__feed-icono" aria-hidden="true">
-                    {m.valido ? <IconoCheck tamano={18} /> : <IconoEquis tamano={18} />}
-                  </span>
+        <div className="supervision__buscador">
+          <span className="supervision__buscador-icono" aria-hidden="true">
+            <IconoBuscar tamano={15} />
+          </span>
+          <input
+            type="text"
+            className="supervision__buscador-input"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar por nombre…"
+            aria-label="Buscar por nombre"
+          />
+          {busqueda ? (
+            <button
+              type="button"
+              className="supervision__buscador-limpiar"
+              onClick={() => setBusqueda('')}
+              aria-label="Limpiar búsqueda"
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
 
-                  <div className="supervision__feed-cuerpo">
-                    <div className="supervision__feed-cabecera">
-                      <strong className="supervision__feed-nombre">
-                        {m.persona?.nombre ?? 'Desconocido'}
-                      </strong>
-                      <span className="supervision__feed-hora">{m.hora}</span>
-                    </div>
-                    <div className="supervision__feed-detalle">
-                      <span>{m.persona?.categoria ?? 'Sin clasificar'}</span>
-                      <span>·</span>
-                      <span>Legajo {m.persona?.legajo ?? '—'}</span>
-                      <span>·</span>
-                      <span>{m.comida ?? 'Sin comida asignada'}</span>
-                      <span>·</span>
-                      <span className="supervision__feed-dispositivo">{m.dispositivo ?? 'disp'}</span>
-                    </div>
-                  </div>
+        <span className="supervision__actualizado" role="status">{textoActualizado}</span>
 
-                  <div className="supervision__feed-estado">
-                    <Etiqueta tono={m.valido ? 'exito' : 'error'}>
-                      {m.titulo}
-                    </Etiqueta>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+        <Boton
+          variante="secundario"
+          onClick={() => cargarDatos({ esRefresco: true })}
+          disabled={actualizando}
+        >
+          {actualizando ? 'Actualizando…' : 'Actualizar'}
+        </Boton>
+      </div>
+
+      {marcaciones.length >= 100 ? (
+        <p className="supervision__nota-truncada" role="status">Mostrando las últimas 100</p>
+      ) : null}
+
+      {marcacionesFiltradas.length === 0 ? (
+        <p className="supervision__vacio" role="status">
+          {hayFiltros
+            ? 'No hay marcaciones que coincidan con los filtros seleccionados.'
+            : 'No hay marcaciones registradas.'}
+        </p>
+      ) : (
+        <div className="supervision__tabla-caja">
+          <table className="supervision__tabla" aria-label="Marcaciones de la comida seleccionada">
+            <thead>
+              <tr>
+                <th scope="col">Hora</th>
+                <th scope="col">Comensal</th>
+                <th scope="col">Categoría</th>
+                <th scope="col">Comida</th>
+                <th scope="col">Resultado</th>
+                <th scope="col">Motivo</th>
+                <th scope="col">Método</th>
+                <th scope="col">Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              {marcacionesFiltradas.map((m) => (
+                <Fragment key={`${m.dispositivo}-${m.id}`}>
+                  <tr className={m.valido ? undefined : 'supervision__fila--rechazada'}>
+                    <td>{m.hora}</td>
+                    <td>{m.persona?.nombre ?? 'Desconocido'}</td>
+                    <td>{m.persona?.categoria ?? 'Sin clasificar'}</td>
+                    <td>{m.comida ?? '—'}</td>
+                    <td>
+                      <Etiqueta tono={m.valido ? 'exito' : 'error'}>
+                        {m.valido ? 'Aceptada' : 'Rechazada'}
+                      </Etiqueta>
+                    </td>
+                    <td>{m.valido ? '—' : (ETIQUETAS_MOTIVOS[m.motivo] ?? m.motivo ?? ETIQUETAS_MOTIVOS.desconocido)}</td>
+                    <td>{metodoDeMarcacion(m)}</td>
+                    <td>
+                      <AccionFila
+                        marcacion={m}
+                        expandida={filaExpandida === m.id}
+                        onAutorizar={() => setFilaExpandida(filaExpandida === m.id ? null : m.id)}
+                      />
+                    </td>
+                  </tr>
+                  {filaExpandida === m.id && m.motivo === 'no_identificado' ? (
+                    <tr className="supervision__fila-autorizar">
+                      <td colSpan={8}>
+                        <div className="supervision__autorizar-caja">
+                          <label className="supervision__autorizar-etiqueta" htmlFor={`autorizar-${m.id}`}>
+                            Comensal
+                          </label>
+                          <select
+                            id={`autorizar-${m.id}`}
+                            className="supervision__select-padron"
+                            value={comensalElegido[m.id] ?? ''}
+                            onChange={(e) => setComensalElegido({
+                              ...comensalElegido,
+                              [m.id]: e.target.value,
+                            })}
+                          >
+                            <option value="">Seleccione comensal del padrón…</option>
+                            {personal.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.nombre} — {p.categoria} ({p.legajo})
+                              </option>
+                            ))}
+                          </select>
+                          <Boton
+                            disabled={!(comensalElegido[m.id] ?? '') || autorizandoId === m.id}
+                            onClick={() => manejarAutorizarManual(m, comensalElegido[m.id])}
+                          >
+                            {autorizandoId === m.id ? 'Autorizando…' : 'Confirmar ración manual'}
+                          </Boton>
+                          <Boton variante="secundario" onClick={() => setFilaExpandida(null)}>
+                            Cancelar
+                          </Boton>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Acción de una fila: "Autorizar" solo para huellas no identificadas (abre el
+ * selector debajo de la fila); en sin_derecho, botón desactivado sin petición;
+ * en las demás filas, nada.
+ */
+function AccionFila({ marcacion, expandida, onAutorizar }) {
+  if (marcacion.motivo === 'no_identificado') {
+    return (
+      <Boton variante="primario" onClick={onAutorizar} aria-expanded={expandida}>
+        Autorizar
+      </Boton>
+    );
+  }
+  if (marcacion.motivo === 'sin_derecho') {
+    return (
+      <Boton
+        variante="secundario"
+        disabled
+        title="Requiere excepción de jefatura (pendiente)"
+      >
+        Autorizar
+      </Boton>
+    );
+  }
+  return null;
+}
+
+/** Aviso de éxito, rechazo o error tras una acción, con cierre manual. */
+function AvisoAccion({ aviso, onCerrar }) {
+  return (
+    <div
+      className={`supervision__aviso-accion supervision__aviso-accion--${aviso.tipo}`}
+      role={aviso.tipo === 'exito' ? 'status' : 'alert'}
+    >
+      {aviso.tipo === 'exito' ? (
+        <span className="supervision__aviso-icono" aria-hidden="true">
+          <IconoCheck tamano={18} />
+        </span>
+      ) : (
+        <span className="supervision__aviso-icono" aria-hidden="true">
+          <IconoAlerta tamano={18} />
+        </span>
+      )}
+      <div className="supervision__aviso-contenido">
+        <strong className="supervision__aviso-titulo">{aviso.titulo}</strong>
+        {aviso.detalle ? (
+          <p className="supervision__aviso-detalle">{aviso.detalle}</p>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        className="supervision__aviso-cerrar"
+        onClick={onCerrar}
+        aria-label="Cerrar aviso"
+      >
+        ×
+      </button>
     </div>
   );
 }
