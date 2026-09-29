@@ -127,6 +127,16 @@ tbody tr:hover {
   overflow: hidden;
 }
 
+/*
+ * Pantalla completa de la cocinera: sin sidebar ni header, el contenido
+ * ocupa el 100 % del ancho y del alto, sin columnas ni franjas vacías.
+ */
+.app--pantalla-completa {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: 'main';
+}
+
 .app__main {
   display: flex;
   flex-direction: column;
