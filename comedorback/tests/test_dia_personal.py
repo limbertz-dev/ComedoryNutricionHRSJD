@@ -151,7 +151,12 @@ def test_dia_personal_misma_ficha_que_el_historial(cliente, tokens, rol):
     historial = _ficha_del_historial(cliente, tokens["jefa"], usuario_id, fecha)
     assert historial is not None
     assert cuerpo["comidas"] == historial["comidas"]
-    assert cuerpo["datos"][0] == historial["persona"]
+    persona = dict(historial["persona"])
+    if rol == "cocinera":
+        # La cocinera ve la misma tira, salvo el carnet (fuga cerrada en R1).
+        assert cuerpo["datos"][0]["carnet_identidad"] is None
+        persona["carnet_identidad"] = None
+    assert cuerpo["datos"][0] == persona
 
 
 def test_dia_personal_por_defecto_es_hoy(cliente, tokens):
@@ -165,7 +170,9 @@ def test_dia_personal_por_defecto_es_hoy(cliente, tokens):
     if historial is None:
         assert cuerpo["total"] == 0 and cuerpo["datos"] == []
     else:
-        assert cuerpo["datos"] == [historial["persona"]]
+        esperada = dict(historial["persona"])
+        esperada["carnet_identidad"] = None  # la cocinera no ve el carnet (R1)
+        assert cuerpo["datos"] == [esperada]
 
 
 def test_dia_personal_sin_derecho_ni_racion_viene_vacio(cliente, tokens):
