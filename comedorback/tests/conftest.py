@@ -78,6 +78,9 @@ def base_de_prueba():
 def tablas_auth_limpias():
     with SesionLocal() as sesion:
         sesion.execute(text("DELETE FROM intentos_login"))
+        # creada_por_cuenta se apunta a sí misma (RESTRICT): se suelta
+        # primero o el DELETE reventaría por la FK.
+        sesion.execute(text("UPDATE usuarios_sistema SET creada_por_cuenta = NULL"))
         sesion.execute(text("DELETE FROM usuarios_sistema"))
         sesion.commit()
     yield

@@ -38,6 +38,9 @@ class Comensal(BaseContrato):
     __tablename__ = "v_comensales"
 
     usuario_id: Mapped[int] = mapped_column(ID, primary_key=True)
+    login: Mapped[str | None] = mapped_column(
+        String(255), comment="users.name: el login con que figura en el padron."
+    )
     nombre_completo: Mapped[str | None] = mapped_column(String(100))
     carnet_identidad: Mapped[str | None] = mapped_column(String(100))
     tipo_trabajador: Mapped[str | None] = mapped_column(String(30))

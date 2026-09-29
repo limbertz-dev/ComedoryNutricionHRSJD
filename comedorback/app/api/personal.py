@@ -9,6 +9,7 @@ from app.consultas import derecho as consultas_derecho
 from app.consultas import personal as consultas
 from app.consultas.personal import FiltrosPadron
 from app.core import reloj
+from app.core.autorizacion import UsuarioActual
 from app.core.db import SesionDep
 from app.esquemas.marcacion import DerechoComida
 from app.esquemas.personal import Comensal, PaginaComensales
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/personal", tags=["personal"])
 @router.get("", response_model=PaginaComensales, summary="Padrón de comensales")
 def listar_personal(
     sesion: SesionDep,
+    usuario: UsuarioActual,
     busqueda: Annotated[
         str | None,
         Query(description="Busca en nombre completo, carnet o número de ítem"),
@@ -45,24 +47,36 @@ def listar_personal(
     total = consultas.contar_comensales(sesion, filtros)
     datos = consultas.listar_comensales(sesion, filtros, limite, desplazamiento)
 
+    comensales = [Comensal(**d) for d in datos]
+    if usuario.rol == "cocinera":
+        # La cocinera opera el lector: le alcanza el legajo (numero_item).
+        # El carnet y el tipo de trabajador no salen de la jefatura.
+        for comensal in comensales:
+            comensal.carnet_identidad = None
+            comensal.tipo_trabajador = None
     return PaginaComensales(
         total=total,
         limite=limite,
         desplazamiento=desplazamiento,
         sin_mapeo_de_categoria=sum(1 for d in datos if d["categoria_reporte"] is None),
-        datos=[Comensal(**d) for d in datos],
+        datos=comensales,
     )
 
 
 @router.get("/{usuario_id}", response_model=Comensal, summary="Ficha de un comensal")
 def obtener_personal(
     sesion: SesionDep,
+    usuario: UsuarioActual,
     usuario_id: Annotated[int, Path(description="users.id, no personas.id")],
 ) -> Comensal:
     comensal = consultas.obtener_comensal(sesion, usuario_id)
     if comensal is None:
         raise HTTPException(status_code=404, detail="No existe ese comensal")
-    return Comensal(**comensal)
+    ficha = Comensal(**comensal)
+    if usuario.rol == "cocinera":
+        ficha.carnet_identidad = None
+        ficha.tipo_trabajador = None
+    return ficha
 
 
 @router.get(

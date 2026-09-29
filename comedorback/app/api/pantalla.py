@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.consultas import historial as consultas_historial
 from app.consultas import pantalla as consultas
 from app.core import reloj
+from app.core.autorizacion import UsuarioActual
 from app.core.db import SesionDep
 from app.esquemas.historial import ComensalDelDia, ComidaListada, HistorialDiario
 from app.esquemas.pantalla import ComidasDelDia, EstadoPantalla, Marcacion
@@ -104,6 +105,7 @@ def comidas_del_dia(
 )
 def dia_personal(
     sesion: SesionDep,
+    usuario: UsuarioActual,
     persona_id: Annotated[int, Query(gt=0, description="users.id, no personas.id")],
     fecha: Annotated[date | None, Query(description="Por defecto, hoy")] = None,
 ) -> HistorialDiario:
@@ -120,11 +122,15 @@ def dia_personal(
     total, comidas, datos = consultas_historial.historial_diario(
         sesion, fecha, limite=1, usuario_id=persona_id
     )
+    fichas = [ComensalDelDia(**asdict(d)) for d in datos]
+    if usuario.rol == "cocinera":
+        for ficha in fichas:
+            ficha.carnet_identidad = None
     return HistorialDiario(
         fecha=fecha,
         total=total,
         limite=1,
         desplazamiento=0,
         comidas=[ComidaListada(**asdict(c)) for c in comidas],
-        datos=[ComensalDelDia(**asdict(d)) for d in datos],
+        datos=fichas,
     )
