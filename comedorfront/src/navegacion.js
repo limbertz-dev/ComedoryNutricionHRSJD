@@ -3,6 +3,7 @@ import {
   IconoHistorial,
   IconoHuella,
   IconoOjo,
+  IconoReloj,
   IconoReportes,
   IconoUsuario,
 } from './components/ui/Iconos.jsx';
@@ -52,10 +53,24 @@ export const SECCIONES = [
     Icono: IconoReportes,
   },
   {
+    id: 'reglas',
+    etiqueta: 'Reglas del sistema',
+    titulo: 'Reglas del sistema',
+    descripcion: 'Horarios y derecho a comer',
+    Icono: IconoReloj,
+  },
+  {
     id: 'admin',
     etiqueta: 'Administración',
     titulo: 'Administración de cuentas',
     descripcion: 'Cuentas del comedor',
+    Icono: IconoUsuario,
+  },
+  {
+    id: 'cuentas',
+    etiqueta: 'Cuentas',
+    titulo: 'Cuentas',
+    descripcion: 'Cuentas del comedor (solo lectura)',
     Icono: IconoUsuario,
   },
 ];

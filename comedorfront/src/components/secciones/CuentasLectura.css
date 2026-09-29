@@ -1,0 +1,174 @@
+/*
+ * CuentasLectura.css — Estilos para la vista de Cuentas (jefa, lectura).
+ *
+ * Tabla y barra iguales a las de Administración, con clases propias: esta
+ * sección no importa Administracion.css y Administración no se toca. Todo
+ * sale de la paleta de tokens.css.
+ */
+
+.cuentas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+  padding: 0 4px var(--e-7);
+}
+
+.cuentas__estado,
+.cuentas__vacio {
+  margin: var(--e-4) 0;
+  padding: var(--e-5);
+  background: var(--c-superficie);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-lg);
+  color: var(--c-texto-2);
+  font-size: var(--t-base);
+  text-align: center;
+}
+
+.cuentas__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  padding: var(--e-4) var(--e-5);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  border-radius: var(--r-md);
+  color: var(--c-error);
+  font-weight: 600;
+}
+
+.cuentas__error p {
+  margin: 0;
+}
+
+.cuentas__aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-3);
+  padding: var(--e-3) var(--e-4);
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  color: var(--c-error);
+}
+
+.cuentas__aviso-contenido {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cuentas__aviso-titulo {
+  font-weight: 700;
+}
+
+.cuentas__aviso-detalle {
+  margin: 0;
+  opacity: 0.95;
+}
+
+.cuentas__aviso-cerrar {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: currentColor;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* -------------------------------------------------------------
+   Barra: buscador y Actualizar
+   ------------------------------------------------------------- */
+.cuentas__barra {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.cuentas__buscador {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 220px;
+  flex: 1;
+}
+
+.cuentas__buscador-icono {
+  position: absolute;
+  left: 10px;
+  color: var(--c-texto-3);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.cuentas__buscador-input {
+  width: 100%;
+  padding: 7px 30px 7px 32px;
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  background: var(--c-superficie);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+}
+
+.cuentas__buscador-limpiar {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: 0;
+  color: var(--c-texto-3);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* -------------------------------------------------------------
+   Tabla de cuentas (solo lectura)
+   ------------------------------------------------------------- */
+.cuentas__tabla-caja {
+  overflow-x: auto;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+}
+
+.cuentas__tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+.cuentas__tabla th,
+.cuentas__tabla td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-borde);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.cuentas__tabla thead th {
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cuentas__tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.cuentas__fila--inactiva {
+  background: var(--c-superficie-2);
+}
+
+.cuentas__usuario {
+  font-weight: 700;
+}
