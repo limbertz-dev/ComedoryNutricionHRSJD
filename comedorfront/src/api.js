@@ -1405,6 +1405,218 @@ export async function saltarAProximaFranja({ signal } = {}) {
   return { tipo: 'ok', comidaId: datos.comida_id, comida: datos.comida, inicio, reloj };
 }
 
+/* ------------------------------------------------------------------ *
+ * Administración de cuentas (solo rol sistemas, sección admin)
+ *
+ * GET  /admin/cuentas → [CuentaApi]
+ * GET  /admin/candidatos?busqueda=&limite= → [CandidatoApi] (2+ caracteres)
+ * POST /admin/cuentas {rol, usuario_turnos_id} | {rol, username, nombre}
+ *   → 201 {cuenta, clave_temporal}
+ * POST /admin/cuentas/{id}/desactivar | /reactivar → CuentaApi
+ * POST /admin/cuentas/{id}/reiniciar-clave → {cuenta, clave_temporal}
+ *
+ * CuentaApi = {id, username, rol, activo, debe_cambiar,
+ *   usuario_turnos_id|null, vinculada, nombre|null, categoria|null,
+ *   creada, ultimo_ingreso|null}
+ * CandidatoApi = {usuario_turnos_id, login, nombre, categoria,
+ *   cuenta_id|null}
+ *
+ * Los motivos del backend se traducen a español claro para la jefatura;
+ * la clave temporal se entrega tal cual y solo vive en memoria mientras
+ * su diálogo está abierto (nunca se guarda ni se registra).
+ * ------------------------------------------------------------------ */
+
+/** Roles que puede tener una cuenta devuelta por la API. */
+const ROLES_CUENTA = ['sistemas', 'jefa', 'cocinera'];
+
+/** Roles permitidos al crear: nunca se crea otra cuenta de sistemas. */
+const ROLES_CUENTA_NUEVA = ['jefa', 'cocinera'];
+
+/** Motivos del backend con el texto que lee la jefatura. */
+const MOTIVOS_ADMIN = {
+  username_en_uso: 'Ese nombre de usuario ya está en uso.',
+  persona_ya_tiene_cuenta: 'Esa persona ya tiene una cuenta.',
+  persona_inexistente: 'Esa persona ya no figura en el padrón.',
+  login_invalido: 'El nombre de usuario no es válido. Use letras, números, puntos o guiones.',
+  rol_no_permitido: 'Solo se pueden crear cuentas de Cocinera o Jefa.',
+  no_puede_desactivarse_a_si_misma: 'No puede desactivar su propia cuenta.',
+  ultima_cuenta_sistemas: 'No se puede desactivar: es la última cuenta de Sistemas.',
+};
+
+/** Texto claro del motivo, o null si no es un motivo conocido. */
+function mensajeDeMotivoAdmin(motivo) {
+  return typeof motivo === 'string' ? MOTIVOS_ADMIN[motivo] ?? null : null;
+}
+
+function adaptarCuenta(dato) {
+  if (!Number.isInteger(dato?.id) || dato.id <= 0
+    || typeof dato.username !== 'string' || dato.username.length === 0
+    || !ROLES_CUENTA.includes(dato.rol)
+    || typeof dato.activo !== 'boolean'
+    || typeof dato.debe_cambiar !== 'boolean'
+    || !(dato.usuario_turnos_id === null || (Number.isInteger(dato.usuario_turnos_id) && dato.usuario_turnos_id > 0))
+    || typeof dato.vinculada !== 'boolean'
+    || !(dato.nombre === null || typeof dato.nombre === 'string')
+    || !(dato.categoria === null || typeof dato.categoria === 'string')
+    || typeof dato.creada !== 'string' || dato.creada.length === 0
+    || !(dato.ultimo_ingreso === null || typeof dato.ultimo_ingreso === 'string')) {
+    throw new Error('La API devolvió una cuenta inválida.');
+  }
+  return {
+    id: dato.id,
+    username: dato.username,
+    rol: dato.rol,
+    activo: dato.activo,
+    debeCambiar: dato.debe_cambiar,
+    usuarioTurnosId: dato.usuario_turnos_id,
+    vinculada: dato.vinculada,
+    nombre: dato.nombre,
+    categoria: dato.categoria,
+    creada: dato.creada,
+    ultimoIngreso: dato.ultimo_ingreso,
+  };
+}
+
+function adaptarCandidato(dato) {
+  if (!Number.isInteger(dato?.usuario_turnos_id) || dato.usuario_turnos_id <= 0
+    || typeof dato.login !== 'string' || dato.login.length === 0
+    || typeof dato.nombre !== 'string' || dato.nombre.length === 0
+    || !(typeof dato.categoria === 'string' || dato.categoria === null)
+    || !(dato.cuenta_id === null || (Number.isInteger(dato.cuenta_id) && dato.cuenta_id > 0))) {
+    throw new Error('La API devolvió un candidato inválido.');
+  }
+  return {
+    usuarioTurnosId: dato.usuario_turnos_id,
+    login: dato.login,
+    nombre: dato.nombre,
+    categoria: dato.categoria,
+    cuentaId: dato.cuenta_id,
+    tieneCuenta: dato.cuenta_id !== null,
+  };
+}
+
+function adaptarCuentaConClave(dato) {
+  if (!dato || typeof dato !== 'object'
+    || typeof dato.clave_temporal !== 'string' || dato.clave_temporal.length === 0) {
+    throw new Error('La API devolvió una clave temporal inválida.');
+  }
+  return { cuenta: adaptarCuenta(dato.cuenta), claveTemporal: dato.clave_temporal };
+}
+
+/** GET /admin/cuentas: todas las cuentas del comedor. */
+export async function obtenerCuentas({ signal } = {}) {
+  try {
+    const cuentas = await solicitarApi('/admin/cuentas', { signal });
+    if (!Array.isArray(cuentas)) {
+      throw new Error('La API devolvió una lista de cuentas inválida.');
+    }
+    return cuentas.map(adaptarCuenta);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar las cuentas. ${error.message}`);
+  }
+}
+
+/** GET /admin/candidatos: personas del padrón que coinciden (2+ caracteres). */
+export async function buscarCandidatos(busqueda, { limite = 20, signal } = {}) {
+  const termino = typeof busqueda === 'string' ? busqueda.trim() : '';
+  if (termino.length < 2) {
+    throw new Error('Escriba al menos 2 caracteres para buscar en el padrón.');
+  }
+  if (!Number.isInteger(limite) || limite < 1 || limite > 50) {
+    throw new Error('Límite de búsqueda inválido.');
+  }
+  try {
+    const parametros = new URLSearchParams({ busqueda: termino, limite: String(limite) });
+    const candidatos = await solicitarApi(`/admin/candidatos?${parametros}`, { signal });
+    if (!Array.isArray(candidatos)) {
+      throw new Error('La API devolvió una lista de candidatos inválida.');
+    }
+    return candidatos.map(adaptarCandidato);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo buscar en el padrón. ${error.message}`);
+  }
+}
+
+/**
+ * POST /admin/cuentas: crea la cuenta y devuelve su clave temporal.
+ * Desde el padrón: {rol, usuarioTurnosId}. Sin vínculo: {rol, username, nombre}.
+ */
+export async function crearCuenta({ rol, usuarioTurnosId = null, username = '', nombre = '' } = {}, { signal } = {}) {
+  if (!ROLES_CUENTA_NUEVA.includes(rol)) {
+    throw new Error(MOTIVOS_ADMIN.rol_no_permitido);
+  }
+  let cuerpo;
+  if (usuarioTurnosId !== null && usuarioTurnosId !== undefined) {
+    if (!Number.isInteger(usuarioTurnosId) || usuarioTurnosId <= 0) {
+      throw new Error('Elija una persona del padrón.');
+    }
+    cuerpo = { rol, usuario_turnos_id: usuarioTurnosId };
+  } else {
+    const usuario = typeof username === 'string' ? username.trim().toLowerCase() : '';
+    const nombreLimpio = typeof nombre === 'string' ? nombre.trim() : '';
+    if (!usuario) throw new Error('Escriba el nombre de usuario.');
+    if (!nombreLimpio) throw new Error('Escriba el nombre de la persona.');
+    cuerpo = { rol, username: usuario, nombre: nombreLimpio };
+  }
+  try {
+    return adaptarCuentaConClave(await solicitarApi('/admin/cuentas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cuerpo),
+      signal,
+    }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo);
+    if (mensaje) throw new Error(mensaje);
+    throw new Error(`No se pudo crear la cuenta. ${error.message}`);
+  }
+}
+
+async function cambiarEstadoCuenta(id, ruta, frase, { signal } = {}) {
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error('Cuenta inválida.');
+  }
+  try {
+    return adaptarCuenta(await solicitarApi(ruta, { method: 'POST', signal }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo);
+    if (mensaje) throw new Error(mensaje);
+    throw new Error(`${frase} ${error.message}`);
+  }
+}
+
+/** POST /admin/cuentas/{id}/desactivar. */
+export function desactivarCuenta(id, { signal } = {}) {
+  return cambiarEstadoCuenta(id, `/admin/cuentas/${id}/desactivar`, 'No se pudo desactivar la cuenta.', { signal });
+}
+
+/** POST /admin/cuentas/{id}/reactivar. */
+export function reactivarCuenta(id, { signal } = {}) {
+  return cambiarEstadoCuenta(id, `/admin/cuentas/${id}/reactivar`, 'No se pudo reactivar la cuenta.', { signal });
+}
+
+/** POST /admin/cuentas/{id}/reiniciar-clave: nueva clave temporal de un solo uso. */
+export async function reiniciarClaveCuenta(id, { signal } = {}) {
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error('Cuenta inválida.');
+  }
+  try {
+    return adaptarCuentaConClave(await solicitarApi(`/admin/cuentas/${id}/reiniciar-clave`, {
+      method: 'POST',
+      signal,
+    }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo);
+    if (mensaje) throw new Error(mensaje);
+    throw new Error(`No se pudo reiniciar la clave. ${error.message}`);
+  }
+}
+
 /** DELETE /simulacion/reloj: el sistema vuelve a la hora real. */
 export function volverARelojReal({ signal } = {}) {
   return operarReloj('/simulacion/reloj', { method: 'DELETE', signal }, 'volver a la hora real');
