@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.consultas.derecho import no_es_enfermeria
+from app.consultas.derecho import excluye_enfermeria_hoy, no_es_enfermeria
 from app.modelos.comedor import CategoriaReporte, CategoriaReporteMap
 from app.modelos.heredados import Comensal, Servicio, UsuarioServicio
 
@@ -45,8 +45,8 @@ _sala_vigente = (
 )
 
 
-def _base() -> Select:
-    return (
+def _base(sesion: Session) -> Select:
+    consulta = (
         select(
             Comensal.usuario_id,
             Comensal.nombre_completo,
@@ -70,8 +70,10 @@ def _base() -> Select:
         .outerjoin(_sala_vigente, _sala_vigente.c.usuario_id == Comensal.usuario_id)
         .outerjoin(UsuarioServicio, UsuarioServicio.id == _sala_vigente.c.asignacion_id)
         .outerjoin(Servicio, Servicio.id == UsuarioServicio.servicio_id)
-        .where(no_es_enfermeria(Comensal.categoria))
     )
+    if excluye_enfermeria_hoy(sesion):
+        consulta = consulta.where(no_es_enfermeria(Comensal.categoria))
+    return consulta
 
 
 def _aplicar_filtros(consulta: Select, filtros: FiltrosPadron) -> Select:
@@ -94,7 +96,7 @@ def _aplicar_filtros(consulta: Select, filtros: FiltrosPadron) -> Select:
 
 
 def contar_comensales(sesion: Session, filtros: FiltrosPadron) -> int:
-    consulta = _aplicar_filtros(_base(), filtros).subquery()
+    consulta = _aplicar_filtros(_base(sesion), filtros).subquery()
     return sesion.execute(select(func.count()).select_from(consulta)).scalar_one()
 
 
@@ -104,7 +106,7 @@ def listar_comensales(
     limite: int = 50,
     desplazamiento: int = 0,
 ) -> list[dict]:
-    consulta = _aplicar_filtros(_base(), filtros)
+    consulta = _aplicar_filtros(_base(sesion), filtros)
     # Los usuarios sin ficha van al final: MySQL ordena los NULL primero y no
     # queremos que las filas incompletas encabecen el padrón.
     consulta = (
@@ -121,7 +123,7 @@ def listar_comensales(
 
 
 def obtener_comensal(sesion: Session, usuario_id: int) -> dict | None:
-    consulta = _base().where(Comensal.usuario_id == usuario_id)
+    consulta = _base(sesion).where(Comensal.usuario_id == usuario_id)
     fila = sesion.execute(consulta).mappings().first()
     if fila is None:
         return None

@@ -15,22 +15,29 @@ de la ración, y a la vez que dos intentos de la misma comida sí choquen.
 Para que una asignación dé derecho tiene que cumplir DOS condiciones, además
 de estar mapeada en turno_comida:
 
-  1. El turno dura 12 horas o más. Es la política del hospital: un turno corto
-     no genera derecho a comida.
-  2. No hay una novedad que lo anule (permiso, baja, vacación, licencia).
+  1. El turno dura lo suficiente. Es la política del hospital: un turno corto
+     no genera derecho a comida. El umbral sale de la versión vigente.
+  2. No hay una novedad que lo anule según la versión vigente.
+
+Los parámetros viven versionados en `reglas_derecho` y se resuelven EN SQL
+por `fecha_turno`: la regla califica la asignación, y `dia_relativo`
+desplaza la comida. Cada fila usa su propia versión, también en consultas
+de varios días, sin bucles en Python.
 """
 
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core import reloj
 from app.modelos.heredados import ComidaPorTurno, NovedadLaboral
+from app.modelos.reglas import ReglaDerecho, ReglaDerechoNovedad
 
-# Un permiso, una baja, una vacación o una licencia anulan el derecho de esa
-# asignación. `devolucion_turno` NO está en la lista: es un cambio entre
-# compañeros, no una ausencia.
+# Valores BASE anteriores a R2, idénticos a la versión base de la migración.
+# `aplicar_reglas` ya no los usa: resuelve la versión vigente EN SQL.
+# Se conservan para documentar el punto de partida y para quien los importe.
 #
 # PENDIENTE: cuando hay reemplazo (novedades_laborales.usuario_reemplazo_id),
 # el derecho debería pasar al que cubre el turno. No está implementado porque
@@ -38,9 +45,7 @@ from app.modelos.heredados import ComidaPorTurno, NovedadLaboral
 # práctica; hoy solo hay 5 filas en la tabla.
 NOVEDADES_QUE_ANULAN = ("permiso", "baja_medica", "vacacion", "licencia")
 
-# Un turno corto no da derecho a comida: es política del hospital.
-#
-# El umbral filtra 49 de los 76 turnos cargados. Se compara contra
+# El umbral base filtra 49 de los 76 turnos cargados. Se compara contra
 # `turnos.duracion_horas`, que es el dato que declara el hospital, y NO contra
 # hora_inicio/hora_fin: en los turnos largos esas dos columnas no reflejan la
 # duración real (el turno 90 dura 30 horas y figura como 6:00-12:00).
@@ -56,11 +61,49 @@ def no_es_enfermeria(categoria):
     return ~categoria.ilike(PATRON_CATEGORIA_ENFERMERIA)
 
 
+def _version_id_para(fecha_columna):
+    """Id de la versión vigente para una fecha, como subconsulta escalar."""
+    return (
+        select(ReglaDerecho.id)
+        .where(ReglaDerecho.vigente_desde <= fecha_columna)
+        .order_by(ReglaDerecho.vigente_desde.desc(), ReglaDerecho.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _duracion_minima_para(fecha_columna):
+    """Turno mínimo vigente para una fecha, como subconsulta escalar."""
+    return (
+        select(ReglaDerecho.duracion_minima_horas)
+        .where(ReglaDerecho.vigente_desde <= fecha_columna)
+        .order_by(ReglaDerecho.vigente_desde.desc(), ReglaDerecho.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _excluir_enfermeria_para(fecha_columna):
+    """Si enfermería queda fuera en la versión vigente para una fecha."""
+    return (
+        select(ReglaDerecho.excluir_enfermeria)
+        .where(ReglaDerecho.vigente_desde <= fecha_columna)
+        .order_by(ReglaDerecho.vigente_desde.desc(), ReglaDerecho.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
 def sin_novedad():
-    """Que no haya un permiso, baja, vacación o licencia sobre la asignación."""
+    """Que no haya una novedad anulatoria según la versión de `fecha_turno`."""
+    version_id = _version_id_para(ComidaPorTurno.fecha_turno)
     return ~select(NovedadLaboral.id).where(
         NovedadLaboral.asignacion_id == ComidaPorTurno.turno_asignado_id,
-        NovedadLaboral.tipo_novedad.in_(NOVEDADES_QUE_ANULAN),
+        NovedadLaboral.tipo_novedad.in_(
+            select(ReglaDerechoNovedad.tipo_novedad).where(
+                ReglaDerechoNovedad.regla_id == version_id
+            )
+        ),
     ).exists()
 
 
@@ -73,12 +116,37 @@ def aplicar_reglas(consulta):
 
     La consulta que se recibe ya debe partir de `v_comidas_por_turno`
     (`ComidaPorTurno`), que trae la duración del turno y la categoría.
+    La versión se resuelve por `fecha_turno`, fila por fila, en SQL.
     """
+    fecha = ComidaPorTurno.fecha_turno
     return (
-        consulta.where(ComidaPorTurno.duracion_horas >= DURACION_MINIMA_HORAS)
-        .where(no_es_enfermeria(ComidaPorTurno.categoria))
+        consulta.where(
+            ComidaPorTurno.duracion_horas >= _duracion_minima_para(fecha)
+        )
+        .where(
+            or_(
+                _excluir_enfermeria_para(fecha) == 0,
+                no_es_enfermeria(ComidaPorTurno.categoria),
+            )
+        )
         .where(sin_novedad())
     )
+
+
+def excluye_enfermeria_hoy(sesion: Session) -> bool:
+    """Si la versión vigente HOY deja a enfermería fuera del padrón.
+
+    El padrón y la pantalla lo usan para no quedar en desacuerdo con el
+    derecho cuando cambia `excluir_enfermeria`. Sin versión, excluye.
+    """
+    hoy = reloj.hoy()
+    valor = sesion.execute(
+        select(ReglaDerecho.excluir_enfermeria)
+        .where(ReglaDerecho.vigente_desde <= hoy)
+        .order_by(ReglaDerecho.vigente_desde.desc(), ReglaDerecho.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return bool(valor) if valor is not None else True
 
 
 @dataclass(frozen=True)
