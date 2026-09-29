@@ -314,7 +314,8 @@ app/
 ├─ modelos/
 │  ├─ heredados.py      las 9 vistas v_* (base de turnos), SOLO LECTURA
 │  ├─ comedor.py        las 6 tablas propias del comedor
-│  └─ usuarios.py       usuarios_sistema e intentos_login
+│  ├─ usuarios.py       usuarios_sistema e intentos_login
+│  └─ reglas.py         reglas_derecho y reglas_derecho_novedad (parámetros por fecha)
 ├─ semillas/            carga de datos iniciales (python -m app.semillas)
 └─ core/
    ├─ config.py         configuración leída de .env (DB_NAME, DB_NAME_TURNOS)
