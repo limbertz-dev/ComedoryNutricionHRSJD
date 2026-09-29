@@ -31,6 +31,16 @@ COMENTARIO_CUENTA = (
     "token. FK interna: las cuentas se dan de baja, no se borran."
 )
 
+# Idéntico carácter por carácter al comment de Asistencia.registrado_por en
+# app/modelos/comedor.py (mismo corte de línea para compararlo a ojo).
+COMENTARIO_REGISTRADO_POR_LEGACY = (
+    "LEGACY: users.id de quien la registro a mano, sin FK. Desde "
+    "registrado_por_cuenta queda en NULL para las filas nuevas."
+)
+COMENTARIO_REGISTRADO_POR_ANTERIOR = (
+    "users.id de quien la registro a mano, sin FK."
+)
+
 
 def upgrade() -> None:
     op.add_column(
@@ -50,6 +60,14 @@ def upgrade() -> None:
         ["id"],
         ondelete="RESTRICT",
     )
+    op.alter_column(
+        "asistencias",
+        "registrado_por",
+        existing_type=mysql.BIGINT(unsigned=True),
+        existing_nullable=True,
+        comment=COMENTARIO_REGISTRADO_POR_LEGACY,
+        existing_comment=COMENTARIO_REGISTRADO_POR_ANTERIOR,
+    )
 
 
 def downgrade() -> None:
@@ -57,5 +75,13 @@ def downgrade() -> None:
         op.f("fk_asistencias_registrado_por_cuenta"),
         "asistencias",
         type_="foreignkey",
+    )
+    op.alter_column(
+        "asistencias",
+        "registrado_por",
+        existing_type=mysql.BIGINT(unsigned=True),
+        existing_nullable=True,
+        comment=COMENTARIO_REGISTRADO_POR_ANTERIOR,
+        existing_comment=COMENTARIO_REGISTRADO_POR_LEGACY,
     )
     op.drop_column("asistencias", "registrado_por_cuenta")
