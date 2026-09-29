@@ -134,6 +134,11 @@ class HorarioComida(Base):
         UniqueConstraint(
             "comida_id", "vigente_desde", name="uq_horarios_comida_vigencia"
         ),
+        Index(
+            "ix_horarios_comida_comida_id_vigente_desde",
+            "comida_id",
+            "vigente_desde",
+        ),
     )
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
@@ -148,6 +153,21 @@ class HorarioComida(Base):
     vigente_desde: Mapped[date] = mapped_column(Date)
     vigente_hasta: Mapped[date | None] = mapped_column(Date)
     activo: Mapped[bool] = mapped_column(TINYINT(1), default=1)
+    motivo: Mapped[str | None] = mapped_column(
+        String(500),
+        comment=(
+            "Por qué se creó esta versión del horario. NULL en las filas "
+            "anteriores a R2, que no lo tenían."
+        ),
+    )
+    creada_por_cuenta: Mapped[int | None] = mapped_column(
+        ID,
+        ForeignKey("usuarios_sistema.id", ondelete="RESTRICT"),
+        comment=(
+            "usuarios_sistema.id de la cuenta root que creó esta versión del "
+            "horario. FK interna: las cuentas se dan de baja, no se borran."
+        ),
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
