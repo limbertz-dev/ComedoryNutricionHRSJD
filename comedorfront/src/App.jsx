@@ -8,6 +8,7 @@ import SimuladorLector from './components/secciones/SimuladorLector.jsx';
 import ControlesReloj from './components/secciones/ControlesReloj.jsx';
 import Supervision from './components/secciones/Supervision.jsx';
 import Administracion from './components/secciones/Administracion.jsx';
+import CuentasLectura from './components/secciones/CuentasLectura.jsx';
 import ReglasSistema from './components/secciones/ReglasSistema.jsx';
 import Dashboard from './components/secciones/Dashboard.jsx';
 import Reportes from './components/secciones/Reportes.jsx';
@@ -362,6 +363,8 @@ export function Panel({ rol, usuario = null }) {
             ? <Administracion usuarioActual={usuario} /> : null}
           {permitida && seccionActiva === 'reglas'
             ? <ReglasSistema key={diaServidor} hoy={reloj ? diaServidor : undefined} /> : null}
+          {permitida && seccionActiva === 'cuentas'
+            ? <CuentasLectura /> : null}
         </div>
       </main>
     </div>
