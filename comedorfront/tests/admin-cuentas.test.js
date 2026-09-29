@@ -60,15 +60,15 @@ const cuentaApi = (cambios = {}) => ({
 // 1. Solo sistemas ve 'admin'
 // -------------------------------------------------------------
 test("solo sistemas ve 'admin': jefa y cocinera no la ven ni la montan", () => {
-  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'admin']);
-  assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes']);
+  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin']);
+  assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
   assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
   assert.equal(puedeVerSeccion('sistemas', 'admin'), true);
   assert.equal(puedeVerSeccion('jefa', 'admin'), false);
   assert.equal(puedeVerSeccion('cocinera', 'admin'), false);
 
   const menuSistemas = seccionesDeRol('sistemas').map(({ id }) => id);
-  assert.deepEqual(menuSistemas, ['supervision', 'dashboard', 'historial', 'reportes', 'admin']);
+  assert.deepEqual(menuSistemas, ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin']);
   assert.ok(!seccionesDeRol('jefa').some(({ id }) => id === 'admin'));
   assert.ok(!seccionesDeRol('cocinera').some(({ id }) => id === 'admin'));
 
