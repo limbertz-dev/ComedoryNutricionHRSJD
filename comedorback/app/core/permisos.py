@@ -57,6 +57,11 @@ ACCESO: dict[str, Regla] = {
     # Administración de cuentas: solo root. Sin lectura parcial: jefa y
     # cocinera reciben 403 en todo /admin/*.
     "admin": Regla(completo=ADMINISTRACION),
+    # Reglas versionadas: solo root. Jefa y cocinera reciben 403 en /reglas/*.
+    "reglas": Regla(completo=ADMINISTRACION),
+    # Cuentas en solo lectura: jefa y sistemas. Solo existe GET /cuentas;
+    # la cocinera recibe 403 y la jefa no ve cuentas de sistemas.
+    "cuentas": Regla(completo=JEFATURA),
     # Solo existe con ENTORNO=simulacion (app/main.py).
     "simulacion": Regla(completo=JEFATURA),
 }
