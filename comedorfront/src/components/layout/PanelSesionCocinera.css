@@ -1,0 +1,90 @@
+/*
+ * PanelSesionCocinera.css — Botón flotante y panel de sesión de la cocinera.
+ *
+ * La cocinera no tiene sidebar ni header: este flotante (abajo a la derecha,
+ * para no tapar el contador de "Marcaciones del turno" ni la etiqueta de
+ * raciones del día) abre su usuario y rol, el simulador del lector, la
+ * pantalla completa y el cierre de sesión. Paleta de tokens.css.
+ */
+
+.panel-sesion {
+  position: fixed;
+  z-index: 60;
+  right: var(--e-4);
+  bottom: var(--e-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.panel-sesion__flotante {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  color: var(--c-texto-2);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-full);
+  box-shadow: var(--s-2);
+  cursor: pointer;
+  transition: color var(--trans-boton), border-color var(--trans-boton), box-shadow var(--trans-boton);
+}
+
+.panel-sesion__flotante:hover {
+  color: var(--c-acento-fuerte);
+  border-color: var(--c-borde-tarjeta-activo);
+  box-shadow: var(--s-acento);
+}
+
+.panel-sesion__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-3);
+  width: min(430px, calc(100vw - var(--e-6)));
+  max-height: calc(100vh - 90px);
+  margin-bottom: var(--e-3);
+  padding: var(--e-4);
+  overflow-y: auto;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: var(--s-2);
+  order: -1;
+}
+
+.panel-sesion__usuario {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--e-3);
+  border-bottom: 1px solid var(--c-borde-suave);
+}
+
+.panel-sesion__usuario-nombre {
+  color: var(--c-texto);
+  font-size: var(--t-base);
+}
+
+.panel-sesion__usuario-rol {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+}
+
+/*
+ * El simulador se dibuja en una sola fila para el header; dentro del panel
+ * se le permite envolverse, solo con esta clase contenedora y sin tocar
+ * SimuladorLector.jsx ni SimuladorLector.css.
+ */
+.panel-sesion__simulador .simulador-header {
+  flex-wrap: wrap;
+  row-gap: var(--e-3);
+}
+
+.panel-sesion__simulador .simulador-header__campo {
+  flex: 1 1 220px;
+}
+
+.panel-sesion__simulador .simulador-header__campo select {
+  max-width: none;
+}
