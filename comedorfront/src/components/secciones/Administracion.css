@@ -1,0 +1,434 @@
+/*
+ * Administracion.css — Estilos para la sección de Administración de cuentas.
+ *
+ * Tabla al estilo de Supervisión y diálogos propios. Utiliza estrictamente la
+ * paleta de tokens.css: superficies, acento, estados y tipografía Nunito.
+ */
+
+.administracion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+  padding: 0 4px var(--e-7);
+}
+
+.administracion__estado,
+.administracion__vacio {
+  margin: var(--e-4) 0;
+  padding: var(--e-5);
+  background: var(--c-superficie);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-lg);
+  color: var(--c-texto-2);
+  font-size: var(--t-base);
+  text-align: center;
+}
+
+.administracion__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  padding: var(--e-4) var(--e-5);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  border-radius: var(--r-md);
+  color: var(--c-error);
+  font-weight: 600;
+}
+
+.administracion__error p {
+  margin: 0;
+}
+
+.administracion__aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-3);
+  padding: var(--e-3) var(--e-4);
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+}
+
+.administracion__aviso--exito {
+  background: var(--c-exito-tenue);
+  border: 1px solid var(--c-exito);
+  color: var(--c-exito);
+}
+
+.administracion__aviso--error {
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  color: var(--c-error);
+}
+
+.administracion__aviso-icono {
+  display: inline-flex;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.administracion__aviso-contenido {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.administracion__aviso-titulo {
+  font-weight: 700;
+}
+
+.administracion__aviso-detalle {
+  margin: 0;
+  opacity: 0.95;
+}
+
+.administracion__aviso-cerrar {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: currentColor;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* -------------------------------------------------------------
+   Barra: buscador, Actualizar y Nueva cuenta
+   ------------------------------------------------------------- */
+.administracion__barra {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.administracion__buscador {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 220px;
+  flex: 1;
+}
+
+.administracion__buscador-icono {
+  position: absolute;
+  left: 10px;
+  color: var(--c-texto-3);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.administracion__buscador-input {
+  width: 100%;
+  padding: 7px 30px 7px 32px;
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  background: var(--c-superficie);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+}
+
+.administracion__buscador-limpiar {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: 0;
+  color: var(--c-texto-3);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* -------------------------------------------------------------
+   Tabla de cuentas
+   ------------------------------------------------------------- */
+.administracion__tabla-caja {
+  overflow-x: auto;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+}
+
+.administracion__tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+.administracion__tabla th,
+.administracion__tabla td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-borde);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.administracion__tabla thead th {
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.administracion__tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.administracion__fila--inactiva {
+  background: var(--c-superficie-2);
+}
+
+.administracion__usuario {
+  font-weight: 700;
+}
+
+.administracion__acciones {
+  display: flex;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+}
+
+.administracion__propia {
+  align-self: center;
+  color: var(--c-texto-3);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------------
+   Diálogos: fondo, caja y acciones
+   ------------------------------------------------------------- */
+.administracion__fondo {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--e-4);
+  background: rgba(18, 35, 61, 0.45);
+}
+
+.administracion__dialogo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+  width: min(560px, 100%);
+  max-height: calc(100vh - var(--e-7));
+  overflow-y: auto;
+  padding: var(--e-5);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: var(--s-2);
+}
+
+.administracion__dialogo-titulo {
+  margin: 0;
+  color: var(--c-texto);
+  font-size: var(--t-lg);
+  font-weight: 800;
+}
+
+.administracion__dialogo-mensaje {
+  margin: 0;
+  color: var(--c-texto);
+  font-size: var(--t-base);
+}
+
+.administracion__dialogo-acciones {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+/* -------------------------------------------------------------
+   Pestañas de Nueva cuenta y campos del formulario
+   ------------------------------------------------------------- */
+.administracion__pestanas {
+  display: flex;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.administracion__pestana {
+  flex: 1;
+  min-width: 140px;
+  padding: var(--e-3) var(--e-4);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-base);
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.administracion__pestana:hover {
+  border-color: var(--c-borde-tarjeta-activo);
+}
+
+.administracion__pestana--activa {
+  border-color: var(--c-acento);
+  background: var(--c-acento-tenue);
+  box-shadow: 0 0 0 2px var(--c-acento-claro);
+}
+
+.administracion__panel-pestana {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-3);
+}
+
+.administracion__campo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+}
+
+.administracion__campo-rotulo {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 700;
+}
+
+.administracion__input,
+.administracion__select {
+  padding: 8px 12px;
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-sm);
+  background: var(--c-superficie);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.administracion__input:read-only {
+  background: var(--c-superficie-2);
+  color: var(--c-texto-2);
+}
+
+.administracion__ayuda {
+  margin: 0;
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+}
+
+.administracion__error-campo {
+  margin: 0;
+  padding: var(--e-2) var(--e-3);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  border-radius: var(--r-sm);
+  color: var(--c-error);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------
+   Candidatos del padrón
+   ------------------------------------------------------------- */
+.administracion__candidatos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-2);
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.administracion__candidato {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  padding: var(--e-2) var(--e-3);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+}
+
+.administracion__candidato--elegido {
+  border-color: var(--c-acento);
+  background: var(--c-acento-tenue);
+}
+
+.administracion__candidato--usado {
+  background: var(--c-superficie-2);
+}
+
+.administracion__candidato-datos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.administracion__candidato-datos strong {
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+}
+
+.administracion__candidato-datos span {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+}
+
+.administracion__elegido {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--e-3);
+}
+
+.administracion__elegido .administracion__campo {
+  flex: 1;
+}
+
+/* -------------------------------------------------------------
+   Clave temporal de un solo uso
+   ------------------------------------------------------------- */
+.administracion__clave-caja {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+  padding: var(--e-4);
+  background: var(--c-superficie-2);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+}
+
+.administracion__clave {
+  flex: 1;
+  min-width: 160px;
+  color: var(--c-texto);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--t-md);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.administracion__clave-aviso {
+  margin: 0;
+  padding: var(--e-3) var(--e-4);
+  background: var(--c-aviso-tenue);
+  border: 1px solid var(--c-aviso);
+  border-radius: var(--r-md);
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
