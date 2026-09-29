@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import Boton from './components/ui/Boton.jsx';
 import Header from './components/layout/Header.jsx';
+import PanelSesionCocinera from './components/layout/PanelSesionCocinera.jsx';
 import Sidebar from './components/layout/Sidebar.jsx';
 import PantallaEnVivo from './components/secciones/PantallaEnVivo.jsx';
 import SimuladorLector from './components/secciones/SimuladorLector.jsx';
@@ -96,7 +97,7 @@ function PuertaDeSesion() {
   return <Panel rol={rol} />;
 }
 
-function Panel({ rol }) {
+export function Panel({ rol }) {
   /* Persistida en localStorage: un F5 en Historial o Reportes no debe
      devolver forzadamente a Control Biométrico. Si lo guardado no le
      corresponde al rol, arranca en su primera sección. */
@@ -251,31 +252,43 @@ function Panel({ rol }) {
     guardarSeccionActiva(id);
   }
 
-  return (
-    <div className="app">
-      <Sidebar
-        seccionActiva={seccionActiva}
-        onCambiarSeccion={manejarCambiarSeccion}
-      />
+  /* La cocinera opera sin sidebar ni header: Control Biométrico ocupa toda la
+     ventana y el simulador vive en su panel flotante, con los mismos props
+     que recibe en el header. */
+  const esCocinera = rol === 'cocinera';
+  const propiedadesSimulador = {
+    personal: estado.personal,
+    seleccionado,
+    onSeleccionar: setSeleccionado,
+    onMarcar: manejarMarcacion,
+    onSimularFalla: manejarFallaBiometrica,
+    leyendo,
+    error: errorMarcacion,
+    reloj: operaReloj ? reloj : null,
+    onCambioReloj: manejarCambioReloj,
+  };
 
-      <Header seccion={seccion} turno={turno} simulacion={reloj}>
-        {esPantallaEnVivo ? (
-          <SimuladorLector
-            personal={estado.personal}
-            seleccionado={seleccionado}
-            onSeleccionar={setSeleccionado}
-            onMarcar={manejarMarcacion}
-            onSimularFalla={manejarFallaBiometrica}
-            leyendo={leyendo}
-            error={errorMarcacion}
-            reloj={operaReloj ? reloj : null}
-            onCambioReloj={manejarCambioReloj}
-          />
-        ) : null}
-        {permitida && seccionActiva === 'supervision' && operaReloj ? (
-          <ControlesReloj reloj={reloj} onCambio={manejarCambioReloj} />
-        ) : null}
-      </Header>
+  return (
+    <div className={`app${esCocinera ? ' app--pantalla-completa' : ''}`}>
+      {esCocinera ? (
+        <PanelSesionCocinera simulador={<SimuladorLector {...propiedadesSimulador} />} />
+      ) : (
+        <Sidebar
+          seccionActiva={seccionActiva}
+          onCambiarSeccion={manejarCambiarSeccion}
+        />
+      )}
+
+      {esCocinera ? null : (
+        <Header seccion={seccion} turno={turno} simulacion={reloj}>
+          {esPantallaEnVivo ? (
+            <SimuladorLector {...propiedadesSimulador} />
+          ) : null}
+          {permitida && seccionActiva === 'supervision' && operaReloj ? (
+            <ControlesReloj reloj={reloj} onCambio={manejarCambioReloj} />
+          ) : null}
+        </Header>
+      )}
 
       <main className={`app__main${esPantallaEnVivo ? ' app__main--sin-scroll' : ''}`}>
         {/*
