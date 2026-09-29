@@ -4,6 +4,7 @@ import {
   IconoHuella,
   IconoOjo,
   IconoReportes,
+  IconoUsuario,
 } from './components/ui/Iconos.jsx';
 import { resolverSeccionGuardada, seccionInicialDeRol, seccionesPermitidas } from './permisos.js';
 
@@ -49,6 +50,13 @@ export const SECCIONES = [
     titulo: 'Reportes',
     descripcion: 'Planillas y estadísticas',
     Icono: IconoReportes,
+  },
+  {
+    id: 'admin',
+    etiqueta: 'Administración',
+    titulo: 'Administración de cuentas',
+    descripcion: 'Cuentas del comedor',
+    Icono: IconoUsuario,
   },
 ];
 
