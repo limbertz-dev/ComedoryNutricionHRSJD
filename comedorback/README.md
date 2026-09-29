@@ -31,7 +31,8 @@ Documentación automática de la API: `http://127.0.0.1:8000/docs`
 - **Vistas del contrato de lectura** (`SQL SECURITY INVOKER`, leen
   `bd_proyecto_backend`): `v_comensales`, `v_categorias`, `v_servicios`,
   `v_comidas`, `v_usuario_servicios`, `v_turnos_asignados`, `v_turno_comida`,
-  `v_novedades_laborales`, `v_comidas_por_turno`.
+  `v_novedades_laborales`, `v_comidas_por_turno`. `v_comensales` expone además
+  `login` (`users.name`).
 
 ### Estrategia de lectura entre bases
 
@@ -53,6 +54,8 @@ impediría al otro ingeniero borrar un usuario o migrar su propio esquema. `regi
 `v_comensales` entrega una fila por `users.id` (LEFT JOIN a `personas` y
 `categorias`, `tiene_ficha = 0` si no hay ficha), toma la ficha de menor id si
 hubiera duplicados y trae el nombre con los espacios ya limpiados.
+Expone además `login` (`users.name`) para vincular cuentas desde el padrón;
+nunca password, email ni tokens.
 
 ### Receta limpia: recrear `bd_nutricion` desde cero
 
@@ -84,7 +87,7 @@ alembic revision --autogenerate -m "descripción"
 ```
 
 La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
-`b7c4d2e8f1a3` (head):
+`2555bc00750e` (head):
 
 | Revisión | Qué hace |
 |---|---|
@@ -93,6 +96,7 @@ La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
 | `0c294cd98c3a` | Las 9 vistas `v_*`; el nombre de la base de turnos sale de `DB_NAME_TURNOS` |
 | `7e2b9c4d1a60` | `usuarios_sistema` e `intentos_login` (autenticación) |
 | `b7c4d2e8f1a3` | `asistencias.registrado_por_cuenta` (FK a `usuarios_sistema`, RESTRICT) y comentario LEGACY en `registrado_por` |
+| `2555bc00750e` | `usuarios_sistema`: `usuario_turnos_id` (UNIQUE, referencia lógica a `users.id`), `nombre` y `creada_por_cuenta`; `v_comensales` suma la columna `login` (`users.name`) |
 
 Reemplaza a la cadena vieja `fa64a5d4e912 → … → f6a7b8c9d0e1`, que asumía las
 tablas heredadas copiadas en la misma base y le agregaba columnas a `comidas`.
@@ -132,7 +136,7 @@ ORIGENES_PERMITIDOS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
 Uno por uno, separados por comas, **nunca con `*`**: con comodín el navegador
-rechaza las peticiones con credenciales, y eso rompería el login cuando exista.
+rechaza las peticiones con credenciales, y eso rompería el login.
 
 Si abres el front por otra dirección —por ejemplo la IP de tu máquina en la red,
 para probarlo desde un celular— hay que agregar ese origen exacto a la lista, o
@@ -150,8 +154,8 @@ más.
 | Rol | Puede |
 |---|---|
 | `jefa` | Todo lo operativo: pantalla, padrón, historial, informes, marcación biométrica y manual |
-| `cocinera` | Solo `GET /pantalla/*` y `POST /asistencias` con `metodo='biometrico'` |
-| `sistemas` | Todo lo de la jefa, más administración de cuentas |
+| `cocinera` | Solo `GET /pantalla/*` y `POST /asistencias` con `metodo='biometrico'`; en `/personal` recibe `carnet_identidad` y `tipo_trabajador` en null, y en `/pantalla/dia-personal` recibe `carnet_identidad` en null (esa ficha no trae `tipo_trabajador`) |
+| `sistemas` | Todo lo de la jefa, más administración de cuentas (crea cuentas de cocinera y jefa desde el padrón o sin vínculo) |
 
 La matriz vive en `app/core/permisos.py` y se aplica router por router en
 `app/main.py` con `requiere_rol(...)`. La regla "manual solo jefatura" depende
@@ -232,6 +236,18 @@ Todos exigen `Authorization: Bearer <access>` salvo `/salud`, `/auth/login` y
 | GET | `/reportes/mensual` | Formulario de Estadística, con coeficientes |
 | GET | `/reportes/gestion` | Resumen anual, una fila por mes |
 | GET | `/reportes/informe?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` | Formulario de Estadística para un rango de fechas arbitrario (hoy, una semana, una quincena), con coeficientes. 422 si `desde > hasta` |
+| GET | `/admin/cuentas` | Todas las cuentas, con vínculo, nombre y último ingreso |
+| GET | `/admin/candidatos?busqueda=` | Personas del padrón para vincular (búsqueda de 2+ letras) |
+| POST | `/admin/cuentas` | Crea una cuenta vinculada o sin vínculo. 201 `{cuenta, clave_temporal}` |
+| POST | `/admin/cuentas/{id}/desactivar` | Da de baja la cuenta y cierra sus sesiones |
+| POST | `/admin/cuentas/{id}/reactivar` | Reactiva la cuenta |
+| POST | `/admin/cuentas/{id}/reiniciar-clave` | 200 `{cuenta, clave_temporal}`; el próximo login da 428 |
+
+Las seis rutas `/admin/*` son solo para `sistemas`: jefa y cocinera reciben
+403. Los errores traen `motivo`: `username_en_uso`, `persona_ya_tiene_cuenta`,
+`persona_inexistente`, `cuenta_inexistente`, `login_invalido`,
+`rol_no_permitido`, `no_puede_desactivarse_a_si_misma`,
+`ultima_cuenta_sistemas`.
 
 Los informes salen de la misma tabla, `asistencias`, con distinto
 agrupamiento: el total del registro diario y el del informe mensual tienen que
@@ -284,7 +300,7 @@ app/
    ├─ permisos.py       la matriz rol x recurso
    ├─ db.py             motor único, sesión, Base y BaseContrato
    └─ tablas_heredadas.py   lo que no administramos + la lista de vistas v_*
-alembic/                migraciones (base 4b5a9ed9330e, head b7c4d2e8f1a3)
+alembic/                migraciones (base 4b5a9ed9330e, head 2555bc00750e)
 tests/                  pytest, contra bd_nutricion_test
 ../scripts/recrear_bd_limpia.py   receta limpia de bd_nutricion
 ```
