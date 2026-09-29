@@ -1,0 +1,375 @@
+/*
+ * Supervision.css — Estilos para la sección de Supervisión.
+ *
+ * Una sola tabla en vivo con pestañas por comida. Utiliza estrictamente la
+ * paleta de tokens.css: variables de superficie, acento, estados y
+ * tipografía Nunito.
+ */
+
+.supervision {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+  padding: 0 4px var(--e-7);
+}
+
+.supervision__estado,
+.supervision__vacio {
+  margin: var(--e-4) 0;
+  padding: var(--e-5);
+  background: var(--c-superficie);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-lg);
+  color: var(--c-texto-2);
+  font-size: var(--t-base);
+  text-align: center;
+}
+
+.supervision__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  padding: var(--e-4) var(--e-5);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  border-radius: var(--r-md);
+  color: var(--c-error);
+  font-weight: 600;
+}
+
+.supervision__error p {
+  margin: 0;
+}
+
+.supervision__aviso-accion {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-3);
+  padding: var(--e-3) var(--e-4);
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  animation: supervision-aparecer 0.2s ease;
+}
+
+.supervision__aviso-accion--exito {
+  background: var(--c-exito-tenue);
+  border: 1px solid var(--c-exito);
+  color: var(--c-exito);
+}
+
+.supervision__aviso-accion--rechazo,
+.supervision__aviso-accion--error {
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  color: var(--c-error);
+}
+
+.supervision__aviso-icono {
+  display: inline-flex;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.supervision__aviso-contenido {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.supervision__aviso-titulo {
+  font-weight: 700;
+}
+
+.supervision__aviso-detalle {
+  margin: 0;
+  opacity: 0.95;
+}
+
+.supervision__aviso-cerrar {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: currentColor;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.supervision__barra-superior {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  flex-wrap: wrap;
+}
+
+.supervision__barra-superior .supervision__vacio {
+  flex: 1;
+  margin: 0;
+}
+
+.supervision__simulacion-aviso {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-3);
+  padding: var(--e-2) var(--e-4);
+  background: var(--c-aviso-tenue);
+  border: 1px solid var(--c-aviso);
+  border-radius: var(--r-md);
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+}
+
+/* -------------------------------------------------------------
+   Pestañas: "Todas" + una por comida del día
+   ------------------------------------------------------------- */
+.supervision__pestanas {
+  display: flex;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.supervision__pestana {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--e-1);
+  min-width: 150px;
+  padding: var(--e-3) var(--e-4);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.supervision__pestana:hover {
+  border-color: var(--c-borde-tarjeta-activo);
+}
+
+.supervision__pestana--activa {
+  border-color: var(--c-acento);
+  background: var(--c-acento-tenue);
+  box-shadow: 0 0 0 2px var(--c-acento-claro);
+}
+
+.supervision__pestana-nombre {
+  font-size: var(--t-base);
+  font-weight: 800;
+}
+
+.supervision__pestana-estado {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-2);
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+}
+
+/* Punto verde: la comida está en curso ahora mismo. */
+.supervision__punto-curso {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-full);
+  background: var(--c-acento);
+  box-shadow: 0 0 0 3px var(--c-acento-claro);
+}
+
+.supervision__pestana-cifras {
+  display: inline-flex;
+  gap: var(--e-3);
+}
+
+.supervision__pestana-cifra {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--t-sm);
+  font-weight: 800;
+}
+
+.supervision__pestana-cifra--exito {
+  color: var(--c-exito);
+}
+
+.supervision__pestana-cifra--error {
+  color: var(--c-error);
+}
+
+/* Nota discreta bajo las pestañas, solo si hay rechazos fuera de franja. */
+.supervision__nota-fuera-franja {
+  margin: 0;
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------
+   Barra: resultado, búsqueda, actualizado y actualización
+   ------------------------------------------------------------- */
+.supervision__filtros {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.supervision__chips-filtro {
+  display: inline-flex;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+  padding: 3px;
+  gap: 3px;
+}
+
+.supervision__chip {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-texto-2);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.supervision__chip--activo {
+  background: var(--gradiente-pildora-activa);
+  color: #ffffff;
+}
+
+.supervision__buscador {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 220px;
+  flex: 1;
+}
+
+.supervision__buscador-icono {
+  position: absolute;
+  left: 10px;
+  color: var(--c-texto-3);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.supervision__buscador-input {
+  width: 100%;
+  padding: 7px 30px 7px 32px;
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  background: var(--c-superficie);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+}
+
+.supervision__buscador-limpiar {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: 0;
+  color: var(--c-texto-3);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.supervision__actualizado {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.supervision__nota-truncada {
+  margin: 0;
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------
+   Tabla de marcaciones
+   ------------------------------------------------------------- */
+.supervision__tabla-caja {
+  overflow-x: auto;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+}
+
+.supervision__tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+.supervision__tabla th,
+.supervision__tabla td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-borde);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.supervision__tabla thead th {
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.supervision__tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* Fondo suave de rechazo para las filas rechazadas. */
+.supervision__fila--rechazada {
+  background: var(--c-error-tenue);
+}
+
+.supervision__fila--rechazada:hover {
+  background: var(--c-error-tenue);
+}
+
+/* Fila expandida con el selector de comensal, debajo de la marcación. */
+.supervision__fila-autorizar td {
+  background: var(--c-superficie-2);
+}
+
+.supervision__autorizar-caja {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.supervision__autorizar-etiqueta {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 700;
+}
+
+.supervision__select-padron {
+  padding: 8px 12px;
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-sm);
+  background: var(--c-superficie);
+  color: var(--c-texto);
+  font-family: var(--fuente);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  max-width: 320px;
+}

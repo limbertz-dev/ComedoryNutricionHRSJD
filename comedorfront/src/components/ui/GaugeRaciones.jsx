@@ -1,4 +1,4 @@
-import useValorAnimado from '../../hooks/useValorAnimado';
+import useValorAnimado from '../../hooks/useValorAnimado.js';
 import './GaugeRaciones.css';
 
 const RADIO = 78;
