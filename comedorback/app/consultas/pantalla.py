@@ -16,7 +16,11 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from app.consultas.derecho import contar_personas_con_derecho, no_es_enfermeria
+from app.consultas.derecho import (
+    contar_personas_con_derecho,
+    excluye_enfermeria_hoy,
+    no_es_enfermeria,
+)
 from app.core import reloj
 from app.logica.marcacion import ComidaEnCurso, resolver_comida_en_curso
 from app.modelos.comedor import (
@@ -196,11 +200,12 @@ def estado(
     comida = resolver_comida_en_curso(sesion, momento)
     fecha_comida = comida.fecha_comida if comida else momento.date()
 
-    padron = sesion.execute(
-        select(func.count())
-        .select_from(Comensal)
-        .where(no_es_enfermeria(Comensal.categoria))
-    ).scalar_one()
+    consulta_padron = select(func.count()).select_from(Comensal)
+    if excluye_enfermeria_hoy(sesion):
+        consulta_padron = consulta_padron.where(
+            no_es_enfermeria(Comensal.categoria)
+        )
+    padron = sesion.execute(consulta_padron).scalar_one()
 
     return Estado(
         momento=momento,
