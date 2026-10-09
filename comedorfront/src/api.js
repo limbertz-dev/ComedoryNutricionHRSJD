@@ -1331,6 +1331,153 @@ export async function obtenerSalud({ signal } = {}) {
   };
 }
 
+/*
+ * --- Monitoreo (contrato R3-1-20261009) ---
+ * GET /monitoreo/estado → diagnóstico; solo sistemas, sin caché.
+ * {momento_real, entorno, reloj_negocio: {ahora, fecha, simulado, congelado},
+ *  base: {estado, revision_alembic, tablas_propias, vistas_contrato, faltan},
+ *  lector: {estado: 'desconocido', razon: 'sin_telemetria'},
+ *  actividad: {fuente, disponible, razon, aceptadas_dia, rechazadas_dia,
+ *              registro_mayor_id: null | {id, fecha_hora, resultado, motivo, created_at}}}
+ * Un error (sin cuerpo garantizado) no dice qué componente falló.
+ */
+const ENTORNOS = ['produccion', 'desarrollo', 'simulacion'];
+const RAZONES_ACTIVIDAD = ['tabla_ausente', 'error_consulta'];
+const RESULTADOS_LECTURA = ['aceptada', 'rechazada'];
+const MOTIVOS_LECTURA = ['duplicado', 'sin_derecho', 'fuera_horario', 'no_identificado'];
+/* Hora local sin zona: una «Z» o un desfase no están confirmados y se rechazan. */
+const FECHA_HORA_SIN_ZONA = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?$/;
+const FECHA_DIA = /^\d{4}-\d{2}-\d{2}$/;
+
+const esFechaHora = (valor) => typeof valor === 'string' && FECHA_HORA_SIN_ZONA.test(valor)
+  && fechaHoraDelServidor(valor) !== null;
+
+function diagnosticoInvalido(campo) {
+  return new Error(`La API devolvió un diagnóstico inválido (${campo}).`);
+}
+
+function adaptarRegistroMayorId(dato) {
+  if (dato === null) return null;
+  if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('registro_mayor_id');
+  if (!Number.isInteger(dato.id) || dato.id <= 0) throw diagnosticoInvalido('registro_mayor_id.id');
+  if (!esFechaHora(dato.fecha_hora)) throw diagnosticoInvalido('registro_mayor_id.fecha_hora');
+  if (!RESULTADOS_LECTURA.includes(dato.resultado)) throw diagnosticoInvalido('registro_mayor_id.resultado');
+  if (dato.motivo !== null && !MOTIVOS_LECTURA.includes(dato.motivo)) {
+    throw diagnosticoInvalido('registro_mayor_id.motivo');
+  }
+  if (!esFechaHora(dato.created_at)) throw diagnosticoInvalido('registro_mayor_id.created_at');
+  return {
+    id: dato.id,
+    fechaHora: dato.fecha_hora,
+    resultado: dato.resultado,
+    motivo: dato.motivo,
+    createdAt: dato.created_at,
+  };
+}
+
+/*
+ * disponible=true: razon null y contadores enteros (0 es un día sin
+ * lecturas). disponible=false: razon conocida y todo en null, nunca 0.
+ */
+function adaptarActividad(dato) {
+  if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('actividad');
+  if (dato.fuente !== 'lecturas_biometricas') throw diagnosticoInvalido('actividad.fuente');
+  if (typeof dato.disponible !== 'boolean') throw diagnosticoInvalido('actividad.disponible');
+  if (dato.disponible) {
+    if (dato.razon !== null) throw diagnosticoInvalido('actividad.razon');
+    if (!esEnteroNoNegativo(dato.aceptadas_dia) || !esEnteroNoNegativo(dato.rechazadas_dia)) {
+      throw diagnosticoInvalido('actividad.contadores');
+    }
+  } else {
+    if (!RAZONES_ACTIVIDAD.includes(dato.razon)) throw diagnosticoInvalido('actividad.razon');
+    if (dato.aceptadas_dia !== null || dato.rechazadas_dia !== null || dato.registro_mayor_id !== null) {
+      throw diagnosticoInvalido('actividad sin datos');
+    }
+  }
+  return {
+    fuente: dato.fuente,
+    disponible: dato.disponible,
+    razon: dato.razon,
+    aceptadasDia: dato.aceptadas_dia,
+    rechazadasDia: dato.rechazadas_dia,
+    registroMayorId: adaptarRegistroMayorId(dato.registro_mayor_id),
+  };
+}
+
+/* Presencia en el catálogo: «ok» con elementos faltantes sería contradictorio. */
+function adaptarBase(dato) {
+  if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('base');
+  if (dato.estado !== 'ok' && dato.estado !== 'incompleta') throw diagnosticoInvalido('base.estado');
+  if (dato.revision_alembic !== null
+    && (typeof dato.revision_alembic !== 'string' || dato.revision_alembic === '')) {
+    throw diagnosticoInvalido('base.revision_alembic');
+  }
+  if (!esEnteroNoNegativo(dato.tablas_propias) || !esEnteroNoNegativo(dato.vistas_contrato)) {
+    throw diagnosticoInvalido('base.conteos');
+  }
+  if (!Array.isArray(dato.faltan)
+    || !dato.faltan.every((nombre) => typeof nombre === 'string' && nombre !== '')) {
+    throw diagnosticoInvalido('base.faltan');
+  }
+  if (dato.estado === 'ok' && dato.faltan.length > 0) throw diagnosticoInvalido('base.estado');
+  return {
+    estado: dato.estado,
+    revisionAlembic: dato.revision_alembic,
+    tablasPropias: dato.tablas_propias,
+    vistasContrato: dato.vistas_contrato,
+    faltan: [...dato.faltan],
+  };
+}
+
+function adaptarRelojNegocio(dato) {
+  if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('reloj_negocio');
+  if (!esFechaHora(dato.ahora)) throw diagnosticoInvalido('reloj_negocio.ahora');
+  // La fecha deriva del mismo `ahora`: si no coinciden, el diagnóstico no es coherente.
+  if (typeof dato.fecha !== 'string' || !FECHA_DIA.test(dato.fecha) || dato.ahora.slice(0, 10) !== dato.fecha) {
+    throw diagnosticoInvalido('reloj_negocio.fecha');
+  }
+  if (typeof dato.simulado !== 'boolean' || typeof dato.congelado !== 'boolean') {
+    throw diagnosticoInvalido('reloj_negocio');
+  }
+  return { ahora: dato.ahora, fecha: dato.fecha, simulado: dato.simulado, congelado: dato.congelado };
+}
+
+/**
+ * Valida el cuerpo de GET /monitoreo/estado y lo pasa a camelCase. Las
+ * horas quedan como texto del servidor (sin zona): no se convierten ni se
+ * comparan entre sí. Ningún null se vuelve cero ni ningún texto, número.
+ */
+export function adaptarEstadoMonitoreo(dato) {
+  if (!dato || typeof dato !== 'object' || Array.isArray(dato)) throw diagnosticoInvalido('cuerpo');
+  if (!esFechaHora(dato.momento_real)) throw diagnosticoInvalido('momento_real');
+  if (!ENTORNOS.includes(dato.entorno)) throw diagnosticoInvalido('entorno');
+  if (dato.lector?.estado !== 'desconocido' || dato.lector?.razon !== 'sin_telemetria') {
+    throw diagnosticoInvalido('lector');
+  }
+  return {
+    momentoReal: dato.momento_real,
+    entorno: dato.entorno,
+    relojNegocio: adaptarRelojNegocio(dato.reloj_negocio),
+    base: adaptarBase(dato.base),
+    lector: { estado: dato.lector.estado, razon: dato.lector.razon },
+    actividad: adaptarActividad(dato.actividad),
+  };
+}
+
+/**
+ * GET /monitoreo/estado: diagnóstico técnico para sistemas. Pasa por
+ * `solicitarApi` sin `manejoPropio`, así 401/403/428 siguen el manejo
+ * central de la sesión. El error conserva su causa (con `status`).
+ */
+export async function obtenerEstadoMonitoreo({ signal } = {}) {
+  try {
+    return adaptarEstadoMonitoreo(await solicitarApi('/monitoreo/estado', { signal }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo obtener el diagnóstico del sistema. ${error.message}`, { cause: error });
+  }
+}
+
 async function operarReloj(ruta, opciones, accion) {
   try {
     return adaptarReloj(await solicitarApi(ruta, opciones));

@@ -1,4 +1,5 @@
 import {
+  IconoAlerta,
   IconoDashboard,
   IconoHistorial,
   IconoHuella,
@@ -65,6 +66,13 @@ export const SECCIONES = [
     titulo: 'Administración de cuentas',
     descripcion: 'Cuentas del comedor',
     Icono: IconoUsuario,
+  },
+  {
+    id: 'monitoreo',
+    etiqueta: 'Salud del sistema',
+    titulo: 'Salud del sistema',
+    descripcion: 'Diagnóstico técnico del sistema',
+    Icono: IconoAlerta,
   },
   {
     id: 'cuentas',

@@ -10,6 +10,7 @@ import Supervision from './components/secciones/Supervision.jsx';
 import Administracion from './components/secciones/Administracion.jsx';
 import CuentasLectura from './components/secciones/CuentasLectura.jsx';
 import ReglasSistema from './components/secciones/ReglasSistema.jsx';
+import SaludSistema from './components/secciones/SaludSistema.jsx';
 import Dashboard from './components/secciones/Dashboard.jsx';
 import Reportes from './components/secciones/Reportes.jsx';
 import Historial from './components/secciones/Historial.jsx';
@@ -363,6 +364,9 @@ export function Panel({ rol, usuario = null }) {
             ? <Administracion usuarioActual={usuario} /> : null}
           {permitida && seccionActiva === 'reglas'
             ? <ReglasSistema key={diaServidor} hoy={reloj ? diaServidor : undefined} /> : null}
+          {/* Sin `reloj`: el entorno y el reloj de negocio salen del propio diagnóstico. */}
+          {permitida && seccionActiva === 'monitoreo'
+            ? <SaludSistema /> : null}
           {permitida && seccionActiva === 'cuentas'
             ? <CuentasLectura /> : null}
         </div>
