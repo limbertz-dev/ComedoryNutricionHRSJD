@@ -116,7 +116,7 @@ const cuentaApi = (cambios = {}) => ({
 // 1. Permisos y menú: reglas solo sistemas, cuentas solo jefa
 // -------------------------------------------------------------
 test('reglas es solo de sistemas y cuentas solo de la jefa', () => {
-  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin']);
+  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin', 'monitoreo']);
   assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
   assert.equal(puedeVerSeccion('sistemas', 'reglas'), true);
   assert.equal(puedeVerSeccion('sistemas', 'cuentas'), false);
