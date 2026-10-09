@@ -36,10 +36,10 @@ const ACTIVA_JEFA = { fase: 'activa', rol: 'jefa', usuario: 'ntarifa', aviso: nu
 
 // --- Guardia por rol ---
 
-test('guardia por rol: cocinera 1 sección, jefa 5, sistemas 6 con reglas y admin, rol desconocido ninguna', () => {
+test('guardia por rol: cocinera 1 sección, jefa 5, sistemas 7 con reglas, admin y monitoreo, rol desconocido ninguna', () => {
   assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
   assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
-  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin']);
+  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin', 'monitoreo']);
   assert.deepEqual(seccionesPermitidas(' Jefa '), seccionesPermitidas('jefa'));
   for (const rol of ['nutricionista', '', null, undefined, 42]) {
     assert.deepEqual(seccionesPermitidas(rol), [], `rol ${rol} debe negarse por defecto`);
