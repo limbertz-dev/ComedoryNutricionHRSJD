@@ -34,6 +34,7 @@ MATRIZ = [
     ("GET", "/reportes/gestion", None, JEFATURA),
     ("GET", "/reportes/informe?desde=2026-01-01&hasta=2026-01-31", None, JEFATURA),
     ("GET", "/auth/yo", None, TODOS),
+    ("GET", "/monitoreo/estado", None, {"sistemas"}),
 ]
 
 # Lo único que responde sin token de acceso.
