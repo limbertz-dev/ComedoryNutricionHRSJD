@@ -1346,11 +1346,33 @@ const RAZONES_ACTIVIDAD = ['tabla_ausente', 'error_consulta'];
 const RESULTADOS_LECTURA = ['aceptada', 'rechazada'];
 const MOTIVOS_LECTURA = ['duplicado', 'sin_derecho', 'fuera_horario', 'no_identificado'];
 /* Hora local sin zona: una «Z» o un desfase no están confirmados y se rechazan. */
-const FECHA_HORA_SIN_ZONA = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?$/;
-const FECHA_DIA = /^\d{4}-\d{2}-\d{2}$/;
+const FECHA_HORA_SIN_ZONA = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?$/;
+const FECHA_DIA = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DIAS_POR_MES = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-const esFechaHora = (valor) => typeof valor === 'string' && FECHA_HORA_SIN_ZONA.test(valor)
-  && fechaHoraDelServidor(valor) !== null;
+const esBisiesto = (anio) => (anio % 4 === 0 && anio % 100 !== 0) || anio % 400 === 0;
+
+/*
+ * Componentes comprobados uno a uno, sin `new Date`: un 31 de febrero o una
+ * hora 24 se rechazan en vez de normalizarse al día u hora siguiente.
+ */
+function esDiaValido(anio, mes, dia) {
+  if (mes < 1 || mes > 12 || dia < 1) return false;
+  return dia <= (mes === 2 && esBisiesto(anio) ? 29 : DIAS_POR_MES[mes - 1]);
+}
+
+function esFecha(valor) {
+  const partes = typeof valor === 'string' ? FECHA_DIA.exec(valor) : null;
+  return partes !== null && esDiaValido(Number(partes[1]), Number(partes[2]), Number(partes[3]));
+}
+
+function esFechaHora(valor) {
+  const partes = typeof valor === 'string' ? FECHA_HORA_SIN_ZONA.exec(valor) : null;
+  if (!partes) return false;
+  const [anio, mes, dia, hora, minuto, segundo = 0] = partes.slice(1)
+    .map((parte) => (parte === undefined ? undefined : Number(parte)));
+  return esDiaValido(anio, mes, dia) && hora <= 23 && minuto <= 59 && segundo <= 59;
+}
 
 function diagnosticoInvalido(campo) {
   return new Error(`La API devolvió un diagnóstico inválido (${campo}).`);
@@ -1433,7 +1455,7 @@ function adaptarRelojNegocio(dato) {
   if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('reloj_negocio');
   if (!esFechaHora(dato.ahora)) throw diagnosticoInvalido('reloj_negocio.ahora');
   // La fecha deriva del mismo `ahora`: si no coinciden, el diagnóstico no es coherente.
-  if (typeof dato.fecha !== 'string' || !FECHA_DIA.test(dato.fecha) || dato.ahora.slice(0, 10) !== dato.fecha) {
+  if (!esFecha(dato.fecha) || dato.ahora.slice(0, 10) !== dato.fecha) {
     throw diagnosticoInvalido('reloj_negocio.fecha');
   }
   if (typeof dato.simulado !== 'boolean' || typeof dato.congelado !== 'boolean') {

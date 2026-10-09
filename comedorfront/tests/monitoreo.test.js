@@ -222,6 +222,52 @@ test('adaptador rechaza cuerpos inválidos o incoherentes sin convertir tipos', 
   await assert.rejects(obtenerEstadoMonitoreo(), /No se pudo obtener el diagnóstico del sistema\. .*inválido/);
 });
 
+test('adaptador: fechas imposibles se rechazan, no se normalizan', () => {
+  const conAhora = (ahora) => estadoApi({
+    reloj_negocio: { ...estadoApi().reloj_negocio, ahora, fecha: ahora.slice(0, 10) },
+  });
+  const imposibles = [
+    ['31 de febrero', '2026-02-31T12:00:00'],
+    ['29 de febrero no bisiesto', '2026-02-29T12:00:00'],
+    ['29 de febrero de 1900', '1900-02-29T12:00:00'],
+    ['31 de abril', '2026-04-31T12:00:00'],
+    ['mes 13', '2026-13-01T12:00:00'],
+    ['mes 0', '2026-00-10T12:00:00'],
+    ['día 0', '2026-10-00T12:00:00'],
+    ['hora 24', '2026-10-09T24:00:00'],
+    ['minuto 60', '2026-10-09T14:60:00'],
+    ['segundo 60', '2026-10-09T14:03:60'],
+  ];
+  for (const [caso, texto] of imposibles) {
+    assert.throws(() => adaptarEstadoMonitoreo(estadoApi({ momento_real: texto })),
+      /\(momento_real\)/, `momento_real: ${caso}`);
+    assert.throws(() => adaptarEstadoMonitoreo(conAhora(texto)), /\(reloj_negocio\.ahora\)/,
+      `reloj_negocio.ahora: ${caso}`);
+    const registro = { ...estadoApi().actividad.registro_mayor_id, fecha_hora: texto };
+    assert.throws(() => adaptarEstadoMonitoreo(estadoApi({ actividad: actividadApi({ registro_mayor_id: registro }) })),
+      /\(registro_mayor_id\.fecha_hora\)/, `fecha_hora: ${caso}`);
+  }
+  assert.throws(() => adaptarEstadoMonitoreo(estadoApi({
+    reloj_negocio: { ...estadoApi().reloj_negocio, ahora: '2026-02-31T12:00:00', fecha: '2026-02-31' },
+  })), /\(reloj_negocio\.ahora\)/);
+
+  // Válidas: bisiestos (incluido 2000), extremos del día, microsegundos y los formatos ya aceptados.
+  for (const texto of [
+    '2028-02-29T12:00:00',
+    '2000-02-29T00:00:00',
+    '2026-12-31T23:59:59',
+    '2026-10-09T14:03:10.123456',
+    '2026-10-09T14:03',
+    '2026-10-09 14:03:10',
+  ]) {
+    const estado = adaptarEstadoMonitoreo(conAhora(texto));
+    assert.equal(estado.relojNegocio.ahora, texto, 'el texto se conserva sin convertir zona');
+    assert.equal(adaptarEstadoMonitoreo(estadoApi({ momento_real: texto })).momentoReal, texto);
+  }
+  assert.throws(() => adaptarEstadoMonitoreo(estadoApi({ momento_real: '2026-10-09T14:03:10.1234567' })),
+    /\(momento_real\)/, 'más de 6 decimales');
+});
+
 // -------------------------------------------------------------
 // 3. Autorización: el manejo central sigue igual
 // -------------------------------------------------------------
