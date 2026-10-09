@@ -12,6 +12,7 @@ from app.api import (
     auth,
     cuentas,
     historial,
+    monitoreo,
     pantalla,
     personal,
     reglas,
@@ -126,6 +127,7 @@ def crear_app(entorno: str = config.entorno) -> FastAPI:
         (admin, "admin"),
         (reglas, "reglas"),
         (cuentas, "cuentas"),
+        (monitoreo, "monitoreo"),
     ]
     # Solo en simulación: en producción y desarrollo /simulacion/* da 404.
     if entorno == "simulacion":
