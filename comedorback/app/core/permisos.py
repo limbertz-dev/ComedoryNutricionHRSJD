@@ -11,7 +11,7 @@ dice qué roles lo abren):
                Ni escrituras en el padrón, ni historial, ni informes, ni
                registro manual.
   · sistemas   soporte técnico. Todo lo de la jefa y, además, la
-               administración de cuentas de usuario.
+               administración de cuentas de usuario y el diagnóstico técnico.
 
 La matriz se aplica en app/main.py, router por router, con `requiere_rol`
 (app/core/autorizacion.py). La regla fina de la marcación (manual solo
@@ -62,6 +62,9 @@ ACCESO: dict[str, Regla] = {
     # Cuentas en solo lectura: jefa y sistemas. Solo existe GET /cuentas;
     # la cocinera recibe 403 y la jefa no ve cuentas de sistemas.
     "cuentas": Regla(completo=JEFATURA),
+    # Diagnóstico técnico (GET /monitoreo/estado): solo root. Jefa y cocinera
+    # reciben 403.
+    "monitoreo": Regla(completo=ADMINISTRACION),
     # Solo existe con ENTORNO=simulacion (app/main.py).
     "simulacion": Regla(completo=JEFATURA),
 }
