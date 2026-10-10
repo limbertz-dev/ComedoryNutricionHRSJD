@@ -257,9 +257,9 @@ export default function PantallaEnVivo({
         limite: LIMITE_MARCACIONES_COCINA, signal,
       }),
       // App ya pide el estado al montar la sección.
-      refrescarEstado: ({ origen }) => (origen === 'inicial'
+      refrescarEstado: ({ origen, signal }) => (origen === 'inicial'
         ? undefined
-        : recargarEstadoRef.current?.({ conservar: true })),
+        : recargarEstadoRef.current?.({ conservar: true, signal })),
       puedeDetectar: () => !deteccionEnPausa.current,
       alActualizar: ({ filas: recibidas, error, nueva }) => {
         if (error) {
@@ -382,9 +382,10 @@ export default function PantallaEnVivo({
         <div className="vivo__columna-izquierda">
           <section className="escenario">
             <header className="escenario__barra">
+              {/* Rótulo neutral: la pantalla no sabe si hay un lector
+                  conectado, así que no muestra un indicador de conexión. */}
               <span className="escenario__lector">
-                <span className="escenario__pulso" aria-hidden="true" />
-                Lector biométrico · Comedor planta baja
+                Control de raciones · Comedor planta baja
               </span>
               <Etiqueta tono="neutro">
                 {pantalla ? `${pantalla.totales_del_dia.raciones_servidas} raciones del día` : 'Consultando estado'}

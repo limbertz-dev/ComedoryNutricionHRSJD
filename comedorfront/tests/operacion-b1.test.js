@@ -28,7 +28,10 @@ import RegistroManual, {
   avisoDeRegistroManual,
   crearRegistroManual,
   filtrarPadron,
+  mismaIdentidad,
+  personaVisible,
 } from '../src/components/secciones/RegistroManual.jsx';
+import { enlazarCancelacion } from '../src/hooks/useConsultaApi.js';
 import { etiquetaDeOrigen, eventoDeFila, filasConPropia } from '../src/components/secciones/PantallaEnVivo.jsx';
 
 const fetchOriginal = globalThis.fetch;
@@ -446,9 +449,10 @@ const vaciar = async () => {
   for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
 };
 
-function armarCiclo({ detectar = () => true } = {}) {
+function armarCiclo({ detectar = () => true, estadoPendiente = false } = {}) {
   const llamadas = [];
   const estados = [];
+  const consultasEstado = [];
   const resultados = [];
   let enVuelo = 0;
   let maximo = 0;
@@ -461,13 +465,19 @@ function armarCiclo({ detectar = () => true } = {}) {
       const fin = (fn) => (valor) => { enVuelo -= 1; fn(valor); };
       llamadas.push({ signal, resolver: fin(resolver), rechazar: fin(rechazar) });
     }),
-    refrescarEstado: ({ origen }) => { estados.push(origen); },
+    refrescarEstado: ({ origen, signal }) => {
+      estados.push(origen);
+      if (!estadoPendiente) return undefined;
+      return new Promise((resolver) => { consultasEstado.push({ signal, resolver }); });
+    },
     alActualizar: (resultado) => resultados.push(resultado),
     puedeDetectar: detectar,
     temporizador,
     documento,
   });
-  return { control, llamadas, estados, resultados, temporizador, documento, maximo: () => maximo };
+  return {
+    control, llamadas, estados, consultasEstado, resultados, temporizador, documento, maximo: () => maximo,
+  };
 }
 
 test('ciclo: el siguiente sale 3 s después de terminar, sin solapes ni temporizadores duplicados', async () => {
@@ -581,4 +591,199 @@ test('ciclo: durante una marcación local no se anuncia nada; después, la exter
   await vaciar();
   assert.equal(c.resultados[3].nueva, null);
   c.control.cancelar();
+});
+
+// -------------------------------------------------------------
+// 5. Corrección B1
+// -------------------------------------------------------------
+
+/** Registra a ANA contra un POST que responde `responder`; cuenta los POST. */
+async function registrarContra(responder) {
+  const peticiones = grabar((peticion) => responder(peticion));
+  const recibidos = [];
+  const registrar = crearRegistroManual({ alResultado: (aviso) => recibidos.push(aviso) });
+  await registrar(ANA);
+  return { aviso: recibidos[0], posts: peticiones.filter(({ metodo }) => metodo === 'POST').length };
+}
+
+test('500, 502, 504, 408 y red son inciertos: verificar antes de reintentar, sin reenvío', async () => {
+  const casos = [
+    () => json({ detail: 'Error interno' }, 500),
+    () => new Response('<html>Bad Gateway</html>', { status: 502 }),
+    () => new Response('', { status: 504 }),
+    () => json({ detail: 'Request Timeout' }, 408),
+    () => { throw new TypeError('Failed to fetch'); },
+  ];
+  for (const responder of casos) {
+    const { aviso, posts } = await registrarContra(responder);
+    assert.equal(posts, 1, 'un solo POST: nunca se reenvía');
+    assert.equal(aviso.tipo, 'error');
+    assert.equal(aviso.titulo, 'No se pudo confirmar el registro');
+    assert.notEqual(aviso.titulo, 'No se registró la ración');
+    assert.match(aviso.detalle, /Revise en la tabla si la ración\s+quedó registrada antes de volver a intentarlo/);
+  }
+  assert.deepEqual(avisos, [], 'un 5xx no toca la sesión');
+});
+
+test('422 es definitivo y valido=false es rechazo de negocio', async () => {
+  const definitivo = await registrarContra(() => json({ detail: 'usuario_id inválido' }, 422));
+  assert.equal(definitivo.posts, 1);
+  assert.equal(definitivo.aviso.titulo, 'No se registró la ración');
+  assert.match(definitivo.aviso.detalle, /HTTP 422/);
+
+  const rechazo = await registrarContra(() => json({
+    valido: false, motivo: 'duplicado', titulo: 'Ya recibió su comida', detalle: 'Ya almorzó.', usuario_id: 99,
+  }));
+  assert.equal(rechazo.posts, 1);
+  assert.equal(rechazo.aviso.tipo, 'rechazo');
+  assert.match(rechazo.aviso.detalle, /No se registró ninguna ración/);
+
+  // 401 sigue el manejo central de sesión y es definitivo.
+  const sesion = await registrarContra(() => json({ detail: 'Sesión inválida.', motivo: 'token_invalido' }, 401));
+  assert.equal(sesion.aviso.titulo, 'No se registró la ración');
+  assert.deepEqual(avisos, ['expirada']);
+});
+
+test('seleccionar A y buscar B o algo sin resultados deja sin comensal: no se envía nada para A', async () => {
+  assert.equal(personaVisible([ANA, LUIS], '', '99'), ANA);
+  assert.equal(personaVisible([ANA, LUIS], 'Luis', '99'), null);
+  assert.equal(personaVisible([ANA, LUIS], 'zzz', '99'), null);
+  assert.equal(personaVisible([LUIS], '', '99'), null, 'si el padrón ya no lo trae, tampoco');
+  assert.equal(personaVisible([ANA, LUIS], 'Luis', ''), null, 'nunca elige a otro en su lugar');
+
+  const html = (props) => renderToStaticMarkup(h(RegistroManual, {
+    abiertoInicial: true, personal: [ANA, LUIS], elegidoInicial: 99, ...props,
+  }));
+  for (const busquedaInicial of ['Luis', 'zzz']) {
+    const vista = html({ busquedaInicial });
+    assert.doesNotMatch(vista, /Confirmar registro|registro-manual__identidad/, busquedaInicial);
+    assert.match(vista, /<option value="" selected="">/);
+  }
+  assert.match(html({ busquedaInicial: 'zzz' }), /Ningún comensal coincide/);
+  assert.doesNotMatch(html({ personal: [LUIS] }), /Confirmar registro/);
+  assert.match(html({ busquedaInicial: 'ana' }), /Confirmar registro/);
+
+  // Justo antes del POST se revalida la identidad confirmada.
+  let posts = 0;
+  let estado = { personal: [ANA, LUIS], busqueda: '', elegido: '99' };
+  const registrar = crearRegistroManual({
+    registrar: async () => { posts += 1; return { valido: true, titulo: 't', detalle: 'd' }; },
+    vigente: (confirmada) => mismaIdentidad(
+      personaVisible(estado.personal, estado.busqueda, estado.elegido), confirmada,
+    ),
+  });
+  estado = { ...estado, busqueda: 'Luis' };
+  assert.equal(await registrar(ANA), null);
+  estado = { personal: [{ ...ANA, nombre: 'Ana G. (otra ficha)' }, LUIS], busqueda: '', elegido: '99' };
+  assert.equal(await registrar(ANA), null, 'la ficha cambió: no es la identidad confirmada');
+  assert.equal(posts, 0);
+  estado = { personal: [ANA, LUIS], busqueda: '', elegido: '99' };
+  await registrar(ANA);
+  assert.equal(posts, 1);
+});
+
+test('ciclo: un ciclo descartado aborta las dos lecturas y no publica respuestas tardías', async () => {
+  const c = armarCiclo({ estadoPendiente: true });
+  c.llamadas[0].resolver([fila('lectura_biometrica', 1)]);
+  await vaciar();
+  c.consultasEstado.forEach(({ resolver }) => resolver());
+  await vaciar();
+  const publicados = c.resultados.length;
+  assert.equal(publicados, 1);
+
+  // Siguiente ciclo con las dos consultas pendientes.
+  c.temporizador.disparar();
+  await vaciar();
+  const marcaciones = c.llamadas.at(-1);
+  const estado = c.consultasEstado.at(-1);
+  assert.equal(marcaciones.signal.aborted, false);
+  assert.equal(estado.signal, marcaciones.signal, 'ambas lecturas comparten la señal del ciclo');
+
+  // Regreso a la pestaña: se descarta el ciclo en vuelo.
+  c.documento.cambiar('hidden');
+  c.documento.cambiar('visible');
+  assert.equal(estado.signal.aborted, true);
+  assert.equal(marcaciones.signal.aborted, true);
+
+  // Respuestas tardías del ciclo descartado: nada se publica.
+  marcaciones.resolver([fila('lectura_biometrica', 99), fila('lectura_biometrica', 1)]);
+  estado.resolver();
+  await vaciar();
+  assert.equal(c.resultados.length, publicados);
+
+  // Desmontaje con el ciclo de regreso pendiente: también se aborta.
+  const regreso = c.llamadas.at(-1);
+  await vaciar();
+  const estadoRegreso = c.consultasEstado.at(-1);
+  assert.notEqual(regreso, marcaciones);
+  c.control.cancelar();
+  assert.equal(regreso.signal.aborted, true);
+  assert.equal(estadoRegreso.signal.aborted, true);
+  regreso.resolver([fila('lectura_biometrica', 100)]);
+  estadoRegreso.resolver();
+  await vaciar();
+  assert.equal(c.resultados.length, publicados, 'tras desmontar no se publica nada');
+});
+
+test('ciclo: con la pestaña oculta, solicitar() no inicia otro ciclo', async () => {
+  const c = armarCiclo();
+  c.llamadas[0].resolver([fila('lectura_biometrica', 1)]);
+  await vaciar();
+  c.documento.cambiar('hidden');
+  c.control.solicitar();
+  c.control.solicitar();
+  assert.equal(c.llamadas.length, 1);
+  assert.equal(c.temporizador.pendientes.size, 0);
+  c.documento.cambiar('visible');
+  assert.equal(c.llamadas.length, 2, 'solo el regreso consulta');
+  c.control.cancelar();
+});
+
+test('useConsultaApi: la señal del ciclo aborta la consulta del estado; un clic no la enlaza', () => {
+  const externa = new AbortController();
+  const propio = new AbortController();
+  enlazarCancelacion(externa.signal, propio);
+  assert.equal(propio.signal.aborted, false);
+  externa.abort();
+  assert.equal(propio.signal.aborted, true);
+
+  const yaAbortada = new AbortController();
+  yaAbortada.abort();
+  const otro = new AbortController();
+  enlazarCancelacion(yaAbortada.signal, otro);
+  assert.equal(otro.signal.aborted, true);
+
+  const conClic = new AbortController();
+  enlazarCancelacion({ type: 'click' }.signal, conClic);
+  enlazarCancelacion(undefined, conClic);
+  assert.equal(conClic.signal.aborted, false, 'el handler de «Reintentar estado» sigue igual');
+});
+
+test('claves repetidas: la respuesta se rechaza entera y el ciclo conserva lo anterior con aviso', async () => {
+  grabar(() => json([filaApi('lectura_biometrica', 5), filaApi('lectura_biometrica', 5, { nombre: 'Otra' })]));
+  await assert.rejects(obtenerUltimasMarcaciones(), /misma clave de evento/);
+
+  // Mismo id con distinto origen sigue siendo válido.
+  grabar(() => json([filaApi('lectura_biometrica', 5), filaApi('asistencia_manual', 5)]));
+  assert.equal((await obtenerUltimasMarcaciones()).length, 2);
+
+  // En el ciclo: primero datos buenos, después la respuesta inconsistente.
+  let respuesta = [filaApi('lectura_biometrica', 1)];
+  grabar(() => json(respuesta));
+  const temporizador = temporizadorFalso();
+  const resultados = [];
+  const control = programarCicloCocina({
+    consultarMarcaciones: ({ signal }) => obtenerUltimasMarcaciones({ limite: 100, signal }),
+    alActualizar: (r) => resultados.push(r),
+    temporizador,
+    documento: documentoFalso(),
+  });
+  await vaciar();
+  assert.equal(resultados[0].filas.length, 1);
+  respuesta = [filaApi('lectura_biometrica', 2), filaApi('lectura_biometrica', 2)];
+  temporizador.disparar();
+  await vaciar();
+  assert.equal(resultados[1].filas, undefined, 'no publica filas: la pantalla conserva las anteriores');
+  assert.match(resultados[1].error, /misma clave de evento/);
+  control.cancelar();
 });

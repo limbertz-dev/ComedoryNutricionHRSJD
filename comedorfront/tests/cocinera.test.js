@@ -39,7 +39,9 @@ test('con rol cocinera no hay sidebar ni header y Control Biométrico ocupa toda
   assert.match(html, /app--pantalla-completa/);
 
   // Mismo contenido: panel del lector, ficha del día y marcaciones del turno
-  assert.match(html, /Lector biométrico/);
+  assert.match(html, /Control de raciones · Comedor planta baja/);
+  // Sin rótulo ni punto animado que aparente un lector conectado.
+  assert.doesNotMatch(html, /Lector biométrico|escenario__pulso/);
   assert.match(html, /vivo__dia/);
   assert.match(html, /Marcaciones del turno/);
 

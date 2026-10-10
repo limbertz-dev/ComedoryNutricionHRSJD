@@ -40,10 +40,15 @@ export function detectarNueva(conocidas, filas, propias = new Set()) {
  * Programa los ciclos de cocina.
  *
  * - `consultarMarcaciones({ signal })` devuelve las filas o lanza.
- * - `refrescarEstado({ origen })` relee el estado del comedor; maneja su
- *   propio error (App conserva el último estado con su aviso). `origen` es
- *   'inicial', 'ciclo', 'solicitado' o 'regreso': App ya pide el estado al
- *   montar, así que quien llama puede omitir el inicial.
+ * - `refrescarEstado({ origen, signal })` relee el estado del comedor;
+ *   maneja su propio error (App conserva el último estado con su aviso) y
+ *   con `signal` abortado no publica nada. `origen` es 'inicial', 'ciclo',
+ *   'solicitado' o 'regreso': App ya pide el estado al montar, así que quien
+ *   llama puede omitir el inicial.
+ *
+ * Las dos consultas son lecturas (GET) y comparten la `signal` del ciclo:
+ * descartar un ciclo (regreso a la pestaña o desmontaje) aborta ambas y
+ * ninguna publica su respuesta tardía.
  * - `alActualizar({ filas, error, nueva })` recibe cada resultado: con éxito,
  *   `filas` y la `nueva` detectada; con fallo, solo `error` (las filas
  *   anteriores quedan a la vista y la referencia se reinicia).
@@ -51,8 +56,9 @@ export function detectarNueva(conocidas, filas, propias = new Set()) {
  *   sin tocar la referencia, para no anunciar dos veces la propia.
  *
  * Sin solapes: `solicitar()` durante un ciclo pide uno más al terminar, sin
- * esperar los 3 s. Con la pestaña oculta no se programa nada; al volver se
- * descarta el ciclo en vuelo, se reinicia la referencia y se consulta.
+ * esperar los 3 s. Con la pestaña oculta no se programa ni se inicia nada
+ * (tampoco con `solicitar()`); al volver se descarta el ciclo en vuelo, se
+ * reinicia la referencia y se consulta.
  */
 export function programarCicloCocina({
   consultarMarcaciones,
@@ -93,7 +99,7 @@ export function programarCicloCocina({
         (filas) => ({ filas }),
         (fallo) => ({ fallo }),
       ),
-      Promise.resolve().then(() => refrescarEstado({ origen })).catch(() => {}),
+      Promise.resolve().then(() => refrescarEstado({ origen, signal })).catch(() => {}),
     ]);
     if (signal.aborted || cancelado) return;
     if (lista.fallo) {
@@ -110,6 +116,8 @@ export function programarCicloCocina({
 
   function ejecutar(origen = 'solicitado') {
     if (cancelado) return;
+    // Oculta, nada empieza: el regreso consulta y fija la referencia.
+    if (oculto() && origen !== 'regreso') return;
     if (controlador) {
       repetir = true;
       return;

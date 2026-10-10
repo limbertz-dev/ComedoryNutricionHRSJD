@@ -4,10 +4,11 @@ import Etiqueta from '../ui/Etiqueta.jsx';
 import { IconoBuscar, IconoCheck, IconoEquis, IconoAlerta } from '../ui/Iconos.jsx';
 import {
   autorizarMarcacionManual,
+  marcacionIncierta,
   obtenerComidasDelDia,
   obtenerUltimasMarcaciones,
 } from '../../api.js';
-import RegistroManual from './RegistroManual.jsx';
+import RegistroManual, { avisoDeFalloRegistro } from './RegistroManual.jsx';
 import './Supervision.css';
 
 const ETIQUETAS_MOTIVOS = {
@@ -120,7 +121,9 @@ export async function ejecutarAutorizacionManual({
     }
     return resultado;
   } catch (err) {
-    setAvisoAccion?.({
+    // Sin una respuesta que lo descarte (red, tiempo, 5xx) no se sabe si la
+    // ración quedó registrada: se pide verificar, nunca se reenvía.
+    setAvisoAccion?.(marcacionIncierta(err) ? avisoDeFalloRegistro(err) : {
       tipo: 'error',
       titulo: 'Error al autorizar',
       detalle: err.message,
