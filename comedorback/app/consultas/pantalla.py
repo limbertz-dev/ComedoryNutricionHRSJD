@@ -54,6 +54,20 @@ class TotalesDia:
     rechazadas: int
 
 
+# De qué tabla sale cada fila de `ultimas_marcaciones`. Lo pone la rama del
+# UNION, nunca el cliente ni el dispositivo: `id` solo es único DENTRO de su
+# tabla y una lectura y una asistencia manual pueden compartirlo.
+ORIGEN_LECTURA = "lectura_biometrica"
+ORIGEN_MANUAL = "asistencia_manual"
+
+
+def clave_evento(origen: str, id_: int) -> str:
+    """'<origen>:<id>': identifica una fila sin ambigüedad entre las dos
+    tablas. No es un cursor ni dice en qué orden se confirmaron las
+    transacciones."""
+    return f"{origen}:{id_}"
+
+
 @dataclass
 class Marcacion:
     id: int
@@ -67,6 +81,8 @@ class Marcacion:
     motivo: str | None
     valido: bool
     dispositivo: str
+    origen: str
+    clave_evento: str
 
 
 @dataclass
@@ -261,7 +277,11 @@ def ultimas_marcaciones(
 
     Combina `lecturas_biometricas` con las asistencias manuales: la pantalla
     muestra los rechazos del lector y las raciones registradas por la
-    jefatura en una sola secuencia cronológica.
+    jefatura en una sola secuencia cronológica. Una asistencia biométrica no
+    entra por la rama manual: aparece una sola vez, como su lectura.
+
+    Es una ventana de lo más reciente (`limite`, hasta 100), no un cursor:
+    entre dos consultas pueden pasar más eventos de los que caben.
     """
     dia = fecha or reloj.hoy()
     comida_asistencia = aliased(Comida, name="comida_asistencia")
@@ -339,13 +359,35 @@ def ultimas_marcaciones(
     if comida_id is not None:
         lecturas = lecturas.where(comida_resuelta_id == comida_id)
         manuales = manuales.where(Asistencia.comida_id == comida_id)
-    consulta = lecturas.union_all(manuales).subquery("marcaciones")
+    return _componer_ventana(sesion, lecturas, manuales, limite)
+
+
+def _componer_ventana(sesion: Session, lecturas, manuales, limite: int) -> list[Marcacion]:
+    """Une las dos ramas, ordena y corta la ventana.
+
+    Cada rama agrega su `origen` como literal: sale de la consulta, nunca de
+    una columna con datos. Orden: fecha_hora e id descendentes y, como último
+    desempate, `origen` ascendente, para que dos filas con la misma fecha e
+    id (una de cada tabla) salgan siempre en el mismo orden.
+    """
+    consulta = (
+        lecturas.add_columns(literal(ORIGEN_LECTURA).label("origen"))
+        .union_all(manuales.add_columns(literal(ORIGEN_MANUAL).label("origen")))
+        .subquery("marcaciones")
+    )
     ordenadas = (
         select(consulta)
-        .order_by(consulta.c.fecha_hora.desc(), consulta.c.id.desc())
+        .order_by(
+            consulta.c.fecha_hora.desc(),
+            consulta.c.id.desc(),
+            consulta.c.origen.asc(),
+        )
         .limit(limite)
     )
-    return [Marcacion(**fila) for fila in sesion.execute(ordenadas).mappings().all()]
+    return [
+        Marcacion(**fila, clave_evento=clave_evento(fila["origen"], fila["id"]))
+        for fila in sesion.execute(ordenadas).mappings().all()
+    ]
 
 
 def _horarios_vigentes(
