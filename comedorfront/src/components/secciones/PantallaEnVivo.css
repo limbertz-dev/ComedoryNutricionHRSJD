@@ -559,6 +559,17 @@
   text-align: center;
 }
 
+/* La lista quedó sin actualizar: se conserva lo último recibido, con aviso. */
+.marcaciones__desactualizado {
+  margin: 0 0 var(--e-3);
+  padding: var(--e-2) var(--e-3);
+  background: var(--c-aviso-tenue);
+  border: 1px solid var(--c-aviso);
+  border-radius: var(--r-sm);
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+}
+
 /* Tarjeta rectangular con fondo teñido por completo según el resultado (como
    las píldoras de comidas), pero con esquinas más contenidas y borde propio
    en vez de una píldora totalmente redondeada. */

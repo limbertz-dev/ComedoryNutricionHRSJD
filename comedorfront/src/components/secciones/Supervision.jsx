@@ -7,6 +7,7 @@ import {
   obtenerComidasDelDia,
   obtenerUltimasMarcaciones,
 } from '../../api.js';
+import RegistroManual from './RegistroManual.jsx';
 import './Supervision.css';
 
 const ETIQUETAS_MOTIVOS = {
@@ -50,11 +51,11 @@ function horaCorta(fecha) {
 }
 
 /**
- * Método de la marcación a partir del dispositivo que la registró: Manual si
- * es un registro a mano, Lector en cualquier otro caso.
+ * Método de la marcación según su `origen` declarado por la API, nunca según
+ * el texto del dispositivo. Una lectura no prueba que el lector esté conectado.
  */
 export function metodoDeMarcacion(marcacion) {
-  return marcacion.dispositivo === 'registro-manual' ? 'Manual' : 'Lector';
+  return marcacion.origen === 'asistencia_manual' ? 'Registro manual' : 'Lectura biométrica';
 }
 
 /**
@@ -81,6 +82,8 @@ export function resolverAvisoAutorizacion(resultado) {
  * - Si es válido, emite aviso de éxito, limpia el comensal seleccionado y notifica éxito.
  * - Si es rechazo del servidor (200 con valido: false), emite aviso de rechazo y NO limpia la selección.
  * - En cualquier caso, recarga los datos desde la API.
+ * La fila se identifica por su `clave` (origen:id): el id numérico se repite
+ * entre lecturas y asistencias manuales.
  * Devuelve el resultado del servidor para que la tabla sepa si cerrar la fila.
  */
 export async function ejecutarAutorizacionManual({
@@ -100,7 +103,7 @@ export async function ejecutarAutorizacionManual({
   const idNumero = Number(usuarioId);
   if (!Number.isInteger(idNumero) || idNumero <= 0) return undefined;
 
-  setAutorizandoId?.(marcacion.id);
+  setAutorizandoId?.(marcacion.clave);
   setAvisoAccion?.(null);
   try {
     const resultado = await autorizarFn(idNumero);
@@ -110,7 +113,7 @@ export async function ejecutarAutorizacionManual({
     if (resultado?.valido) {
       setComensalElegido?.((prev) => {
         const copia = { ...prev };
-        delete copia[marcacion.id];
+        delete copia[marcacion.clave];
         return copia;
       });
       onMarcacionExitosa?.();
@@ -176,13 +179,19 @@ export function programarRefrescoSupervision({ cargarDatos, intervaloMs = 30000 
  *
  * Una sola tabla en vivo: arriba, las pestañas de las comidas del día
  * ("Todas" + una por comida); debajo, la barra de filtros y la tabla de
- * marcaciones de la pestaña activa. La única acción vive en la columna
- * Acción, solo para huellas no identificadas.
+ * marcaciones de la pestaña activa. La acción de fila vive en la columna
+ * Acción, solo para huellas no identificadas. Aparte, con
+ * `puedeRegistrarManual` (jefa y sistemas), «Registrar ración manual» no
+ * depende de ninguna fila.
  */
 export default function Supervision({
   fecha,
   simulacion = null,
   personal = [],
+  cargandoPadron = false,
+  errorPadron = '',
+  puedeRegistrarManual = false,
+  registrarManual = autorizarMarcacionManual,
   versionReloj = 0,
   onMarcacionExitosa,
   cargandoInicial = true,
@@ -192,10 +201,14 @@ export default function Supervision({
   avisoAccionInicial = null,
   actualizadoInicial = null,
   filaExpandidaInicial = null,
+  errorRefrescoInicial = '',
 }) {
   const [cargando, setCargando] = useState(cargandoInicial);
   const [actualizando, setActualizando] = useState(false);
   const [error, setError] = useState(errorInicial);
+  /* Fallo del último refresco: aparte del aviso de una acción, para que un
+     refresco fallido nunca tape que un registro tuvo éxito. */
+  const [errorRefresco, setErrorRefresco] = useState(errorRefrescoInicial);
   const [dia, setDia] = useState(comidasIniciales);
   const [marcaciones, setMarcaciones] = useState(marcacionesIniciales);
   const [actualizado, setActualizado] = useState(actualizadoInicial);
@@ -238,16 +251,13 @@ export default function Supervision({
       setDia(diaServidor);
       setMarcaciones(ultimas);
       setActualizado(new Date());
+      setErrorRefresco('');
     } catch (err) {
       if (!signal?.aborted) {
         if (!esRefresco) {
           setError(err.message);
         } else {
-          setAvisoAccion({
-            tipo: 'error',
-            titulo: 'No se pudo actualizar',
-            detalle: err.message,
-          });
+          setErrorRefresco(err.message);
         }
       }
     } finally {
@@ -290,6 +300,35 @@ export default function Supervision({
     if (resultado?.valido) setFilaExpandida(null);
   }
 
+  /* Registro manual independiente de las filas: el aviso es el de cualquier
+     acción y el refresco posterior informa su fallo por separado. */
+  const registroManual = puedeRegistrarManual ? (
+    <RegistroManual
+      personal={personal}
+      cargandoPadron={cargandoPadron}
+      errorPadron={errorPadron}
+      registrar={registrarManual}
+      onAviso={setAvisoAccion}
+      onExito={() => onMarcacionExitosa?.()}
+      onRefrescar={() => cargarDatos({ esRefresco: true })}
+    />
+  ) : null;
+  const avisos = (
+    <>
+      {avisoAccion ? <AvisoAccion aviso={avisoAccion} onCerrar={() => setAvisoAccion(null)} /> : null}
+      {errorRefresco ? (
+        <AvisoAccion
+          aviso={{
+            tipo: 'error',
+            titulo: 'No se pudo actualizar',
+            detalle: `Se muestran los datos anteriores. ${errorRefresco}`,
+          }}
+          onCerrar={() => setErrorRefresco('')}
+        />
+      ) : null}
+    </>
+  );
+
   /* Filtrado local sobre las filas de la pestaña activa */
   const marcacionesFiltradas = useMemo(
     () => filtrarMarcaciones(marcaciones, { resultado: filtroResultado, busqueda }),
@@ -312,6 +351,8 @@ export default function Supervision({
           <p>{error}</p>
           <Boton onClick={() => cargarDatos()}>Reintentar supervisión</Boton>
         </div>
+        {avisoAccion ? <AvisoAccion aviso={avisoAccion} onCerrar={() => setAvisoAccion(null)} /> : null}
+        {registroManual}
       </div>
     );
   }
@@ -333,7 +374,8 @@ export default function Supervision({
             {actualizando ? 'Actualizando…' : 'Actualizar'}
           </Boton>
         </div>
-        {avisoAccion ? <AvisoAccion aviso={avisoAccion} onCerrar={() => setAvisoAccion(null)} /> : null}
+        {avisos}
+        {registroManual}
       </div>
     );
   }
@@ -352,7 +394,9 @@ export default function Supervision({
         </aside>
       ) : null}
 
-      {avisoAccion ? <AvisoAccion aviso={avisoAccion} onCerrar={() => setAvisoAccion(null)} /> : null}
+      {avisos}
+
+      {registroManual}
 
       {/* Pestañas: "Todas" + una por comida del día, en el orden recibido. */}
       <div className="supervision__pestanas" role="tablist" aria-label="Filtrar por comida">
@@ -498,7 +542,7 @@ export default function Supervision({
             </thead>
             <tbody>
               {marcacionesFiltradas.map((m) => (
-                <Fragment key={`${m.dispositivo}-${m.id}`}>
+                <Fragment key={m.clave}>
                   <tr className={m.valido ? undefined : 'supervision__fila--rechazada'}>
                     <td>{m.hora}</td>
                     <td>{m.persona?.nombre ?? 'Desconocido'}</td>
@@ -514,25 +558,25 @@ export default function Supervision({
                     <td>
                       <AccionFila
                         marcacion={m}
-                        expandida={filaExpandida === m.id}
-                        onAutorizar={() => setFilaExpandida(filaExpandida === m.id ? null : m.id)}
+                        expandida={filaExpandida === m.clave}
+                        onAutorizar={() => setFilaExpandida(filaExpandida === m.clave ? null : m.clave)}
                       />
                     </td>
                   </tr>
-                  {filaExpandida === m.id && m.motivo === 'no_identificado' ? (
+                  {filaExpandida === m.clave && m.motivo === 'no_identificado' ? (
                     <tr className="supervision__fila-autorizar">
                       <td colSpan={8}>
                         <div className="supervision__autorizar-caja">
-                          <label className="supervision__autorizar-etiqueta" htmlFor={`autorizar-${m.id}`}>
+                          <label className="supervision__autorizar-etiqueta" htmlFor={`autorizar-${m.clave}`}>
                             Comensal
                           </label>
                           <select
-                            id={`autorizar-${m.id}`}
+                            id={`autorizar-${m.clave}`}
                             className="supervision__select-padron"
-                            value={comensalElegido[m.id] ?? ''}
+                            value={comensalElegido[m.clave] ?? ''}
                             onChange={(e) => setComensalElegido({
                               ...comensalElegido,
-                              [m.id]: e.target.value,
+                              [m.clave]: e.target.value,
                             })}
                           >
                             <option value="">Seleccione comensal del padrón…</option>
@@ -543,10 +587,10 @@ export default function Supervision({
                             ))}
                           </select>
                           <Boton
-                            disabled={!(comensalElegido[m.id] ?? '') || autorizandoId === m.id}
-                            onClick={() => manejarAutorizarManual(m, comensalElegido[m.id])}
+                            disabled={!(comensalElegido[m.clave] ?? '') || autorizandoId === m.clave}
+                            onClick={() => manejarAutorizarManual(m, comensalElegido[m.clave])}
                           >
-                            {autorizandoId === m.id ? 'Autorizando…' : 'Confirmar ración manual'}
+                            {autorizandoId === m.clave ? 'Autorizando…' : 'Confirmar ración manual'}
                           </Boton>
                           <Boton variante="secundario" onClick={() => setFilaExpandida(null)}>
                             Cancelar
