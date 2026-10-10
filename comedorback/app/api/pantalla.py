@@ -69,7 +69,13 @@ def ultimas_marcaciones(
     limite: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> list[Marcacion]:
     """Incluye los rechazos: son justamente lo que la persona parada frente al
-    lector necesita ver."""
+    lector necesita ver.
+
+    Cada fila trae `origen` y `clave_evento` ('<origen>:<id>'): `id` se
+    repite entre lecturas y asistencias manuales, la clave no. Es una ventana
+    de lo más reciente (hasta 100 filas), no un cursor: no garantiza entregar
+    todos los eventos ocurridos entre dos consultas.
+    """
     return [
         Marcacion(**asdict(m))
         for m in consultas.ultimas_marcaciones(
