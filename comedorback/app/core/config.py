@@ -13,6 +13,11 @@ registro = logging.getLogger(__name__)
 # Las bases reales: la propia de producción y la del módulo de turnos.
 BASES_REALES = frozenset({"bd_nutricion", "bd_proyecto_backend"})
 
+# Los entornos posibles. ENTORNO solo da el valor por omisión con que se arma
+# la app del proceso: el entorno que rige cada petición es el de la app que
+# la atiende (app/core/entorno.py).
+Entorno = Literal["produccion", "desarrollo", "simulacion"]
+
 
 class Configuracion(BaseSettings):
     # hide_input_in_errors: un ValidationError nunca imprime el valor recibido.
@@ -28,7 +33,7 @@ class Configuracion(BaseSettings):
     nombre_app: str = "Sistema de Comedor y Nutrición Hospitalaria"
     # simulacion: monta /simulacion/* para mover el reloj (app/core/reloj.py)
     # y SOLO arranca contra las bases de scripts/preparar_simulacion.py.
-    entorno: Literal["produccion", "desarrollo", "simulacion"] = "desarrollo"
+    entorno: Entorno = "desarrollo"
 
     db_host: str = "127.0.0.1"
     db_port: int = 3306

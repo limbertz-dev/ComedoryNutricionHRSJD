@@ -23,6 +23,7 @@ from app.core import reloj
 from app.core.autorizacion import ErrorAuth, requiere_rol
 from app.core.config import config
 from app.core.db import Base, SesionDep
+from app.core.entorno import EntornoDep, validar_entorno
 from app.core.permisos import ACCESO
 from app.core.tablas_heredadas import VISTAS_CONTRATO
 
@@ -41,7 +42,7 @@ diagnostico = APIRouter(tags=["diagnóstico"])
 
 
 @diagnostico.get("/salud")
-def salud(sesion: SesionDep):
+def salud(sesion: SesionDep, entorno: EntornoDep):
     """Confirma que la API responde y que `bd_nutricion` está completa.
 
     Solo mira objetos de `bd_nutricion`: su catálogo y `alembic_version`. No
@@ -71,7 +72,7 @@ def salud(sesion: SesionDep):
     cuerpo = {
         "estado": "incompleta" if faltan else "ok",
         "base_de_datos": "conectada",
-        "entorno": config.entorno,
+        "entorno": entorno,
         "reloj": _reloj_para_salud(),
         "base_datos": config.db_name,
         "base_turnos": config.db_name_turnos,
@@ -94,9 +95,18 @@ def _reloj_para_salud() -> dict:
 
 
 def crear_app(entorno: str = config.entorno) -> FastAPI:
-    """Arma la API. `entorno` decide si se monta /simulacion/*; los tests lo
-    pasan explícito para probar los tres entornos en un mismo proceso."""
+    """Arma la API para `entorno`. Los tests lo pasan explícito para probar
+    los tres entornos en un mismo proceso.
+
+    El entorno queda fijo en `app.state.entorno` y es la ÚNICA fuente de las
+    decisiones por entorno de esta app: el montaje de /simulacion/*, el
+    `entorno` de /salud y /monitoreo/estado y quién puede declarar una
+    marcación biométrica (ver app/core/entorno.py). `config.entorno` es solo
+    el valor por omisión de este argumento.
+    """
+    entorno = validar_entorno(entorno)
     app = FastAPI(title=config.nombre_app, version="0.1.0")
+    app.state.entorno = entorno
 
     # El front corre en otro puerto que la API, así que para el navegador son dos
     # sitios distintos y bloquea las peticiones salvo que la API diga quién puede

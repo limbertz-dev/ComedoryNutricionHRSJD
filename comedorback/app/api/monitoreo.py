@@ -28,8 +28,8 @@ from sqlalchemy.orm import Session
 
 from app.consultas import monitoreo as consultas
 from app.core import reloj
-from app.core.config import config
 from app.core.db import SesionDep
+from app.core.entorno import EntornoDep
 from app.esquemas.auth import ErrorConMotivo
 from app.esquemas.monitoreo import (
     Actividad,
@@ -98,7 +98,7 @@ def _actividad(sesion: Session, catalogo: consultas.Catalogo, dia: date) -> Acti
     summary="Diagnóstico técnico: base, reloj, lector y actividad",
     responses={401: {"model": ErrorConMotivo}, 403: {"model": ErrorConMotivo}},
 )
-def estado(sesion: SesionDep) -> EstadoMonitoreo:
+def estado(sesion: SesionDep, entorno: EntornoDep) -> EstadoMonitoreo:
     """Todo sale de valores ya leídos: después de un rollback por la
     actividad no se toca ningún objeto de la sesión (la cuenta del token
     incluida), así no hay lecturas implícitas de más."""
@@ -114,7 +114,7 @@ def estado(sesion: SesionDep) -> EstadoMonitoreo:
     )
     return EstadoMonitoreo(
         momento_real=foto.real,
-        entorno=config.entorno,
+        entorno=entorno,
         reloj_negocio=RelojNegocio(
             ahora=foto.ahora,
             fecha=foto.ahora.date(),
