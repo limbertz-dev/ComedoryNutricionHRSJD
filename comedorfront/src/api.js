@@ -84,6 +84,8 @@ export function claveDeEvento(origen, id) {
  * `clave_evento` ("<origen>:<id>"), que se validan y se exponen como
  * `origen` y `clave`. Es una ventana de los registros más recientes (hasta
  * `limite`), no un cursor: entre dos consultas pueden quedar eventos fuera.
+ * Dos filas con la misma `clave_evento` vuelven inconsistente la respuesta:
+ * se rechaza entera, sin elegir una fila ni inventar otra clave.
  */
 export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, signal } = {}) {
   try {
@@ -94,6 +96,7 @@ export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, 
     if (!Array.isArray(marcaciones)) {
       throw new Error('La API devolvió una lista de marcaciones inválida.');
     }
+    const claves = new Set();
     return marcaciones.map((dato) => {
       if (!Number.isInteger(dato?.id)) {
         throw new Error('La API devolvió una marcación sin identificador.');
@@ -102,6 +105,10 @@ export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, 
         || dato.clave_evento !== claveDeEvento(dato.origen, dato.id)) {
         throw new Error('La API devolvió una marcación sin origen válido.');
       }
+      if (claves.has(dato.clave_evento)) {
+        throw new Error('La API devolvió marcaciones con la misma clave de evento: la lista es inconsistente.');
+      }
+      claves.add(dato.clave_evento);
       const valido = typeof dato.valido === 'boolean' ? dato.valido : dato.resultado === 'aceptada';
       return {
         id: dato.id,
@@ -1214,9 +1221,17 @@ export async function autorizarMarcacionManual(usuarioId, { persona, signal } = 
   return marcarAsistencia(usuarioId, { persona, metodo: 'manual', signal });
 }
 
-/** true si el fallo de una marcación no trae respuesta del servidor (red, tiempo). */
+/**
+ * true si, tras el fallo de una marcación, no se sabe si quedó registrada:
+ * red, tiempo de espera, respuesta ilegible o un 5xx (que el servidor haya
+ * respondido no prueba que haya revertido la escritura). Solo un 4xx
+ * (salvo 408) es un rechazo de la petición antes de registrar: datos
+ * inválidos, permisos o sesión, que siguen su manejo central.
+ */
 export function marcacionIncierta(error) {
-  return !(error?.cause instanceof ErrorApi);
+  const causa = error?.cause;
+  if (!(causa instanceof ErrorApi)) return true;
+  return !(causa.status >= 400 && causa.status < 500 && causa.status !== 408);
 }
 
 /* ----------------------------- Historial nominal de la API */
