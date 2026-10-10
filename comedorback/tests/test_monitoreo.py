@@ -305,7 +305,8 @@ def test_lector_desconocido_en_todos_los_entornos(tokens, entorno):
     r = TestClient(crear_app(entorno)).get(RUTA, headers=tokens["sistemas"])
     assert r.status_code == 200, r.text
     assert r.json()["lector"] == LECTOR
-    assert r.json()["entorno"] == config.entorno
+    # El de la app que respondió, no el de config.
+    assert r.json()["entorno"] == entorno
 
 
 # --- relojes ------------------------------------------------------------------

@@ -152,11 +152,12 @@ def test_el_cuerpo_no_puede_suplantar_la_cuenta(cliente, cuentas):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_biometrico_no_guarda_cuenta(cliente, cuentas):
+def test_biometrico_no_guarda_cuenta(cliente_simulacion, cuentas):
+    """Biométrico desde una sesión: solo en simulación."""
     _, jefa = cuentas["jefa"]
     usuario_id, fecha, comida_id = _derecho_reciente()
     reloj.fijar(datetime.combine(fecha, _mitad_franja(comida_id)), congelar=True)
-    r = cliente.post(
+    r = cliente_simulacion.post(
         "/asistencias",
         json={"usuario_id": usuario_id, "metodo": "biometrico"},
         headers=jefa,

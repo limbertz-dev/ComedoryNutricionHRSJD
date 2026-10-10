@@ -14,9 +14,10 @@ dice qué roles lo abren):
                administración de cuentas de usuario y el diagnóstico técnico.
 
 La matriz se aplica en app/main.py, router por router, con `requiere_rol`
-(app/core/autorizacion.py). La regla fina de la marcación (manual solo
-jefatura) no se puede decidir por la ruta porque depende del cuerpo de la
-petición, así que la aplica el endpoint llamando a `exigir_metodo_marcacion`.
+(app/core/autorizacion.py). Las reglas finas de la marcación (manual solo
+jefatura; biométrico desde una sesión solo en simulación) no se pueden
+decidir por la ruta porque dependen del cuerpo de la petición, así que las
+aplica el endpoint con `exigir_origen_biometrico` y `exigir_metodo_marcacion`.
 Si una política cambia, se cambia AQUÍ y no en cada endpoint.
 """
 
@@ -29,6 +30,14 @@ ADMINISTRACION: frozenset[str] = frozenset({"sistemas"})
 # manual salta el lector, así que queda en manos de quien responde por el
 # informe, no de quien está sirviendo.
 MARCACION_MANUAL: frozenset[str] = JEFATURA
+
+# Entornos en que una sesión humana puede declarar una marcación biométrica
+# (el simulador del navegador). Fuera de ellos, quién apoyó el dedo solo lo
+# puede decir un lector autorizado, que todavía no existe: hoy, en producción
+# y en desarrollo, POST /asistencias con metodo='biometrico' da 403
+# `biometrico_solo_lector` para los tres roles. Se compara contra el entorno
+# de la app (app/core/entorno.py), nunca contra config.entorno.
+BIOMETRICO_DESDE_SESION: frozenset[str] = frozenset({"simulacion"})
 
 
 class Regla:
@@ -47,8 +56,8 @@ class Regla:
 
 ACCESO: dict[str, Regla] = {
     "pantalla": Regla(completo=JEFATURA, lectura=frozenset({"cocinera"})),
-    # Las tres pueden llegar al endpoint; el método lo filtra
-    # `exigir_metodo_marcacion`.
+    # Las tres pueden llegar al endpoint; el método lo filtran
+    # `exigir_origen_biometrico` y `exigir_metodo_marcacion`.
     "asistencias": Regla(completo=frozenset(ROLES)),
     # La cocinera lee el padrón para operar el lector; escribirlo, no.
     "personal": Regla(completo=JEFATURA, lectura=frozenset({"cocinera"})),
