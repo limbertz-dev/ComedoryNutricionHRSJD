@@ -32,9 +32,11 @@ export async function alternarPantallaCompleta() {
  * de sesión. Se cierra con Escape o con un clic afuera.
  *
  * `simulador` es el <SimuladorLector> armado por App con los mismos props que
- * recibe en el header; acá solo se aloja, sin cambiarle nada.
+ * recibe en el header; acá solo se aloja, sin cambiarle nada. Fuera de una
+ * simulación confirmada llega null y el panel queda con la sesión y la
+ * pantalla completa.
  */
-export default function PanelSesionCocinera({ simulador, abiertoInicial = false }) {
+export default function PanelSesionCocinera({ simulador = null, abiertoInicial = false }) {
   const { rol, usuario, logout } = useSesion();
   const [abierto, setAbierto] = useState(abiertoInicial);
   const cajaRef = useRef(null);
@@ -105,7 +107,7 @@ export function CajaSesionCocinera({
             <strong className="panel-sesion__usuario-nombre">{usuario || 'Usuario'}</strong>
             <small className="panel-sesion__usuario-rol">{etiquetaDeRol(rol)}</small>
           </div>
-          <div className="panel-sesion__simulador">{simulador}</div>
+          {simulador ? <div className="panel-sesion__simulador">{simulador}</div> : null}
           {admitePantallaCompleta() ? (
             <Boton variante="secundario" anchoCompleto onClick={alternarPantallaCompleta}>
               Pantalla completa

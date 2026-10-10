@@ -25,8 +25,9 @@ import {
 } from './navegacion.js';
 import { puedeMarcarManual, puedeOperarReloj, puedeVerSeccion, seccionInicialDeRol } from './permisos.js';
 import { escucharSesion } from './sesion.js';
-import { claveDelDia } from './simulacion.js';
+import { claveDelDia, protegerAccionSimulador } from './simulacion.js';
 import {
+  esRechazoBiometricoSoloLector,
   marcarAsistencia,
   obtenerEstadoPantalla,
   obtenerPersonal,
@@ -124,9 +125,21 @@ export function Panel({ rol, usuario = null }) {
      PantallaEnVivo: el simulador ahora se monta desde el header. */
   const [seleccionado, setSeleccionado] = useState('');
   /* Reloj del servidor en simulación; null en cualquier otro entorno, y
-     entonces nada de simulación se monta ni cambia de dónde sale la hora. */
+     entonces nada de simulación se monta ni cambia de dónde sale la hora.
+     El reloj solo se muestra: el simulador del lector lo habilita únicamente
+     una confirmación vigente de /salud (`simulacionConfirmada`). */
   const operaReloj = puedeOperarReloj(rol);
-  const { reloj, aplicar: aplicarReloj } = useSimulacion({ operaReloj });
+  const {
+    reloj,
+    aplicar: aplicarReloj,
+    simulacionConfirmada,
+    simulacionVigente,
+  } = useSimulacion({ operaReloj });
+  /* Detalle del 403 `biometrico_solo_lector`: el servidor no corre en
+     simulación, así que el simulador queda deshabilitado mientras dure el
+     panel, aunque /salud dijera otra cosa. */
+  const [bloqueoBiometrico, setBloqueoBiometrico] = useState('');
+  const simuladorActivo = simulacionConfirmada && !bloqueoBiometrico;
   const ahoraServidor = reloj?.ahora ?? null;
   const diaServidor = claveDelDia(reloj);
   /* Sube cada vez que se mueve el reloj: las listas de hoy se vuelven a pedir. */
@@ -173,6 +186,18 @@ export function Panel({ rol, usuario = null }) {
   const marcando = useRef(false);
   /* En simulación la hora provisoria de la tarjeta es la del servidor. */
   const conHora = () => (ahoraServidor ? { ahora: ahoraServidor } : {});
+
+  /* El rechazo de origen no es un error de la marcación: deshabilita el
+     simulador con el detalle del servidor y no se reintenta como manual. */
+  function registrarFalloBiometrico(error) {
+    if (esRechazoBiometricoSoloLector(error)) {
+      setBloqueoBiometrico(error.message);
+      setSeleccionado('');
+    } else {
+      setErrorMarcacion(error.message);
+    }
+  }
+
   async function manejarMarcacion(personaId) {
     if (marcando.current) return;
     marcando.current = true;
@@ -191,7 +216,7 @@ export function Panel({ rol, usuario = null }) {
          y la cifra bajen con su transición. */
       recargarEstado({ conservar: true });
     } catch (error) {
-      setErrorMarcacion(error.message);
+      registrarFalloBiometrico(error);
     } finally {
       setLeyendo(false);
       marcando.current = false;
@@ -215,7 +240,7 @@ export function Panel({ rol, usuario = null }) {
       ]);
       despachar({ tipo: 'MARCACION', evento });
     } catch (error) {
-      setErrorMarcacion(error.message);
+      registrarFalloBiometrico(error);
     } finally {
       setLeyendo(false);
       marcando.current = false;
@@ -258,14 +283,16 @@ export function Panel({ rol, usuario = null }) {
 
   /* La cocinera opera sin sidebar ni header: Control Biométrico ocupa toda la
      ventana y el simulador vive en su panel flotante, con los mismos props
-     que recibe en el header. */
+     que recibe en el header. Fuera de una simulación confirmada no se monta,
+     y sus acciones vuelven a comprobar la confirmación al usarse. */
   const esCocinera = rol === 'cocinera';
+  const simuladorPermitido = () => !bloqueoBiometrico && simulacionVigente();
   const propiedadesSimulador = {
     personal: estado.personal,
     seleccionado,
     onSeleccionar: setSeleccionado,
-    onMarcar: manejarMarcacion,
-    onSimularFalla: manejarFallaBiometrica,
+    onMarcar: protegerAccionSimulador(simuladorPermitido, manejarMarcacion),
+    onSimularFalla: protegerAccionSimulador(simuladorPermitido, manejarFallaBiometrica),
     leyendo,
     error: errorMarcacion,
     reloj: operaReloj ? reloj : null,
@@ -275,7 +302,9 @@ export function Panel({ rol, usuario = null }) {
   return (
     <div className={`app${esCocinera ? ' app--pantalla-completa' : ''}`}>
       {esCocinera ? (
-        <PanelSesionCocinera simulador={<SimuladorLector {...propiedadesSimulador} />} />
+        <PanelSesionCocinera
+          simulador={simuladorActivo ? <SimuladorLector {...propiedadesSimulador} /> : null}
+        />
       ) : (
         <Sidebar
           seccionActiva={seccionActiva}
@@ -285,7 +314,7 @@ export function Panel({ rol, usuario = null }) {
 
       {esCocinera ? null : (
         <Header seccion={seccion} turno={turno} simulacion={reloj}>
-          {esPantallaEnVivo ? (
+          {esPantallaEnVivo && simuladorActivo ? (
             <SimuladorLector {...propiedadesSimulador} />
           ) : null}
           {permitida && seccionActiva === 'supervision' && operaReloj ? (
@@ -301,7 +330,7 @@ export function Panel({ rol, usuario = null }) {
           repetirlo solo le resta a un layout sin scroll. Los errores sí se
           quedan: son los únicos que necesitan atención y acción (reintentar).
         */}
-        {permitida && (!esPantallaEnVivo || errorApi || errorEstado) ? (
+        {permitida && (!esPantallaEnVivo || errorApi || errorEstado || bloqueoBiometrico) ? (
           <div className="app__estado-api">
             {!esPantallaEnVivo ? (
               <p id="estado-api" role="status">
@@ -309,6 +338,7 @@ export function Panel({ rol, usuario = null }) {
               </p>
             ) : null}
             {errorApi ? <p role="alert">{errorApi}</p> : null}
+            {bloqueoBiometrico ? <p role="alert">{bloqueoBiometrico}</p> : null}
             {!esPantallaEnVivo && cargandoEstado ? <p role="status">Consultando estado del comedor…</p> : null}
             {errorEstado ? <p role="alert">{errorEstado} <Boton variante="fantasma" onClick={recargarEstado}>Reintentar estado</Boton></p> : null}
             {!esPantallaEnVivo && pantalla?.fuera_de_horario ? <p role="status">Fuera de horario: no hay comida vigente y no se pueden registrar asistencias.</p> : null}
