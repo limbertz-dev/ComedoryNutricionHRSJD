@@ -209,12 +209,11 @@ export function Panel({ rol, usuario = null }) {
         marcarAsistencia(personaId, { persona, metodo: 'biometrico', ...conHora() }),
         esperar(MS_LECTURA),
       ]);
+      /* El cupo lo lleva el servidor. No se relee acá: el evento nuevo hace
+         que PantallaEnVivo pida un ciclo (lista + estado, con `conservar`),
+         así la lista y el gauge se actualizan en una sola vuelta, sin
+         consultas solapadas. */
       despachar({ tipo: 'MARCACION', evento });
-      /* El cupo lo lleva el servidor: se vuelve a consultar en el acto para
-         que el gauge reste la ración sin recargar la página. `conservar`
-         mantiene el valor anterior hasta que llega el nuevo, para que el arco
-         y la cifra bajen con su transición. */
-      recargarEstado({ conservar: true });
     } catch (error) {
       registrarFalloBiometrico(error);
     } finally {
@@ -363,6 +362,7 @@ export function Panel({ rol, usuario = null }) {
               onMarcarManual={puedeMarcarManual(rol) ? manejarMarcacionManual : null}
               fechaServidor={reloj ? diaServidor : undefined}
               versionReloj={versionReloj}
+              recargarEstado={recargarEstado}
             />
           ) : null}
 
@@ -372,6 +372,9 @@ export function Panel({ rol, usuario = null }) {
               fecha={reloj ? diaServidor : undefined}
               simulacion={reloj}
               personal={estado.personal}
+              cargandoPadron={cargandoPersonal}
+              errorPadron={errorApi}
+              puedeRegistrarManual={puedeMarcarManual(rol)}
               versionReloj={versionReloj}
               onMarcacionExitosa={() => recargarEstado({ conservar: true })}
             />

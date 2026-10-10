@@ -59,6 +59,18 @@ function horaDeMarcacion(fechaHora) {
   return Number.isNaN(momento.getTime()) ? '--:--:--' : horaLegible(momento);
 }
 
+/** Orígenes de una fila de GET /pantalla/ultimas-marcaciones. */
+export const ORIGENES_MARCACION = ['lectura_biometrica', 'asistencia_manual'];
+
+/**
+ * Identidad de un evento persistido: "<origen>:<id>". El `id` numérico solo
+ * es único dentro de su tabla (una lectura y una asistencia manual pueden
+ * compartirlo), así que filas, selección y deduplicación usan esta clave.
+ */
+export function claveDeEvento(origen, id) {
+  return `${origen}:${id}`;
+}
+
 /**
  * GET /pantalla/ultimas-marcaciones: el hilo real del lector, ya persistido.
  *
@@ -67,6 +79,11 @@ function horaDeMarcacion(fechaHora) {
  * que ya usa la tarjeta de marcaciones (`persona`, `hora`, `valido`, `titulo`),
  * para que la lista del servidor y la marcación recién enviada se pinten con
  * el mismo componente.
+ *
+ * Cada fila trae `origen` ('lectura_biometrica' | 'asistencia_manual') y
+ * `clave_evento` ("<origen>:<id>"), que se validan y se exponen como
+ * `origen` y `clave`. Es una ventana de los registros más recientes (hasta
+ * `limite`), no un cursor: entre dos consultas pueden quedar eventos fuera.
  */
 export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, signal } = {}) {
   try {
@@ -81,9 +98,15 @@ export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, 
       if (!Number.isInteger(dato?.id)) {
         throw new Error('La API devolvió una marcación sin identificador.');
       }
+      if (!ORIGENES_MARCACION.includes(dato.origen)
+        || dato.clave_evento !== claveDeEvento(dato.origen, dato.id)) {
+        throw new Error('La API devolvió una marcación sin origen válido.');
+      }
       const valido = typeof dato.valido === 'boolean' ? dato.valido : dato.resultado === 'aceptada';
       return {
         id: dato.id,
+        origen: dato.origen,
+        clave: dato.clave_evento,
         usuarioId: dato.usuario_id ?? null,
         valido,
         titulo: valido ? 'Marcación válida'
@@ -104,7 +127,7 @@ export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, 
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new Error(`No se pudieron cargar las últimas marcaciones. ${error.message}`);
+    throw new Error(`No se pudieron cargar las últimas marcaciones. ${error.message}`, { cause: error });
   }
 }
 
@@ -520,6 +543,13 @@ function horaLegible(fecha) {
  * con 403 `biometrico_solo_lector`: ese rechazo no es «Sin permiso» de la
  * sección, así que vuelve como ErrorApi con el `detail` del servidor
  * (ver `esRechazoBiometricoSoloLector`) y nunca se reintenta como manual.
+ *
+ * La respuesta suma `origen` y `claveEvento`, la misma clave con que la fila
+ * aparece en GET /pantalla/ultimas-marcaciones: con `lectura_id` es la
+ * lectura (una asistencia ligada a una lectura solo aparece como lectura);
+ * sin ella, la asistencia manual; sin ninguna, null (un rechazo manual no
+ * deja fila). Un fallo conserva su causa en `cause`: sin ErrorApi no hubo
+ * respuesta del servidor y el resultado es incierto.
  */
 export async function marcarAsistencia(personaId, { persona, metodo = 'manual', ahora = new Date(), signal } = {}) {
   try {
@@ -544,9 +574,14 @@ export async function marcarAsistencia(personaId, { persona, metodo = 'manual', 
       || (respuesta.usuario_id != null && respuesta.usuario_id !== personaId)) {
       throw new Error('La API devolvió una marcación inválida.');
     }
+    const origen = Number.isInteger(respuesta.lectura_id) ? 'lectura_biometrica'
+      : Number.isInteger(respuesta.asistencia_id) ? 'asistencia_manual' : null;
     return {
       ...respuesta,
       id: (secuenciaEvento += 1),
+      origen,
+      claveEvento: origen === null ? null
+        : claveDeEvento(origen, origen === 'lectura_biometrica' ? respuesta.lectura_id : respuesta.asistencia_id),
       // La respuesta actual no trae hora: esta es la hora de recepción local,
       // o la del reloj del servidor cuando App la conoce (simulación).
       hora: horaLegible(ahora),
@@ -566,7 +601,10 @@ export async function marcarAsistencia(personaId, { persona, metodo = 'manual', 
         error.datos,
       );
     }
-    throw new Error(`No se pudo confirmar la marcación. ${error.message} Verifique el registro antes de volver a enviarla.`);
+    throw new Error(
+      `No se pudo confirmar la marcación. ${error.message} Verifique el registro antes de volver a enviarla.`,
+      { cause: error },
+    );
   }
 }
 
@@ -1163,14 +1201,22 @@ export async function obtenerInformeRaciones({ desde, hasta, hoy = new Date(), s
 }
 
 /**
- * Autoriza una ración manual para una lectura no identificada en Supervisión.
- * Envía { usuario_id, metodo: 'manual' } sin parámetro momento.
+ * Ración manual desde Supervisión: autorizar una lectura no identificada o
+ * registrar a un comensal elegido del padrón. Envía solo
+ * { usuario_id, metodo: 'manual' }: sin momento, dispositivo ni operador
+ * (la cuenta sale del token). Con `persona` del padrón no vuelve a pedir
+ * su ficha antes del POST.
  */
-export async function autorizarMarcacionManual(usuarioId, { signal } = {}) {
+export async function autorizarMarcacionManual(usuarioId, { persona, signal } = {}) {
   if (!Number.isInteger(usuarioId) || usuarioId <= 0) {
     throw new Error('Seleccione un comensal del padrón.');
   }
-  return marcarAsistencia(usuarioId, { metodo: 'manual', signal });
+  return marcarAsistencia(usuarioId, { persona, metodo: 'manual', signal });
+}
+
+/** true si el fallo de una marcación no trae respuesta del servidor (red, tiempo). */
+export function marcacionIncierta(error) {
+  return !(error?.cause instanceof ErrorApi);
 }
 
 /* ----------------------------- Historial nominal de la API */
