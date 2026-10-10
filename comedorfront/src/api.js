@@ -206,8 +206,12 @@ export class ErrorApi extends Error {
  * temporal; otro 403 avisa «Sin permiso». `manejoPropio` apaga avisos y
  * reintento en /auth/login, /auth/cambio-password y /auth/refresh, donde esos
  * códigos hablan de la credencial tecleada y los resuelve el formulario.
+ * `motivosLocales` lista los motivos de 403 que resuelve quien llama, sin
+ * aviso central: el resto de 401, 403 y 428 sigue el manejo de siempre.
  */
-async function solicitarApi(ruta, { signal, manejoPropio = false, reintentoRefresh = true, ...opciones } = {}) {
+async function solicitarApi(ruta, {
+  signal, manejoPropio = false, motivosLocales = [], reintentoRefresh = true, ...opciones
+} = {}) {
   const controlador = new AbortController();
   const cancelar = () => controlador.abort();
   const temporizador = setTimeout(cancelar, 15000);
@@ -240,9 +244,10 @@ async function solicitarApi(ruta, { signal, manejoPropio = false, reintentoRefre
           throw new ErrorApi(mensajeDeStatus(401), 401, datos, retryAfter);
         }
         if (signal?.aborted) throw new DOMException('Cancelado', 'AbortError');
-        return solicitarApi(ruta, { signal, manejoPropio, reintentoRefresh: false, ...opciones });
+        return solicitarApi(ruta, { signal, manejoPropio, motivosLocales, reintentoRefresh: false, ...opciones });
       }
-      if (!manejoPropio) avisarPorMotivo(respuesta.status, motivo, datos);
+      const local = respuesta.status === 403 && motivosLocales.includes(motivo);
+      if (!manejoPropio && !local) avisarPorMotivo(respuesta.status, motivo, datos);
       throw new ErrorApi(mensajeDeStatus(respuesta.status), respuesta.status, datos, retryAfter);
     }
     if (respuesta.status === 204) return null;
@@ -510,6 +515,11 @@ function horaLegible(fecha) {
  * justamente para recorrer el mismo camino que recorrerá el hardware; el
  * registro a mano de una ración se queda en 'manual', que es el valor por
  * omisión aquí.
+ *
+ * Fuera de simulación el servidor rechaza 'biometrico' desde el navegador
+ * con 403 `biometrico_solo_lector`: ese rechazo no es «Sin permiso» de la
+ * sección, así que vuelve como ErrorApi con el `detail` del servidor
+ * (ver `esRechazoBiometricoSoloLector`) y nunca se reintenta como manual.
  */
 export async function marcarAsistencia(personaId, { persona, metodo = 'manual', ahora = new Date(), signal } = {}) {
   try {
@@ -526,6 +536,7 @@ export async function marcarAsistencia(personaId, { persona, metodo = 'manual', 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ usuario_id: personaId, metodo }),
+      motivosLocales: metodo === 'biometrico' ? [MOTIVO_BIOMETRICO_SOLO_LECTOR] : [],
       signal,
     });
     if (typeof respuesta?.valido !== 'boolean' || typeof respuesta.titulo !== 'string'
@@ -548,8 +559,24 @@ export async function marcarAsistencia(personaId, { persona, metodo = 'manual', 
     };
   } catch (error) {
     if (signal?.aborted) throw error;
+    if (metodo === 'biometrico' && esRechazoBiometricoSoloLector(error)) {
+      throw new ErrorApi(
+        detalleDe(error.datos, 'La marcación biométrica requiere un lector autorizado fuera de simulación.'),
+        403,
+        error.datos,
+      );
+    }
     throw new Error(`No se pudo confirmar la marcación. ${error.message} Verifique el registro antes de volver a enviarla.`);
   }
+}
+
+/** Motivo del 403 de POST /asistencias con 'biometrico' fuera de simulación. */
+export const MOTIVO_BIOMETRICO_SOLO_LECTOR = 'biometrico_solo_lector';
+
+/** true si `error` es el rechazo de una marcación biométrica fuera de simulación. */
+export function esRechazoBiometricoSoloLector(error) {
+  return error instanceof ErrorApi && error.status === 403
+    && error.datos?.motivo === MOTIVO_BIOMETRICO_SOLO_LECTOR;
 }
 
 /** Nombre conservado para compatibilidad; ahora exige una persona explícita. */
@@ -1311,7 +1338,24 @@ function adaptarReloj(dato, { conCongelado = true } = {}) {
  * `reloj` es null fuera de simulación.
  */
 export async function obtenerSalud({ signal } = {}) {
+  const { entorno, simulacion, reloj } = await leerSalud({ signal });
+  return { entorno, simulacion, reloj };
+}
+
+/**
+ * GET /salud como confirmación del entorno. Igual que `obtenerSalud`, más
+ * `confirmaSimulacion`: true solo si la API respondió 200 con entorno
+ * 'simulacion' y un reloj válido. Un 503 deja ver el reloj, pero no confirma
+ * nada; un error o una respuesta inválida se lanzan.
+ */
+export async function confirmarEntornoSalud({ signal } = {}) {
+  const { entorno, simulacion, reloj, degradada } = await leerSalud({ signal });
+  return { entorno, simulacion, reloj, confirmaSimulacion: simulacion && !degradada };
+}
+
+async function leerSalud({ signal }) {
   let datos;
+  let degradada = false;
   try {
     datos = await solicitarApi('/salud', { signal, manejoPropio: true });
   } catch (error) {
@@ -1321,6 +1365,7 @@ export async function obtenerSalud({ signal } = {}) {
       throw new Error(`No se pudo consultar el estado de la API. ${error.message}`);
     }
     datos = error.datos;
+    degradada = true;
   }
   const entorno = typeof datos?.entorno === 'string' ? datos.entorno : null;
   const simulacion = entorno === 'simulacion';
@@ -1328,6 +1373,7 @@ export async function obtenerSalud({ signal } = {}) {
     entorno,
     simulacion,
     reloj: simulacion ? adaptarReloj(datos.reloj, { conCongelado: false }) : null,
+    degradada,
   };
 }
 

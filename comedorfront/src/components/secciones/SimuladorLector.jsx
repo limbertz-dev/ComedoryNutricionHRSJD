@@ -10,7 +10,8 @@ import './SimuladorLector.css';
  * turno/fecha: así "Apoyar huella" queda siempre visible sin importar el
  * scroll, el mismo requisito que ya cumplía el botón "Simular marcación" del
  * mockup original, y sin agregarle una fila propia al header. App.jsx solo lo
- * monta cuando la sección activa es Control Biométrico.
+ * monta en Control Biométrico y con una confirmación vigente de /salud de que
+ * la API corre en simulación; fuera de ella no existe.
  *
  * Elige a quién "apoya la huella" y dispara exactamente la misma marcación
  * que enviará el lector real (POST /asistencias con metodo 'biometrico').
