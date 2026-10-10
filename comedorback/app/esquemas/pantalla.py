@@ -46,7 +46,12 @@ class EstadoPantalla(BaseModel):
 
 
 class Marcacion(BaseModel):
-    id: int
+    id: int = Field(
+        description=(
+            "id en su tabla de origen. NO es único en la lista: una lectura y "
+            "una asistencia manual pueden tener el mismo. Use clave_evento."
+        )
+    )
     fecha_hora: datetime
     usuario_id: int | None = None
     nombre: str | None = Field(
@@ -66,6 +71,20 @@ class Marcacion(BaseModel):
     motivo: str | None = None
     valido: bool = Field(description="True si resultado == 'aceptada'")
     dispositivo: str
+    origen: Literal["lectura_biometrica", "asistencia_manual"] = Field(
+        description=(
+            "Tabla de la que sale la fila, según la rama de la consulta; nunca "
+            "del cliente ni del dispositivo. Una asistencia biométrica aparece "
+            "solo como su lectura."
+        )
+    )
+    clave_evento: str = Field(
+        description=(
+            "'<origen>:<id>'. Identifica la fila sin ambigüedad. No es un "
+            "cursor ni refleja el orden de confirmación de las transacciones."
+        ),
+        examples=["lectura_biometrica:7", "asistencia_manual:7"],
+    )
 
 
 class ComidaDelDia(BaseModel):
