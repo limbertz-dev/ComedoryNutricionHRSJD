@@ -236,34 +236,124 @@ def estado(
     )
 
 
-def _franja_vigente(hora, dia):
-    """El predicado que une una lectura con el horario que la cubre.
+def _franja_vigente(horario, hora, dia):
+    """El predicado que une una lectura con un horario que la cubre.
 
-    Punto único: lo usan tanto `ultimas_marcaciones` como `comidas_del_dia`,
-    así la resolución lectura→comida es la misma en los dos lados.
-    `hora` y `dia` son expresiones sobre la marca temporal de la lectura.
+    `horario` son las columnas de un horario (`alias.c`); `hora` y `dia`,
+    expresiones sobre la marca temporal de la lectura. Solo dice si un
+    horario es CANDIDATO: puede haber varios, y elegir entre ellos es cosa de
+    `_comida_por_lectura`.
     """
-    cruza_medianoche = HorarioComida.hora_fin < HorarioComida.hora_inicio
+    cruza_medianoche = horario.hora_fin < horario.hora_inicio
     dentro_normal = and_(
         ~cruza_medianoche,
-        HorarioComida.hora_inicio <= hora,
-        hora < HorarioComida.hora_fin,
+        horario.hora_inicio <= hora,
+        hora < horario.hora_fin,
     )
     dentro_cruzada = and_(
         cruza_medianoche,
         or_(
-            HorarioComida.hora_inicio <= hora,
-            hora < HorarioComida.hora_fin,
+            horario.hora_inicio <= hora,
+            hora < horario.hora_fin,
         ),
     )
     return and_(
-        HorarioComida.activo == 1,
-        HorarioComida.vigente_desde <= dia,
+        horario.activo == 1,
+        horario.vigente_desde <= dia,
         or_(
-            HorarioComida.vigente_hasta.is_(None),
-            HorarioComida.vigente_hasta >= dia,
+            horario.vigente_hasta.is_(None),
+            horario.vigente_hasta >= dia,
         ),
         or_(dentro_normal, dentro_cruzada),
+    )
+
+
+def _del_dia(columna, dia: date):
+    """`DATE(columna) = dia` como rango: el mismo resultado sobre DATETIME,
+    pero puede usar el índice de fecha_hora en vez de recorrer la tabla."""
+    desde = datetime.combine(dia, time.min)
+    return (columna >= desde, columna < desde + timedelta(days=1))
+
+
+def _alias_lecturas(nombre: str):
+    return LecturaBiometrica.__table__.alias(nombre)
+
+
+def _alias_horarios(nombre: str):
+    return HorarioComida.__table__.alias(nombre)
+
+
+def _comida_por_lectura(
+    dia: date, *, lecturas=_alias_lecturas, horarios=_alias_horarios
+):
+    """Subconsulta (lectura_id, comida_id): UNA fila por lectura del día que
+    tenga al menos un horario candidato.
+
+    Punto único de la resolución lectura→comida por horario: la usan
+    `ultimas_marcaciones` y `comidas_del_dia`, así la lista y Supervisión
+    dicen lo mismo. Entre los candidatos (`_franja_vigente`) cuentan solo los
+    de mayor `vigente_desde`, el mismo orden que `resolver_comida_en_curso`:
+
+      · si todos son de una comida, esa comida;
+      · si empatan comidas distintas, NULL: la consulta no elige una al azar
+        ni reconstruye la decisión de la marcación, que no quedó guardada en
+        la lectura;
+      · sin candidatos la lectura no aparece acá, y el LEFT JOIN de quien la
+        usa la deja sin comida.
+
+    Dos versiones de la misma comida no pueden empatar en `vigente_desde`
+    (UNIQUE en horarios_comida). Solo se usa para lecturas SIN asistencia: la
+    comida de una ración servida es la persistida (`_comida_de_la_lectura`).
+
+    SQL: lecturas del día (rango sobre fecha_hora) JOIN horarios candidatos,
+    NOT EXISTS de un candidato con vigencia más nueva, GROUP BY lectura. No
+    está correlacionada con la consulta de afuera: se calcula una vez por
+    petición. Coste esperado: lecturas del día × horarios × horarios, y la
+    tabla de horarios tiene decenas de filas; no recorre otros días. No medido.
+
+    `lecturas` y `horarios` fabrican alias con columnas `.c`: las pruebas
+    pasan filas sintéticas por ahí.
+    """
+    lectura = lecturas("lectura_resuelta")
+    candidato = horarios("horario_candidato")
+    mas_nuevo = horarios("horario_mas_nuevo")
+    hora = func.time(lectura.c.fecha_hora)
+    fecha = func.date(lectura.c.fecha_hora)
+    hay_uno_mas_nuevo = (
+        select(mas_nuevo.c.id)
+        .where(
+            _franja_vigente(mas_nuevo.c, hora, fecha),
+            mas_nuevo.c.vigente_desde > candidato.c.vigente_desde,
+        )
+        .exists()
+    )
+    return (
+        select(
+            lectura.c.id.label("lectura_id"),
+            case(
+                (
+                    func.count(func.distinct(candidato.c.comida_id)) == 1,
+                    func.min(candidato.c.comida_id),
+                ),
+                else_=None,
+            ).label("comida_id"),
+        )
+        .select_from(lectura)
+        .join(candidato, _franja_vigente(candidato.c, hora, fecha))
+        .where(*_del_dia(lectura.c.fecha_hora, dia))
+        .where(~hay_uno_mas_nuevo)
+        .group_by(lectura.c.id)
+        .subquery("comida_por_lectura")
+    )
+
+
+def _comida_de_la_lectura(resuelta):
+    """La comida de una lectura: la persistida en su asistencia si la tiene
+    (los horarios actuales no reclasifican una ración servida); si no, la
+    resuelta por horario, que puede ser NULL."""
+    return case(
+        (Asistencia.id.is_not(None), Asistencia.comida_id),
+        else_=resuelta.c.comida_id,
     )
 
 
@@ -286,11 +376,9 @@ def ultimas_marcaciones(
     dia = fecha or reloj.hoy()
     comida_asistencia = aliased(Comida, name="comida_asistencia")
     comida_horario = aliased(Comida, name="comida_horario")
-    hora_lectura = func.time(LecturaBiometrica.fecha_hora)
-    dia_lectura = func.date(LecturaBiometrica.fecha_hora)
-    comida_resuelta_id = func.coalesce(
-        Asistencia.comida_id, HorarioComida.comida_id
-    )
+    # Una fila por lectura ANTES de filtrar por comida y cortar el límite.
+    resuelta = _comida_por_lectura(dia)
+    comida_resuelta_id = _comida_de_la_lectura(resuelta)
     lecturas = (
         select(
             LecturaBiometrica.id,
@@ -308,9 +396,10 @@ def ultimas_marcaciones(
                 else_=Comensal.categoria,
             ).label("categoria"),
             comida_resuelta_id.label("comida_id"),
-            func.coalesce(comida_asistencia.nombre, comida_horario.nombre).label(
-                "comida"
-            ),
+            case(
+                (Asistencia.id.is_not(None), comida_asistencia.nombre),
+                else_=comida_horario.nombre,
+            ).label("comida"),
             LecturaBiometrica.resultado,
             case(
                 (LecturaBiometrica.usuario_id.is_(None), literal("no_identificado")),
@@ -326,12 +415,9 @@ def ultimas_marcaciones(
         .outerjoin(Comensal, Comensal.usuario_id == LecturaBiometrica.usuario_id)
         .outerjoin(Asistencia, Asistencia.lectura_id == LecturaBiometrica.id)
         .outerjoin(comida_asistencia, comida_asistencia.id == Asistencia.comida_id)
-        .outerjoin(
-            HorarioComida,
-            _franja_vigente(hora_lectura, dia_lectura),
-        )
-        .outerjoin(comida_horario, comida_horario.id == HorarioComida.comida_id)
-        .where(func.date(LecturaBiometrica.fecha_hora) == dia)
+        .outerjoin(resuelta, resuelta.c.lectura_id == LecturaBiometrica.id)
+        .outerjoin(comida_horario, comida_horario.id == resuelta.c.comida_id)
+        .where(*_del_dia(LecturaBiometrica.fecha_hora, dia))
     )
     manuales = (
         select(
@@ -448,12 +534,11 @@ def _rechazos_por_comida(
     """Rechazos del día del reloj, resueltos a comida como `ultimas_marcaciones`.
 
     Devuelve ((comida_id, motivo) → cantidad, rechazos_sin_comida). Sin tope.
+    Cada rechazo cuenta una sola vez: en su comida, o en rechazos_sin_comida
+    si no tiene candidato o si empatan comidas distintas.
     """
-    hora_lectura = func.time(LecturaBiometrica.fecha_hora)
-    dia_lectura = func.date(LecturaBiometrica.fecha_hora)
-    comida_resuelta_id = func.coalesce(
-        Asistencia.comida_id, HorarioComida.comida_id
-    )
+    resuelta = _comida_por_lectura(dia)
+    comida_resuelta_id = _comida_de_la_lectura(resuelta)
     motivo_presentado = case(
         (LecturaBiometrica.usuario_id.is_(None), literal("no_identificado")),
         else_=LecturaBiometrica.motivo,
@@ -468,8 +553,8 @@ def _rechazos_por_comida(
         )
         .select_from(LecturaBiometrica)
         .outerjoin(Asistencia, Asistencia.lectura_id == LecturaBiometrica.id)
-        .outerjoin(HorarioComida, _franja_vigente(hora_lectura, dia_lectura))
-        .where(func.date(LecturaBiometrica.fecha_hora) == dia)
+        .outerjoin(resuelta, resuelta.c.lectura_id == LecturaBiometrica.id)
+        .where(*_del_dia(LecturaBiometrica.fecha_hora, dia))
         .where(LecturaBiometrica.resultado == "rechazada")
         .group_by(comida_resuelta_id, motivo_presentado)
     ).all():
