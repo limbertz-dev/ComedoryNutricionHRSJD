@@ -149,7 +149,8 @@ def test_avanzar_exige_un_avance_positivo(sim, tokens, cuerpo):
 def test_salud_informa_entorno_y_reloj(sim):
     r = sim.get("/salud")
     reloj_salud = r.json()["reloj"]
-    assert r.json()["entorno"] == config.entorno
+    # El entorno de la app que respondió, aunque config diga otro.
+    assert r.json()["entorno"] == "simulacion"
     assert reloj_salud["simulado"] is False
 
     reloj.fijar(datetime(2026, 9, 24, 12, 30), congelar=True)

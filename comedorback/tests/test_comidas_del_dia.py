@@ -210,12 +210,13 @@ def test_fechas_pasadas_y_futuras(cliente, tokens):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_duplicado_resuelto_a_su_comida(cliente, tokens):
+def test_duplicado_resuelto_a_su_comida(cliente, cliente_simulacion, tokens):
     usuario_id, fecha, comida_id = _derecho_reciente()
     momento = datetime.combine(fecha, _mitad_franja(comida_id))
     _manual(cliente, tokens["jefa"], usuario_id, momento)
     reloj.fijar(momento, congelar=True)
-    r = cliente.post(
+    # Biométrico desde una sesión: solo en simulación.
+    r = cliente_simulacion.post(
         "/asistencias",
         json={"usuario_id": usuario_id, "metodo": "biometrico"},
         headers=tokens["cocinera"],
@@ -234,14 +235,16 @@ def test_duplicado_resuelto_a_su_comida(cliente, tokens):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_rechazos_del_dia_y_sin_comida(cliente, tokens):
+def test_rechazos_del_dia_y_sin_comida(cliente, cliente_simulacion, tokens):
     coci, jefa = tokens["cocinera"], tokens["jefa"]
+    # Las lecturas se generan en simulación; las consultas, en la app normal.
+    sim = cliente_simulacion
     reloj.fijar(datetime(2026, 9, 24, 12, 30), congelar=True)
-    r = cliente.post("/asistencias", json={"metodo": "biometrico"}, headers=coci)
+    r = sim.post("/asistencias", json={"metodo": "biometrico"}, headers=coci)
     assert r.json()["motivo"] == "no_identificado", r.text
     with SesionLocal() as sesion:
         mayor = sesion.execute(select(func.max(Comensal.usuario_id))).scalar() or 0
-    r = cliente.post(
+    r = sim.post(
         "/asistencias",
         json={"usuario_id": mayor + 1000, "metodo": "biometrico"},
         headers=coci,
@@ -249,7 +252,7 @@ def test_rechazos_del_dia_y_sin_comida(cliente, tokens):
     assert r.json()["motivo"] == "sin_derecho", r.text
     # La semilla deja 10:00-11:00 sin cubrir a propósito.
     reloj.fijar(datetime(2026, 9, 24, 10, 30), congelar=True)
-    r = cliente.post("/asistencias", json={"metodo": "biometrico"}, headers=coci)
+    r = sim.post("/asistencias", json={"metodo": "biometrico"}, headers=coci)
     assert r.json()["motivo"] == "fuera_horario", r.text
 
     r = cliente.get(RUTA, params={"fecha": DIA.isoformat()}, headers=jefa)

@@ -24,11 +24,24 @@ class DerechoComida(BaseModel):
 
 
 class SolicitudMarcacion(BaseModel):
-    """Lo que manda el lector, o la jefatura cuando registra a mano."""
+    """Lo que manda el navegador: el simulador del lector (solo en
+    simulación) o la jefatura cuando registra a mano."""
 
     usuario_id: int | None = Field(default=None, gt=0)
-    dispositivo: str = "lector-comedor-01"
-    metodo: Literal["biometrico", "manual"] = "biometrico"
+    dispositivo: str | None = Field(
+        default=None,
+        description=(
+            "DEPRECADO: se ignora. El servidor registra 'simulador-navegador': "
+            "el cliente no puede hacerse pasar por un lector."
+        ),
+    )
+    metodo: Literal["biometrico", "manual"] = Field(
+        default="biometrico",
+        description=(
+            "Omitido vale 'biometrico' y tiene su misma restricción: fuera de "
+            "simulación, 403 biometrico_solo_lector."
+        ),
+    )
     momento: datetime | None = Field(
         default=None,
         description=(

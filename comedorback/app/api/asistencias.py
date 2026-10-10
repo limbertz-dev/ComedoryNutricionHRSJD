@@ -2,12 +2,22 @@
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.core.autorizacion import UsuarioActual, exigir_metodo_marcacion
+from app.core.autorizacion import (
+    UsuarioActual,
+    exigir_metodo_marcacion,
+    exigir_origen_biometrico,
+)
 from app.core.db import SesionDep
+from app.core.entorno import EntornoDep
 from app.esquemas.marcacion import RespuestaMarcacion, SolicitudMarcacion
 from app.logica import marcacion
 
 router = APIRouter(prefix="/asistencias", tags=["asistencias"])
+
+# Toda marcación de esta ruta llega con el token de una persona, desde el
+# navegador. El dispositivo lo fija el servidor: el texto del cliente no
+# distingue nada y en la bitácora parecería un lector que no existe.
+DISPOSITIVO_NAVEGADOR = "simulador-navegador"
 
 
 @router.post(
@@ -17,7 +27,10 @@ router = APIRouter(prefix="/asistencias", tags=["asistencias"])
     status_code=status.HTTP_200_OK,
 )
 def marcar(
-    sesion: SesionDep, solicitud: SolicitudMarcacion, usuario: UsuarioActual
+    sesion: SesionDep,
+    solicitud: SolicitudMarcacion,
+    usuario: UsuarioActual,
+    entorno: EntornoDep,
 ) -> RespuestaMarcacion:
     """Aplica las reglas del comedor y registra la ración si todas pasan.
 
@@ -26,9 +39,13 @@ def marcar(
     lector tiene que mostrar en pantalla. Una lectura biometrica sin usuario
     se registra como auditoria `no_identificado`. El campo `valido` lo distingue.
 
-    La marcación manual es solo de jefatura (403 `metodo_no_autorizado` para
-    la cocinera); ver app/core/permisos.py.
+    La marcación biométrica (también con `metodo` omitido) solo se acepta en
+    simulación: en producción y desarrollo da 403 `biometrico_solo_lector`
+    antes de tocar la lógica, sin lecturas ni asistencias. La manual es solo
+    de jefatura (403 `metodo_no_autorizado` para la cocinera); ver
+    app/core/permisos.py.
     """
+    exigir_origen_biometrico(entorno, solicitud.metodo)
     exigir_metodo_marcacion(usuario, solicitud.metodo)
     if solicitud.momento is not None and solicitud.metodo != "manual":
         raise HTTPException(
@@ -40,7 +57,7 @@ def marcar(
         sesion,
         usuario_id=solicitud.usuario_id,
         momento=solicitud.momento,
-        dispositivo=solicitud.dispositivo,
+        dispositivo=DISPOSITIVO_NAVEGADOR,
         metodo=solicitud.metodo,
         registrado_por_cuenta=(
             usuario.id if solicitud.metodo == "manual" else None
