@@ -34,7 +34,7 @@ from sqlalchemy.engine import Engine  # noqa: E402
 from app.core import seguridad  # noqa: E402
 from app.core.config import config  # noqa: E402
 from app.core.db import SesionLocal  # noqa: E402
-from app.main import app  # noqa: E402
+from app.main import app, crear_app  # noqa: E402
 from app.modelos.usuarios import UsuarioSistema  # noqa: E402
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -102,6 +102,15 @@ def tablas_auth_limpias():
 @pytest.fixture
 def cliente() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture
+def cliente_simulacion() -> TestClient:
+    """Una app de simulación sobre la MISMA base de tests: cambia solo el
+    entorno de la app, no la configuración ni la base. La usan las pruebas
+    que generan lecturas con POST /asistencias biométrico, que fuera de
+    simulación da 403 (test_biometria_origen.py cubre ese lado)."""
+    return TestClient(crear_app("simulacion"))
 
 
 @pytest.fixture
