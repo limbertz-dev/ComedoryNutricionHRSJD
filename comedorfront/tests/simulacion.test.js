@@ -91,7 +91,8 @@ test('/salud con 503 (base incompleta) igual informa el entorno; sin cuerpo, fal
 
 test('fuera de simulación nunca se consulta /simulacion/*, ni siquiera con rol de jefatura', async () => {
   const peticiones = grabar(() => json(salud('produccion')));
-  assert.deepEqual(await consultarSimulacion({ operaReloj: true }), { simulacion: false, reloj: null });
+  assert.deepEqual(await consultarSimulacion({ operaReloj: true }),
+    { simulacion: false, confirmada: false, reloj: null });
   assert.deepEqual(peticiones.map(({ ruta }) => ruta), ['/salud']);
 });
 
@@ -100,22 +101,35 @@ test('en simulación, jefatura lee /simulacion/reloj; los demás, solo /salud', 
   const jefa = await consultarSimulacion({ operaReloj: true });
   assert.deepEqual(peticiones.map(({ ruta }) => ruta), ['/salud', '/simulacion/reloj']);
   assert.equal(jefa.reloj.congelado, true);
+  assert.equal(jefa.confirmada, true);
 
   peticiones = grabar(({ ruta }) => json(ruta === '/salud' ? salud('simulacion') : estadoReloj()));
   const cocinera = await consultarSimulacion({ operaReloj: false });
   assert.deepEqual(peticiones.map(({ ruta }) => ruta), ['/salud']);
   assert.equal(cocinera.simulacion, true);
+  assert.equal(cocinera.confirmada, true);
 
-  // Vueltas siguientes de jefatura: directo al reloj.
-  peticiones = grabar(() => json(estadoReloj()));
-  await consultarSimulacion({ operaReloj: true, yaEnSimulacion: true });
-  assert.deepEqual(peticiones.map(({ ruta }) => ruta), ['/simulacion/reloj']);
+  // Cada vuelta vuelve a preguntar a /salud: la confirmación sale solo de ahí.
+  peticiones = grabar(({ ruta }) => json(ruta === '/salud' ? salud('simulacion') : estadoReloj()));
+  await consultarSimulacion({ operaReloj: true });
+  await consultarSimulacion({ operaReloj: true });
+  assert.deepEqual(peticiones.map(({ ruta }) => ruta),
+    ['/salud', '/simulacion/reloj', '/salud', '/simulacion/reloj']);
 
   // Si el reloj falla, queda la hora de /salud.
   grabar(({ ruta }) => (ruta === '/salud' ? json(salud('simulacion')) : json({}, 500)));
   const respaldo = await consultarSimulacion({ operaReloj: true });
   assert.equal(respaldo.simulacion, true);
+  assert.equal(respaldo.confirmada, true);
   assert.equal(respaldo.reloj.ahora.getHours(), 12);
+});
+
+test('/salud con 503 en simulación muestra el reloj pero no confirma el entorno', async () => {
+  grabar(() => json({ ...salud('simulacion'), estado: 'incompleta', faltan: ['x'] }, 503));
+  const resultado = await consultarSimulacion({ operaReloj: false });
+  assert.equal(resultado.simulacion, true);
+  assert.equal(resultado.confirmada, false);
+  assert.equal(resultado.reloj.ahora.getHours(), 12);
 });
 
 // --- Las 5 rutas de /simulacion/reloj ---
