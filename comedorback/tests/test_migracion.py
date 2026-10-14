@@ -243,6 +243,89 @@ def test_reversion_bloqueada_con_microsegundos_en_lecturas(
     ]
 
 
+# --- el predicado real de "hora distinta de medianoche", ejecutado en MySQL ------------------
+
+
+def _migracion():
+    """El módulo de la revisión, cargado por su ruta (sin registrarlo)."""
+    import importlib.util
+    from pathlib import Path
+
+    ruta = Path(__file__).resolve().parents[1] / "alembic" / "versions" / (
+        f"{REVISION}_horarios_inmediatos.py"
+    )
+    spec = importlib.util.spec_from_file_location("migracion_horarios_prueba", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+@pytest.mark.parametrize(
+    "valor,bloqueado",
+    [
+        ("2026-01-01 00:00:00.000000", False),
+        ("2026-01-01 00:00:00", False),
+        ("2026-01-01 00:00:00.000001", True),
+        ("2026-01-01 00:00:01", True),
+        ("2026-01-01 00:01:00", True),
+        ("2026-01-01 01:00:00", True),
+        ("2026-03-01 23:59:59.999999", True),
+        (None, False),  # NULL nunca bloquea
+    ],
+    ids=["medianoche_6", "medianoche", "un_micro", "un_segundo", "un_minuto", "una_hora", "casi_24h", "null"],
+)
+def test_predicado_de_hora_distinta_de_medianoche(valor, bloqueado):
+    """Ejecuta el predicado REAL de la migración sobre valores sintéticos,
+    para vigente_desde y para vigente_hasta (sin tocar ninguna tabla)."""
+    tiene_hora = _migracion()._tiene_hora
+    with SesionLocal() as sesion:
+        for columna in ("vigente_desde", "vigente_hasta"):
+            filas = sesion.execute(
+                text(
+                    f"SELECT 1 FROM (SELECT CAST(:v AS DATETIME(6)) AS {columna}) t "
+                    f"WHERE {tiene_hora(columna)}"
+                ),
+                {"v": valor},
+            ).all()
+            assert bool(filas) is bloqueado, (columna, valor)
+
+
+def test_predicado_sobre_la_consulta_completa_del_downgrade(en_head):
+    """Con las filas exactas del fallo real (medianoche con y sin hasta) no hay
+    nada que bloquear; con un microsegundo en cualquiera de las dos columnas,
+    sí. Usa la misma función que el downgrade, sobre `horarios_comida`."""
+    horarios.sembrar()
+    almuerzo = _preparar_con_cierre_sin_semilla(almuerzo=comida_id("almuerzo"))
+    migracion = _migracion()
+    consulta = text(
+        "SELECT id FROM horarios_comida "
+        f"WHERE {migracion._tiene_hora('vigente_desde')} OR {migracion._tiene_hora('vigente_hasta')}"
+    )
+    with SesionLocal() as sesion:
+        assert sesion.execute(consulta).all() == []
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = '2026-03-01 00:00:00.000001' "
+        "WHERE comida_id = :c AND vigente_hasta IS NOT NULL",
+        c=almuerzo,
+    )
+    with SesionLocal() as sesion:
+        assert len(sesion.execute(consulta).all()) == 1
+
+
+def _preparar_con_cierre_sin_semilla(almuerzo: int) -> int:
+    """Como `_preparar_con_cierre`, sobre una semilla ya cargada."""
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = '2026-03-01 00:00:00' WHERE comida_id = :c",
+        c=almuerzo,
+    )
+    _sql(
+        "INSERT INTO horarios_comida (comida_id, hora_inicio, hora_fin, vigente_desde, "
+        "vigente_hasta, activo) VALUES (:c, '12:00:00', '13:00:00', '2026-03-01 00:00:00', NULL, 1)",
+        c=almuerzo,
+    )
+    return almuerzo
+
+
 # --- downgrade interrumpido: el reintento no continúa ni resta otro día ----------------------
 
 
