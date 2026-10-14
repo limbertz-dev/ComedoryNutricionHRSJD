@@ -43,6 +43,21 @@ export function estadoDeCuenta(cuenta) {
   return { texto: 'Activa', tono: 'exito' };
 }
 
+/**
+ * Cuántas cuentas hay en cada estado de la tabla (el mismo criterio de
+ * estadoDeCuenta): sirve para el resumen sobre la tabla, sin recontar a mano.
+ */
+export function contarCuentasPorEstado(cuentas = []) {
+  const conteo = { activas: 0, claveTemporal: 0, inactivas: 0 };
+  for (const cuenta of cuentas) {
+    const { texto } = estadoDeCuenta(cuenta);
+    if (texto === 'Inactiva') conteo.inactivas += 1;
+    else if (texto === 'Clave temporal') conteo.claveTemporal += 1;
+    else conteo.activas += 1;
+  }
+  return conteo;
+}
+
 /** Último ingreso: «Nunca» si no ingresó; si no, fecha y hora cortas. */
 export function formatoUltimoIngreso(texto) {
   if (texto === null || texto === undefined || texto === '') return 'Nunca';

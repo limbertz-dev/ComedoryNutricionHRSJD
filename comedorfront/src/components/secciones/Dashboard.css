@@ -1,28 +1,75 @@
-/* Estilos exclusivos de la seccion Dashboard. */
-.dashboard {
+/*
+ * Estilos exclusivos del Resumen.
+ *
+ * De arriba abajo: la hora de los datos, el turno actual junto a las cifras
+ * del día y, al final, el gráfico por categoría. Cada bloque lleva su propio
+ * rótulo de período porque cuentan cosas distintas.
+ */
+.resumen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+  padding: 0 4px var(--e-7);
+}
+
+.resumen__corte {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--e-2);
+  margin: 0;
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Turno a la izquierda, cifras del día a la derecha; el turno manda. */
+.resumen__principal {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.4fr);
   gap: var(--e-4);
   align-items: stretch;
 }
 
-.dashboard__columna {
-  display: flex;
-  flex-direction: column;
+.resumen__cifras {
+  display: grid;
+  grid-template-rows: auto 1fr;
   gap: var(--e-4);
   min-width: 0;
 }
 
-/* La tarjeta del turno estira para igualar el alto de la tarjeta del grafico. */
-.dashboard__columna > .tarjeta:first-child {
-  flex: 1;
+/* Sin dato todavía: se dice, no se rellena. */
+.resumen__vacio {
+  padding: var(--e-5);
+  background: var(--c-superficie);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-lg);
+  color: var(--c-texto-2);
+  font-size: var(--t-base);
+  font-weight: 600;
+  text-align: center;
 }
 
-.dashboard__columna > .tarjeta:first-child .tarjeta__cuerpo {
-  justify-content: center;
+.resumen__vacio--interno {
+  margin: auto 0;
+  background: var(--c-superficie-2);
 }
 
 /* ---------- Tarjeta del turno actual ---------- */
+.resumen__turno .tarjeta__cuerpo {
+  justify-content: center;
+}
+
+.resumen__periodo {
+  margin-bottom: var(--e-3);
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .turno__rotulo {
   font-size: var(--t-sm);
   color: var(--c-texto-2);
@@ -32,6 +79,7 @@
   margin-top: var(--e-1);
   font-size: var(--t-3xl);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   line-height: 1.05;
   letter-spacing: -0.03em;
   color: var(--c-acento-fuerte);
@@ -72,15 +120,30 @@
   color: var(--c-texto);
 }
 
-/* ---------- Tiles de apoyo ---------- */
-.dashboard__tiles {
+/* Fuera de horario: aviso en lugar de una cifra que no existe. */
+.resumen__aparte {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--e-4);
+  gap: var(--e-2);
+  padding: var(--e-4);
+  background: var(--c-aviso-tenue);
+  border: 1px solid #fde68a;
+  border-radius: var(--r-md);
+  color: var(--c-texto);
+  font-size: var(--t-sm);
 }
 
+.resumen__aparte p {
+  margin: 0;
+}
+
+.resumen__aparte-titulo {
+  color: var(--c-aviso);
+  font-weight: 800;
+}
+
+/* ---------- Cifras del día ---------- */
 /* Forma de KPI del sistema original: teja de icono a la izquierda y el dato
-   a la derecha, en dos líneas. */
+   a la derecha. */
 .tile {
   display: flex;
   align-items: center;
@@ -91,7 +154,7 @@
   background: rgba(255, 255, 255, 0.93);
   border: 1px solid var(--c-borde);
   border-radius: var(--r-lg);
-  box-shadow: 0 8px 22px rgba(18, 35, 61, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 8px rgba(18, 35, 61, 0.04);
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
@@ -105,6 +168,7 @@
   display: grid;
   gap: 3px;
   min-width: 0;
+  flex: 1;
 }
 
 .tile__icono {
@@ -120,11 +184,12 @@
   box-shadow: 0 5px 14px rgba(0, 180, 115, 0.1), inset 0 1px 0 #ffffff;
 }
 
-.tile__icono--error {
-  color: var(--c-error);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(254, 226, 226, 0.95));
-  border-color: #fecaca;
-  box-shadow: 0 5px 14px rgba(185, 28, 28, 0.1), inset 0 1px 0 #ffffff;
+/* Las lecturas son del lector, no raciones: teja neutra, no verde de «ración». */
+.tile__icono--neutro {
+  color: var(--c-icono);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(247, 250, 249, 0.95));
+  border-color: var(--c-borde-fuerte);
+  box-shadow: 0 5px 14px rgba(18, 35, 61, 0.07), inset 0 1px 0 #ffffff;
 }
 
 .tile__rotulo {
@@ -142,6 +207,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+.tile--grande .tile__valor {
+  font-size: var(--t-2xl);
+  line-height: 1;
+}
+
 .tile__valor--exito {
   color: var(--c-exito);
 }
@@ -150,8 +220,41 @@
   color: var(--c-error);
 }
 
+.tile__periodo {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Aceptadas / rechazadas / total, en una sola fila. */
+.tile__lecturas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: var(--e-3);
+  margin: var(--e-1) 0;
+}
+
+.tile__lecturas > div {
+  display: grid;
+  gap: 2px;
+}
+
+.tile__lecturas dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+}
+
+.tile__lecturas dd {
+  margin: 0;
+}
+
 /* ---------- Grafico ---------- */
-.dashboard__grafico .tarjeta__cuerpo {
+.resumen__grafico .tarjeta__cuerpo {
   padding: var(--e-5) var(--e-4) var(--e-4);
 }
 
@@ -198,7 +301,7 @@
 }
 
 @media (max-width: 1180px) {
-  .dashboard {
+  .resumen__principal {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -207,8 +310,32 @@
   }
 }
 
+@media (max-width: 560px) {
+  .tile {
+    padding: 14px 16px;
+  }
+
+  .tile__icono {
+    width: 44px;
+    height: 44px;
+  }
+
+  .tile--grande .tile__valor {
+    font-size: var(--t-xl);
+  }
+
+  .turno__cifra {
+    font-size: var(--t-2xl);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tile:hover {
     transform: none;
+  }
+
+  .tile,
+  .turno__medidor-relleno {
+    transition: none;
   }
 }

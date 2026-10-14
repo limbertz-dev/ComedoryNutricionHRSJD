@@ -217,9 +217,12 @@ export default function InformeRaciones({ ahora = null }) {
         </div>
 
         <div className="informe__acciones">
-          <div className="informe__periodo">
+          {/* Una sola línea: el dato secundario va al lado y no agranda el control. */}
+          <div className="informe__periodo" aria-label="Período del informe">
             <span className="informe__periodo-mes">{informe?.periodo.principal ?? '…'}</span>
-            <span className="informe__periodo-gestion">{informe?.periodo.secundario ?? ''}</span>
+            {informe?.periodo.secundario ? (
+              <span className="informe__periodo-gestion">{informe.periodo.secundario}</span>
+            ) : null}
           </div>
 
           <Boton
@@ -242,10 +245,11 @@ export default function InformeRaciones({ ahora = null }) {
         </div>
       </header>
 
-      {cargando ? <p role="status">Cargando informe…</p> : null}
+      {cargando ? <p className="informe__estado" role="status">Cargando informe…</p> : null}
       {error ? (
-        <p role="alert">
-          {error} <Boton variante="secundario" onClick={recargar}>Reintentar informe</Boton>
+        <p className="informe__error" role="alert">
+          <span>{error}</span>
+          <Boton variante="secundario" tamano="sm" onClick={recargar}>Reintentar informe</Boton>
         </p>
       ) : null}
 

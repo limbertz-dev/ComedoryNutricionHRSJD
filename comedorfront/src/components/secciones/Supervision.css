@@ -1,9 +1,10 @@
 /*
  * Supervision.css — Estilos para la sección de Supervisión.
  *
- * Una sola tabla en vivo con pestañas por comida. Utiliza estrictamente la
- * paleta de tokens.css: variables de superficie, acento, estados y
- * tipografía Nunito.
+ * Jerarquía de arriba abajo: comidas del día (pestañas), resumen de la
+ * pestaña (aceptadas, rechazadas, manuales y su período), barra de filtros y,
+ * al final, la tabla de marcaciones. Superficies planas de borde fino, como el
+ * reporte de LA Aguilar Silva, pero con la paleta verde de tokens.css.
  */
 
 .supervision {
@@ -13,6 +14,7 @@
   padding: 0 4px var(--e-7);
 }
 
+/* ---------- Estados de la sección ---------- */
 .supervision__estado,
 .supervision__vacio {
   margin: var(--e-4) 0;
@@ -22,7 +24,16 @@
   border-radius: var(--r-lg);
   color: var(--c-texto-2);
   font-size: var(--t-base);
+  font-weight: 600;
   text-align: center;
+}
+
+/* Sin resultados dentro del panel de la tabla: sin marco propio, ya lo da el panel. */
+.supervision__vacio--tabla {
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .supervision__error {
@@ -30,6 +41,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--e-4);
+  flex-wrap: wrap;
   padding: var(--e-4) var(--e-5);
   background: var(--c-error-tenue);
   border: 1px solid var(--c-error);
@@ -42,20 +54,21 @@
   margin: 0;
 }
 
+/* ---------- Avisos de una acción ---------- */
 .supervision__aviso-accion {
   display: flex;
   align-items: flex-start;
   gap: var(--e-3);
   padding: var(--e-3) var(--e-4);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   font-size: var(--t-sm);
-  animation: supervision-aparecer 0.2s ease;
+  animation: supervision-aparecer 200ms ease;
 }
 
 .supervision__aviso-accion--exito {
   background: var(--c-exito-tenue);
   border: 1px solid var(--c-exito);
-  color: var(--c-exito);
+  color: var(--c-acento-oscuro);
 }
 
 .supervision__aviso-accion--rechazo,
@@ -87,13 +100,32 @@
 }
 
 .supervision__aviso-cerrar {
+  display: grid;
+  width: 28px;
+  height: 28px;
   margin-left: auto;
-  background: transparent;
-  border: 0;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
   color: currentColor;
   font-size: 1.25rem;
   line-height: 1;
-  cursor: pointer;
+  transition: background var(--trans-boton);
+}
+
+.supervision__aviso-cerrar:hover {
+  background: rgba(18, 35, 61, 0.08);
+}
+
+@keyframes supervision-aparecer {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .supervision__barra-superior {
@@ -112,6 +144,7 @@
 .supervision__simulacion-aviso {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   gap: var(--e-3);
   padding: var(--e-2) var(--e-4);
   background: var(--c-aviso-tenue);
@@ -125,34 +158,38 @@
    Pestañas: "Todas" + una por comida del día
    ------------------------------------------------------------- */
 .supervision__pestanas {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
   gap: var(--e-3);
-  flex-wrap: wrap;
 }
 
 .supervision__pestana {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--e-1);
-  min-width: 150px;
+  min-width: 0;
   padding: var(--e-3) var(--e-4);
   background: var(--c-superficie);
   border: 1px solid var(--c-borde);
   border-radius: var(--r-md);
+  box-shadow: 0 2px 8px rgba(18, 35, 61, 0.04);
   color: var(--c-texto);
   font-family: var(--fuente);
-  cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  text-align: left;
+  transition: border-color var(--trans), box-shadow var(--trans), background var(--trans);
 }
 
 .supervision__pestana:hover {
   border-color: var(--c-borde-tarjeta-activo);
+  box-shadow: var(--s-3);
 }
 
-.supervision__pestana--activa {
-  border-color: var(--c-acento);
+.supervision__pestana--activa,
+.supervision__pestana--activa:hover {
   background: var(--c-acento-tenue);
+  border-color: var(--c-acento);
   box-shadow: 0 0 0 2px var(--c-acento-claro);
 }
 
@@ -170,18 +207,34 @@
   font-weight: 700;
 }
 
-/* Punto verde: la comida está en curso ahora mismo. */
+.supervision__pestana-estado--curso {
+  color: var(--c-acento-oscuro);
+}
+
+/* Punto verde que late: la comida está en curso ahora mismo. */
 .supervision__punto-curso {
   width: 9px;
   height: 9px;
   border-radius: var(--r-full);
   background: var(--c-acento);
   box-shadow: 0 0 0 3px var(--c-acento-claro);
+  animation: supervision-latido 2200ms ease-in-out infinite;
+}
+
+@keyframes supervision-latido {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--c-acento-claro);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(0, 180, 115, 0.12);
+  }
 }
 
 .supervision__pestana-cifras {
   display: inline-flex;
   gap: var(--e-3);
+  margin-top: var(--e-1);
 }
 
 .supervision__pestana-cifra {
@@ -190,6 +243,7 @@
   gap: 4px;
   font-size: var(--t-sm);
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 .supervision__pestana-cifra--exito {
@@ -200,12 +254,114 @@
   color: var(--c-error);
 }
 
+.supervision__pestana-cifra--manual {
+  color: var(--c-icono);
+}
+
 /* Nota discreta bajo las pestañas, solo si hay rechazos fuera de franja. */
 .supervision__nota-fuera-franja {
-  margin: 0;
+  margin: calc(var(--e-2) * -1) 0 0;
   color: var(--c-texto-2);
   font-size: var(--t-sm);
   font-weight: 600;
+}
+
+/* -------------------------------------------------------------
+   Resumen de la pestaña: período y tres cifras
+   ------------------------------------------------------------- */
+.supervision__resumen {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(0, 3fr);
+  align-items: stretch;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 2px 8px rgba(18, 35, 61, 0.04);
+  overflow: hidden;
+}
+
+.supervision__periodo {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--e-4) var(--e-5);
+  background: var(--c-acento-tenue);
+  border-right: 1px solid var(--c-acento-linea);
+}
+
+.supervision__periodo-titulo {
+  color: var(--c-acento-oscuro);
+  font-size: var(--t-lg);
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.supervision__periodo-detalle {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.supervision__cifras {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.supervision__cifra {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--e-4) var(--e-5);
+}
+
+.supervision__cifra + .supervision__cifra {
+  border-left: 1px solid var(--c-borde);
+}
+
+.supervision__cifra dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.supervision__cifra dd {
+  margin: 0;
+  font-size: var(--t-xl);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.supervision__cifra small {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.supervision__cifra--exito dt,
+.supervision__cifra--exito dd {
+  color: var(--c-exito);
+}
+
+.supervision__cifra--error dt,
+.supervision__cifra--error dd {
+  color: var(--c-error);
+}
+
+.supervision__cifra--manual dt,
+.supervision__cifra--manual dd {
+  color: var(--c-icono);
 }
 
 /* -------------------------------------------------------------
@@ -220,28 +376,36 @@
 
 .supervision__chips-filtro {
   display: inline-flex;
-  background: var(--c-superficie);
-  border: 1px solid var(--c-borde);
-  border-radius: var(--r-md);
+  align-items: center;
+  height: var(--alto-control-compacto);
   padding: 3px;
   gap: 3px;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-md);
 }
 
 .supervision__chip {
-  padding: 6px 14px;
-  border: 0;
+  height: 100%;
+  padding: 0 14px;
   border-radius: var(--r-sm);
   background: transparent;
   color: var(--c-texto-2);
   font-family: var(--fuente);
   font-size: var(--t-sm);
   font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color var(--trans-boton), background var(--trans-boton), box-shadow var(--trans-boton);
 }
 
-.supervision__chip--activo {
+.supervision__chip:hover {
+  background: var(--c-acento-tenue);
+  color: var(--c-acento-oscuro);
+}
+
+.supervision__chip--activo,
+.supervision__chip--activo:hover {
   background: var(--gradiente-pildora-activa);
+  box-shadow: var(--s-pildora-activa);
   color: #ffffff;
 }
 
@@ -255,7 +419,7 @@
 
 .supervision__buscador-icono {
   position: absolute;
-  left: 10px;
+  left: 12px;
   color: var(--c-texto-3);
   display: flex;
   align-items: center;
@@ -264,47 +428,104 @@
 
 .supervision__buscador-input {
   width: 100%;
-  padding: 7px 30px 7px 32px;
+  height: var(--alto-control-compacto);
+  padding: 0 34px 0 36px;
   border: 1px solid var(--c-borde-fuerte);
   border-radius: var(--r-md);
   background: var(--c-superficie);
   color: var(--c-texto);
   font-family: var(--fuente);
   font-size: var(--t-sm);
+  transition: border-color var(--trans), box-shadow var(--trans);
+}
+
+.supervision__buscador-input::placeholder {
+  color: var(--c-texto-3);
+}
+
+.supervision__buscador-input:hover {
+  border-color: var(--c-borde-tarjeta-activo);
+}
+
+.supervision__buscador-input:focus-visible {
+  border-color: var(--c-acento);
+  box-shadow: var(--s-foco);
+  outline: none;
 }
 
 .supervision__buscador-limpiar {
   position: absolute;
-  right: 8px;
-  background: transparent;
-  border: 0;
+  right: 6px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--r-sm);
   color: var(--c-texto-3);
-  font-size: 1rem;
-  cursor: pointer;
+  font-size: 1.125rem;
+  line-height: 1;
+  transition: color var(--trans-boton), background var(--trans-boton);
+}
+
+.supervision__buscador-limpiar:hover {
+  background: var(--c-superficie-2);
+  color: var(--c-texto);
 }
 
 .supervision__actualizado {
   color: var(--c-texto-2);
   font-size: var(--t-sm);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* -------------------------------------------------------------
+   Panel de la tabla de marcaciones
+   ------------------------------------------------------------- */
+.supervision__panel {
+  overflow: hidden;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 2px 8px rgba(18, 35, 61, 0.04);
+}
+
+.supervision__panel-cabecera {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+  min-height: 48px;
+  padding: var(--e-2) var(--e-4);
+  background: var(--c-superficie-2);
+  border-bottom: 1px solid var(--c-borde);
+}
+
+.supervision__conteo {
+  margin: 0;
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 .supervision__nota-truncada {
   margin: 0;
-  color: var(--c-texto-2);
-  font-size: var(--t-sm);
-  font-weight: 600;
+  padding: 2px 10px;
+  background: var(--c-aviso-tenue);
+  border-radius: var(--r-full);
+  color: var(--c-aviso);
+  font-size: var(--t-xs);
+  font-weight: 700;
 }
 
-/* -------------------------------------------------------------
-   Tabla de marcaciones
-   ------------------------------------------------------------- */
+.supervision__panel-cabecera .boton {
+  margin-left: auto;
+}
+
 .supervision__tabla-caja {
   overflow-x: auto;
-  background: var(--c-superficie);
-  border: 1px solid var(--c-borde);
-  border-radius: var(--r-lg);
 }
 
 .supervision__tabla {
@@ -315,7 +536,7 @@
 
 .supervision__tabla th,
 .supervision__tabla td {
-  padding: 10px 12px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--c-borde);
   text-align: left;
   vertical-align: middle;
@@ -323,10 +544,10 @@
 
 .supervision__tabla thead th {
   color: var(--c-texto-2);
-  background: var(--c-superficie-2);
+  background: var(--c-superficie);
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.055em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -335,17 +556,64 @@
   border-bottom: 0;
 }
 
-/* Fondo suave de rechazo para las filas rechazadas. */
+/* Hora y comensal mandan; el resto se lee como apoyo. */
+.supervision__tabla tbody td:first-child {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.supervision__tabla tbody td:nth-child(2) {
+  color: var(--c-texto);
+  font-weight: 700;
+}
+
+.supervision__tabla tbody td:nth-child(3),
+.supervision__tabla tbody td:nth-child(4),
+.supervision__tabla tbody td:nth-child(6),
+.supervision__tabla tbody td:nth-child(7) {
+  color: var(--c-texto-2);
+}
+
+.supervision__tabla tbody td:nth-child(7) {
+  white-space: nowrap;
+}
+
+.supervision__resultado {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-1);
+  flex-wrap: wrap;
+}
+
+/* Marca lateral de la fila: rojo si se rechazó, azul oscuro si fue manual. */
+.supervision__fila--manual td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-icono);
+}
+
 .supervision__fila--rechazada {
-  background: var(--c-error-tenue);
+  background: rgba(254, 226, 226, 0.5);
+}
+
+.supervision__fila--rechazada td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-error);
 }
 
 .supervision__fila--rechazada:hover {
   background: var(--c-error-tenue);
 }
 
+.supervision__sin-accion {
+  color: var(--c-texto-3);
+  font-weight: 700;
+}
+
 /* Fila expandida con el selector de comensal, debajo de la marcación. */
 .supervision__fila-autorizar td {
+  background: var(--c-superficie-2);
+}
+
+.supervision__fila-autorizar:hover {
   background: var(--c-superficie-2);
 }
 
@@ -363,13 +631,85 @@
 }
 
 .supervision__select-padron {
-  padding: 8px 12px;
+  min-height: var(--alto-control-compacto);
+  padding: 0 12px;
   border: 1px solid var(--c-borde-fuerte);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   background: var(--c-superficie);
   color: var(--c-texto);
   font-family: var(--fuente);
   font-size: var(--t-sm);
   font-weight: 600;
   max-width: 320px;
+  transition: border-color var(--trans), box-shadow var(--trans);
+}
+
+.supervision__select-padron:hover {
+  border-color: var(--c-borde-tarjeta-activo);
+}
+
+.supervision__select-padron:focus-visible {
+  border-color: var(--c-acento);
+  box-shadow: var(--s-foco);
+  outline: none;
+}
+
+/* -------------------------------------------------------------
+   Pantallas pequeñas
+   ------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .supervision__resumen {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .supervision__periodo {
+    border-right: 0;
+    border-bottom: 1px solid var(--c-acento-linea);
+  }
+}
+
+@media (max-width: 640px) {
+  .supervision__cifras {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .supervision__cifra + .supervision__cifra {
+    border-top: 1px solid var(--c-borde);
+    border-left: 0;
+  }
+
+  .supervision__chips-filtro {
+    width: 100%;
+  }
+
+  .supervision__chip {
+    flex: 1;
+    padding: 0 8px;
+  }
+
+  .supervision__buscador {
+    flex: 1 1 100%;
+  }
+
+  .supervision__actualizado {
+    margin-right: auto;
+  }
+
+  .supervision__panel-cabecera .boton {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .supervision__punto-curso,
+  .supervision__aviso-accion {
+    animation: none;
+  }
+
+  .supervision__pestana,
+  .supervision__chip,
+  .supervision__buscador-input,
+  .supervision__select-padron {
+    transition: none;
+  }
 }

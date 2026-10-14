@@ -170,11 +170,54 @@ diario, usando fecha_comida cuando está disponible.
 Reportes muestra una sola vista, el formulario de Estadística, pedida por rango
 de fechas a /reportes/informe: «este mes» y «esta gestión» son rangos. Un rango
 sin raciones se presenta vacío, sin cifras de demostración. Excel y PDF salen de
-ese mismo informe (exportarInformeExcel / exportarInformePdf).
+ese mismo informe (exportarInformeExcel / exportarInformePdf). La vista no ofrece
+pestaña ni acceso a «Reportes de pacientes»: llegarán con su módulo. El selector de
+fechas, el período, Excel y PDF miden lo mismo (`--alto-control` en tokens.css) y la
+línea secundaria del período (días o gestión) va en la misma fila: no agranda el control.
 
 useConsultaApi cancela lecturas obsoletas al cambiar de período o desmontar una
 vista. Carga, respuesta vacía y error son estados distintos. Hay reintento manual
 para lecturas; no hay reintentos automáticos del POST ni datos ficticios de respaldo.
+
+## Interfaz de jefatura
+
+Supervisión, Resumen, Reportes y Cuentas comparten el lenguaje visual de
+laaguilarsilva en verde: superficies planas de borde fino, controles compactos
+(`--alto-control` de 46 px en las barras de reporte y `--alto-control-compacto` de
+40 px en las de filtro), foco visible (el global, más `--s-foco` en los campos),
+transiciones cortas y `prefers-reduced-motion`. No se agregó ninguna dependencia.
+
+**Supervisión.** Las pestañas por comida traen aceptadas, rechazadas y manuales;
+debajo, un resumen de la pestaña activa con su período. Las manuales ya están
+dentro de las aceptadas (`servidas` incluye `manuales`): se muestran aparte, no se
+suman. La barra de filtros suma el segmento «Manuales» (por `origen`) y cada fila
+manual lleva su marca. Registro manual y «Autorizar» no cambiaron.
+
+*Intervenciones de cocina: pendientes del contrato de A3.* No hay interfaz ni
+llamadas. Cuando llegue el contrato se incorporarán en dos puntos de
+`Supervision.jsx` (un comentario los marca): un panel «Intervenciones» entre el
+resumen y la barra de filtros, acotado a la pestaña activa, y acciones por
+marcación en la columna «Acción», junto a «Autorizar».
+
+**Resumen.** Tres conteos distintos, cada uno con su período (`src/resumen.js`):
+
+| Bloque | Campo de /pantalla/estado | Período |
+|---|---|---|
+| Turno actual | cupo (servidas, previstas, restantes, porcentaje) | solo la comida en curso, en su fecha de comida |
+| Raciones servidas del día y gráfico por categoría | totales_del_dia.raciones_servidas, por_categoria | todas las comidas de la fecha de comida |
+| Lecturas del lector | aceptadas, rechazadas, lecturas | día del reloj; son toques de dedo, no raciones |
+
+Un cupo sin previstas se dice («sin cupo cargado») y no se le inventa porcentaje.
+
+*Métricas propuestas para el Resumen (no se aproximan en el front):* comparación
+con el día o la semana anterior y ritmo de servidas por hora dentro de la franja
+necesitan backend nuevo. La cobertura del día completo (servidas contra previstas
+de todas las comidas) y los rechazos del día por motivo ya salen por comida de
+`/pantalla/comidas-del-dia` (Supervisión), pero llevarlos al Resumen es una
+decisión de producto, no un cambio de presentación.
+
+**Cuentas.** Solo lectura: buscador, conteo por estado, tabla y, en pantallas
+pequeñas, una tarjeta por cuenta. Administración de cuentas (sistemas) no se tocó.
 
 ## Pendiente de mapeo
 

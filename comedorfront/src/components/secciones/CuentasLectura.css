@@ -1,9 +1,9 @@
 /*
  * CuentasLectura.css — Estilos para la vista de Cuentas (jefa, lectura).
  *
- * Tabla y barra iguales a las de Administración, con clases propias: esta
- * sección no importa Administracion.css y Administración no se toca. Todo
- * sale de la paleta de tokens.css.
+ * Barra de búsqueda y un panel con el conteo por estado y la tabla. Es solo
+ * lectura: aquí no hay controles de edición. Esta sección no importa
+ * Administracion.css y Administración no se toca. Todo sale de tokens.css.
  */
 
 .cuentas {
@@ -22,7 +22,23 @@
   border-radius: var(--r-lg);
   color: var(--c-texto-2);
   font-size: var(--t-base);
+  font-weight: 600;
   text-align: center;
+}
+
+/* Sin coincidencias dentro del panel: el marco ya lo da el panel. */
+.cuentas__vacio--tabla {
+  display: grid;
+  justify-items: center;
+  gap: var(--e-3);
+  margin: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.cuentas__vacio--tabla p {
+  margin: 0;
 }
 
 .cuentas__error {
@@ -30,6 +46,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--e-4);
+  flex-wrap: wrap;
   padding: var(--e-4) var(--e-5);
   background: var(--c-error-tenue);
   border: 1px solid var(--c-error);
@@ -47,7 +64,7 @@
   align-items: flex-start;
   gap: var(--e-3);
   padding: var(--e-3) var(--e-4);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   font-size: var(--t-sm);
   background: var(--c-error-tenue);
   border: 1px solid var(--c-error);
@@ -70,17 +87,25 @@
 }
 
 .cuentas__aviso-cerrar {
+  display: grid;
+  width: 28px;
+  height: 28px;
   margin-left: auto;
-  background: transparent;
-  border: 0;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
   color: currentColor;
   font-size: 1.25rem;
   line-height: 1;
-  cursor: pointer;
+  transition: background var(--trans-boton);
+}
+
+.cuentas__aviso-cerrar:hover {
+  background: rgba(18, 35, 61, 0.08);
 }
 
 /* -------------------------------------------------------------
-   Barra: buscador y Actualizar
+   Barra: buscador, «Solo lectura» y Actualizar
    ------------------------------------------------------------- */
 .cuentas__barra {
   display: flex;
@@ -99,7 +124,7 @@
 
 .cuentas__buscador-icono {
   position: absolute;
-  left: 10px;
+  left: 12px;
   color: var(--c-texto-3);
   display: flex;
   align-items: center;
@@ -108,33 +133,92 @@
 
 .cuentas__buscador-input {
   width: 100%;
-  padding: 7px 30px 7px 32px;
+  height: var(--alto-control-compacto);
+  padding: 0 34px 0 36px;
   border: 1px solid var(--c-borde-fuerte);
   border-radius: var(--r-md);
   background: var(--c-superficie);
   color: var(--c-texto);
   font-family: var(--fuente);
   font-size: var(--t-sm);
+  transition: border-color var(--trans), box-shadow var(--trans);
+}
+
+.cuentas__buscador-input::placeholder {
+  color: var(--c-texto-3);
+}
+
+.cuentas__buscador-input:hover {
+  border-color: var(--c-borde-tarjeta-activo);
+}
+
+.cuentas__buscador-input:focus-visible {
+  border-color: var(--c-acento);
+  box-shadow: var(--s-foco);
+  outline: none;
 }
 
 .cuentas__buscador-limpiar {
   position: absolute;
-  right: 8px;
-  background: transparent;
-  border: 0;
+  right: 6px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--r-sm);
   color: var(--c-texto-3);
-  font-size: 1rem;
-  cursor: pointer;
+  font-size: 1.125rem;
+  line-height: 1;
+  transition: color var(--trans-boton), background var(--trans-boton);
+}
+
+.cuentas__buscador-limpiar:hover {
+  background: var(--c-superficie-2);
+  color: var(--c-texto);
 }
 
 /* -------------------------------------------------------------
-   Tabla de cuentas (solo lectura)
+   Panel: conteo por estado y tabla de cuentas (solo lectura)
    ------------------------------------------------------------- */
-.cuentas__tabla-caja {
-  overflow-x: auto;
+.cuentas__panel {
+  overflow: hidden;
   background: var(--c-superficie);
   border: 1px solid var(--c-borde);
   border-radius: var(--r-lg);
+  box-shadow: 0 2px 8px rgba(18, 35, 61, 0.04);
+}
+
+.cuentas__panel-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+  min-height: 48px;
+  padding: var(--e-2) var(--e-4);
+  background: var(--c-superficie-2);
+  border-bottom: 1px solid var(--c-borde);
+}
+
+.cuentas__conteo {
+  margin: 0;
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.cuentas__estados {
+  display: flex;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cuentas__tabla-caja {
+  overflow-x: auto;
 }
 
 .cuentas__tabla {
@@ -145,7 +229,7 @@
 
 .cuentas__tabla th,
 .cuentas__tabla td {
-  padding: 10px 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--c-borde);
   text-align: left;
   vertical-align: middle;
@@ -153,10 +237,10 @@
 
 .cuentas__tabla thead th {
   color: var(--c-texto-2);
-  background: var(--c-superficie-2);
+  background: var(--c-superficie);
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.055em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -165,10 +249,96 @@
   border-bottom: 0;
 }
 
+.cuentas__tabla tbody td {
+  color: var(--c-texto-2);
+}
+
+.cuentas__tabla tbody td:nth-child(2) {
+  color: var(--c-texto);
+  font-weight: 600;
+}
+
+.cuentas__tabla tbody td:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cuentas__usuario,
+.cuentas__tabla tbody td.cuentas__usuario {
+  color: var(--c-texto);
+  font-weight: 800;
+}
+
+/* Cuenta dada de baja: fondo tenue y su etiqueta «Inactiva»; el texto conserva
+   su contraste (nada de bajarle la opacidad). */
 .cuentas__fila--inactiva {
   background: var(--c-superficie-2);
 }
 
-.cuentas__usuario {
-  font-weight: 700;
+.cuentas__tabla tbody td.cuentas__nunca {
+  color: var(--c-texto-3);
+  font-style: italic;
+}
+
+/* -------------------------------------------------------------
+   Pantallas pequeñas: cada cuenta pasa a ser una tarjeta
+   ------------------------------------------------------------- */
+@media (max-width: 720px) {
+  .cuentas__buscador {
+    flex: 1 1 100%;
+  }
+
+  .cuentas__tabla thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .cuentas__tabla,
+  .cuentas__tabla tbody {
+    display: block;
+  }
+
+  .cuentas__tabla tbody tr {
+    display: grid;
+    gap: 4px;
+    padding: var(--e-3) var(--e-4);
+    border-bottom: 1px solid var(--c-borde);
+  }
+
+  .cuentas__tabla tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .cuentas__tabla tbody td,
+  .cuentas__tabla tbody tr:last-child td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--e-3);
+    padding: 2px 0;
+    border-bottom: 0;
+    text-align: right;
+    white-space: normal;
+  }
+
+  .cuentas__tabla tbody td::before {
+    content: attr(data-label);
+    color: var(--c-texto-2);
+    font-size: var(--t-xs);
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-align: left;
+    text-transform: uppercase;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cuentas__buscador-input,
+  .cuentas__buscador-limpiar,
+  .cuentas__aviso-cerrar {
+    transition: none;
+  }
 }
