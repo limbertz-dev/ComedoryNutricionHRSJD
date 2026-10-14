@@ -65,23 +65,23 @@ const marcacionFixture = (cambios = {}) => ({
 // -------------------------------------------------------------
 // 1. Permisos
 // -------------------------------------------------------------
-test('permisos: cocinera sigue en [vivo], jefa y sistemas abren supervision y ya no vivo, seccion guardada vivo -> supervision', () => {
+test('permisos: cocinera sigue en [vivo], la jefa abre supervision y ya no vivo, sistemas ya no ve supervision', () => {
   // Cocinera sigue en ['vivo']
   assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
   assert.equal(puedeVerSeccion('cocinera', 'vivo'), true);
   assert.equal(puedeVerSeccion('cocinera', 'supervision'), false);
 
-  // Jefa y Sistemas abren 'supervision' y ya no 'vivo'
+  // La jefa abre 'supervision' y ya no 'vivo'; sistemas conserva solo sus tres secciones
   assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
-  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin', 'monitoreo']);
+  assert.deepEqual(seccionesPermitidas('sistemas'), ['reglas', 'admin', 'monitoreo']);
   assert.equal(puedeVerSeccion('jefa', 'supervision'), true);
   assert.equal(puedeVerSeccion('jefa', 'vivo'), false);
-  assert.equal(puedeVerSeccion('sistemas', 'supervision'), true);
+  assert.equal(puedeVerSeccion('sistemas', 'supervision'), false);
   assert.equal(puedeVerSeccion('sistemas', 'vivo'), false);
 
-  // Sección guardada 'vivo' -> 'supervision' para jefa y sistemas
+  // Sección guardada 'vivo' -> 'supervision' para la jefa; sistemas cae en Reglas
   assert.equal(resolverSeccionGuardada('jefa', 'vivo'), 'supervision');
-  assert.equal(resolverSeccionGuardada('sistemas', 'vivo'), 'supervision');
+  assert.equal(resolverSeccionGuardada('sistemas', 'vivo'), 'reglas');
 
   // Cocinera con 'vivo' guardada permanece en 'vivo'
   assert.equal(resolverSeccionGuardada('cocinera', 'vivo'), 'vivo');
