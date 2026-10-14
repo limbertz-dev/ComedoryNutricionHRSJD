@@ -4,6 +4,7 @@ import Etiqueta from '../ui/Etiqueta.jsx';
 import GaugeRaciones from '../ui/GaugeRaciones.jsx';
 import Tarjeta from '../ui/Tarjeta.jsx';
 import { obtenerDiaPersonal, obtenerUltimasMarcaciones } from '../../api.js';
+import { LIMITE_MARCACIONES_COCINA, programarCicloCocina } from '../../cocinaEnVivo.js';
 import useConsultaApi from '../../hooks/useConsultaApi.js';
 import Boton from '../ui/Boton.jsx';
 import { IconoBuscar, IconoCheck, IconoEquis, IconoHuella } from '../ui/Iconos.jsx';
@@ -87,6 +88,71 @@ function FiltroComida({ activo, onCambiar }) {
   );
 }
 
+/** Texto del origen de una marcación; null si no dejó fila persistida. */
+export function etiquetaDeOrigen(origen) {
+  if (origen === 'asistencia_manual') return 'Registro manual';
+  if (origen === 'lectura_biometrica') return 'Lectura biométrica';
+  return null;
+}
+
+/**
+ * Fila de la lista con la misma forma que la marcación en vivo, para que el
+ * escenario y la barra de comidas la muestren igual. `id` es la clave del
+ * evento: el id numérico se repite entre lecturas y asistencias manuales.
+ */
+export function eventoDeFila(fila) {
+  const manual = fila.origen === 'asistencia_manual';
+  return {
+    id: fila.clave,
+    origen: fila.origen ?? null,
+    valido: fila.valido,
+    titulo: manual && fila.valido ? 'Registro manual' : fila.titulo,
+    detalle: manual
+      ? 'Ración registrada a mano desde Supervisión'
+      : fila.valido
+        ? 'Ración habilitada — comensal registrado'
+        : 'Marcación no habilitada para este turno',
+    hora: fila.hora,
+    persona: {
+      id: fila.persona?.id ?? null,
+      nombre: fila.persona?.nombre,
+      categoria: fila.persona?.categoria,
+      legajo: fila.persona?.legajo ?? '—',
+    },
+  };
+}
+
+/**
+ * Lista de la tarjeta: las filas del servidor y, al tope, la marcación que
+ * envió esta pantalla mientras su fila guardada no llegue. Se deduplica por
+ * `claveEvento` (origen + id): una asistencia manual con el mismo id numérico
+ * que la lectura enviada es otro evento y no la reemplaza.
+ */
+export function filasConPropia(marcaciones, evento) {
+  const guardadas = marcaciones ?? [];
+  if (!evento) return guardadas;
+  if (evento.claveEvento && guardadas.some((fila) => fila.clave === evento.claveEvento)) {
+    return guardadas;
+  }
+  return [{
+    id: `local-${evento.id}`,
+    clave: `local-${evento.id}`,
+    origen: evento.origen ?? null,
+    valido: evento.valido,
+    titulo: evento.titulo,
+    hora: evento.hora,
+    // evento.tiempo y evento.comida_id vienen de la misma respuesta de
+    // marcarAsistencia que ya usa el resto de la pantalla.
+    comida: evento.tiempo ?? null,
+    comidaId: evento.comida_id ?? null,
+    persona: {
+      id: evento.persona.id,
+      nombre: evento.persona.nombre,
+      categoria: evento.persona.categoria,
+    },
+  }, ...guardadas];
+}
+
 /**
  * Sección principal: emula el puesto de control del comedor.
  *
@@ -105,6 +171,11 @@ function FiltroComida({ activo, onCambiar }) {
  * En simulación, `fechaServidor` es el día del reloj del servidor
  * ("YYYY-MM-DD") y `versionReloj` cambia cada vez que alguien mueve ese
  * reloj; fuera de simulación no llegan y todo sigue como siempre.
+ *
+ * La lista y el estado del comedor (`recargarEstado`, de App) se releen en
+ * ciclos de 3 s (`programarCicloCocina`): así llega a cocina lo registrado
+ * en otro puesto, como la ración manual de la jefa. Una marcación no prueba
+ * que haya un lector conectado.
  */
 export default function PantallaEnVivo({
   evento,
@@ -115,22 +186,25 @@ export default function PantallaEnVivo({
   onMarcarManual,
   fechaServidor,
   versionReloj = 0,
+  recargarEstado,
 }) {
   /*
-   * Última marcación ya conocida al entrar en la sección. El evento vive en
-   * App, así que al volver desde Resumen o Reportes sigue ahí: sin esta marca,
-   * el flash se dispararía de nuevo por una marcación vieja, como si el lector
-   * acabara de leer una huella.
+   * Lo que se muestra como «recién ocurrido»: la marcación que envió esta
+   * pantalla (`evento`, de App) o la novedad que trajo el ciclo. Al montar,
+   * el evento que App ya tenía se muestra sin flash: al volver desde otra
+   * sección no debe parecer que el lector acaba de leer una huella.
    */
-  const eventoAlMontar = useRef(evento?.id ?? null);
+  const [enVivo, setEnVivo] = useState(() => (
+    evento ? { llave: `local-${evento.id}`, evento, flash: false } : null
+  ));
 
-  /* El flash es la reacción a una lectura en vivo, nunca a elegir una fila de
-     la lista: por eso sigue atado al `evento` real y no al mostrado. */
-  const mostrarFlash = !leyendo && evento !== null && evento.id !== eventoAlMontar.current;
+  /* El flash es la reacción a una marcación en vivo, nunca a elegir una
+     fila de la lista. */
+  const mostrarFlash = !leyendo && enVivo?.flash === true;
 
-  /* Fila de la lista elegida a mano: mientras haya una, manda sobre la
-     marcación en vivo tanto en el escenario como en la barra de comidas. */
-  const [idSeleccionado, setIdSeleccionado] = useState(null);
+  /* Fila de la lista elegida a mano (por su clave): mientras haya una, manda
+     sobre la marcación en vivo en el escenario y en la barra de comidas. */
+  const [claveSeleccionada, setClaveSeleccionada] = useState(null);
 
   /* Texto para acotar la lista por nombre o legajo, sobre lo ya cargado. */
   const [busqueda, setBusqueda] = useState('');
@@ -157,73 +231,89 @@ export default function PantallaEnVivo({
     if (valida) setFiltroComida(valida);
   }, [comidaTurno]);
 
-  /* Lecturas guardadas de hoy: sin fecha, el servidor ya consulta el día
-     actual por su cuenta. */
-  const consultarMarcaciones = useCallback(
-    (signal) => obtenerUltimasMarcaciones({ signal }),
-    [],
-  );
-  const {
-    datos: marcaciones,
-    cargando: cargandoMarcaciones,
-    error: errorMarcaciones,
-    recargar: recargarMarcaciones,
-  } = useConsultaApi(consultarMarcaciones);
-
   /*
-   * Cada marcación nueva vuelve a pedir la lista, con `conservar` para que la
-   * tarjeta no parpadee: lo que ya está en pantalla sigue ahí hasta que llega
-   * la respuesta. También limpia la fila elegida a mano, para que el
-   * escenario vuelva a seguir la marcación recién llegada. La marca evita
-   * repetir esto al cambiar de fecha o al volver a la sección con un evento
-   * viejo todavía en el estado de App.
+   * Lecturas y registros manuales de hoy (sin fecha, el servidor consulta el
+   * día actual), en ciclos junto con el estado del comedor. Un fallo conserva
+   * la lista anterior con un aviso de desactualización.
    */
+  const [marcaciones, setMarcaciones] = useState(null);
+  const [errorMarcaciones, setErrorMarcaciones] = useState('');
+  const cargandoMarcaciones = marcaciones === null && !errorMarcaciones;
+
   const idEvento = evento?.id ?? null;
   const eventoRecargado = useRef(idEvento);
+  /* Mientras se lee una huella o App trae un evento que esta pantalla todavía
+     no registró como propio, el ciclo no anuncia novedades: la marcación
+     propia no debe aparecer dos veces como «recién llegada». */
+  const deteccionEnPausa = useRef(false);
+  deteccionEnPausa.current = leyendo || idEvento !== eventoRecargado.current;
+  const recargarEstadoRef = useRef(recargarEstado);
+  recargarEstadoRef.current = recargarEstado;
+  const ciclo = useRef(null);
+
+  useEffect(() => {
+    const control = programarCicloCocina({
+      consultarMarcaciones: ({ signal }) => obtenerUltimasMarcaciones({
+        limite: LIMITE_MARCACIONES_COCINA, signal,
+      }),
+      // App ya pide el estado al montar la sección.
+      refrescarEstado: ({ origen, signal }) => (origen === 'inicial'
+        ? undefined
+        : recargarEstadoRef.current?.({ conservar: true, signal })),
+      puedeDetectar: () => !deteccionEnPausa.current,
+      alActualizar: ({ filas: recibidas, error, nueva }) => {
+        if (error) {
+          setErrorMarcaciones(error);
+          return;
+        }
+        setMarcaciones(recibidas);
+        setErrorMarcaciones('');
+        if (nueva) {
+          setEnVivo({ llave: nueva.clave, evento: eventoDeFila(nueva), flash: true });
+          setClaveSeleccionada(null);
+        }
+      },
+    });
+    ciclo.current = control;
+    return () => {
+      control.cancelar();
+      ciclo.current = null;
+    };
+  }, []);
+
+  /*
+   * Marcación enviada desde esta pantalla: pasa a ser lo «recién ocurrido»,
+   * su clave queda como propia (el ciclo no la vuelve a anunciar) y se pide
+   * un ciclo para traer la fila guardada y el cupo. La marca evita repetirlo
+   * al volver a la sección con un evento viejo todavía en el estado de App.
+   */
   useEffect(() => {
     if (idEvento === null || eventoRecargado.current === idEvento) return;
     eventoRecargado.current = idEvento;
-    recargarMarcaciones({ conservar: true });
-    setIdSeleccionado(null);
-  }, [idEvento, recargarMarcaciones]);
+    deteccionEnPausa.current = leyendo;
+    ciclo.current?.registrarPropia(evento.claveEvento);
+    setEnVivo({ llave: `local-${idEvento}`, evento, flash: true });
+    setClaveSeleccionada(null);
+    ciclo.current?.solicitar();
+  }, [idEvento, evento, leyendo]);
 
   /* Mover el reloj de simulación cambia el día o la franja: la lista se
-     vuelve a pedir, sin vaciarse mientras llega. */
+     vuelve a pedir y lo que traiga no se anuncia como recién ocurrido. */
   const versionRecargada = useRef(versionReloj);
   useEffect(() => {
     if (versionRecargada.current === versionReloj) return;
     versionRecargada.current = versionReloj;
-    recargarMarcaciones({ conservar: true });
-  }, [versionReloj, recargarMarcaciones]);
+    ciclo.current?.reiniciarReferencia();
+    ciclo.current?.solicitar();
+  }, [versionReloj]);
 
   /*
-   * Mientras esa consulta viaja, la marcación recién enviada se muestra al
-   * tope por su cuenta: `lectura_id` es la fila que el servidor acaba de
-   * guardar, así que en cuanto la lista la trae, la copia local desaparece
-   * sola y nunca se ve dos veces.
+   * Mientras el ciclo no trae la fila guardada, la marcación recién enviada
+   * se muestra al tope por su cuenta. `claveEvento` es la clave de esa fila
+   * (lectura o asistencia manual, nunca el id numérico solo), así que en
+   * cuanto la lista la trae, la copia local desaparece y no se ve dos veces.
    */
-  const filas = useMemo(() => {
-    const guardadas = marcaciones ?? [];
-    const propia = evento
-      && !guardadas.some((fila) => fila.id === evento.lectura_id)
-      ? [{
-          id: `local-${evento.id}`,
-          valido: evento.valido,
-          titulo: evento.titulo,
-          hora: evento.hora,
-          // evento.tiempo y evento.comida_id vienen de la misma respuesta de
-          // marcarAsistencia que ya usa el resto de la pantalla.
-          comida: evento.tiempo ?? null,
-          comidaId: evento.comida_id ?? null,
-          persona: {
-            id: evento.persona.id,
-            nombre: evento.persona.nombre,
-            categoria: evento.persona.categoria,
-          },
-        }]
-      : [];
-    return [...propia, ...guardadas];
-  }, [marcaciones, evento]);
+  const filas = useMemo(() => filasConPropia(marcaciones, evento), [marcaciones, evento]);
 
   /* Filtro estricto por tiempo de comida, más el texto de búsqueda por
      nombre o legajo, sobre lo ya cargado: nunca se muestran marcaciones de
@@ -244,29 +334,15 @@ export default function PantallaEnVivo({
      vivo: así el escenario y la barra de comidas muestran cualquiera de los
      dos sin distinguir de dónde vino. */
   const eventoSeleccionado = useMemo(() => {
-    if (idSeleccionado === null) return null;
-    const fila = filas.find((f) => f.id === idSeleccionado);
-    if (!fila) return null;
-    return {
-      id: fila.id,
-      valido: fila.valido,
-      titulo: fila.titulo,
-      detalle: fila.valido
-        ? 'Ración habilitada — comensal registrado'
-        : 'Marcación no habilitada para este turno',
-      hora: fila.hora,
-      persona: {
-        id: fila.persona?.id ?? null,
-        nombre: fila.persona?.nombre,
-        categoria: fila.persona?.categoria,
-        legajo: fila.persona?.legajo ?? '—',
-      },
-    };
-  }, [idSeleccionado, filas]);
+    if (claveSeleccionada === null) return null;
+    const fila = filas.find((f) => f.clave === claveSeleccionada);
+    return fila ? eventoDeFila(fila) : null;
+  }, [claveSeleccionada, filas]);
 
   /* Lo que manda en el escenario y en la barra de comidas: la fila elegida a
      mano si hay una, o si no, la marcación en vivo. */
-  const eventoMostrado = eventoSeleccionado ?? evento;
+  const eventoMostrado = eventoSeleccionado ?? enVivo?.evento ?? null;
+  const origenMostrado = etiquetaDeOrigen(eventoMostrado?.origen);
   const mostrarResultado = !leyendo && eventoMostrado !== null;
   const personaMostrada = eventoMostrado?.persona;
 
@@ -294,8 +370,8 @@ export default function PantallaEnVivo({
       {mostrarFlash
         ? createPortal(
             <div
-              key={evento.id}
-              className={`vivo__flash vivo__flash--${evento.valido ? 'exito' : 'error'}`}
+              key={enVivo.llave}
+              className={`vivo__flash vivo__flash--${enVivo.evento.valido ? 'exito' : 'error'}`}
               aria-hidden="true"
             />,
             document.body,
@@ -306,9 +382,10 @@ export default function PantallaEnVivo({
         <div className="vivo__columna-izquierda">
           <section className="escenario">
             <header className="escenario__barra">
+              {/* Rótulo neutral: la pantalla no sabe si hay un lector
+                  conectado, así que no muestra un indicador de conexión. */}
               <span className="escenario__lector">
-                <span className="escenario__pulso" aria-hidden="true" />
-                Lector biométrico · Comedor planta baja
+                Control de raciones · Comedor planta baja
               </span>
               <Etiqueta tono="neutro">
                 {pantalla ? `${pantalla.totales_del_dia.raciones_servidas} raciones del día` : 'Consultando estado'}
@@ -383,6 +460,7 @@ export default function PantallaEnVivo({
                     <p className="resultado__nombre">{personaMostrada?.nombre ?? 'Huella no reconocida'}</p>
 
                     <div className="resultado__meta">
+                      {origenMostrado ? <Etiqueta tono="neutro">{origenMostrado}</Etiqueta> : null}
                       <Etiqueta tono="neutro">{personaMostrada.categoria}</Etiqueta>
                       <span className="resultado__legajo">Legajo {personaMostrada.legajo}</span>
                       <span className="resultado__hora">{eventoMostrado.hora}</span>
@@ -458,10 +536,16 @@ export default function PantallaEnVivo({
               ) : null}
             </div>
 
+            {errorMarcaciones && filas.length > 0 ? (
+              <p className="marcaciones__desactualizado" role="alert">
+                Sin actualizar: se muestran las últimas marcaciones recibidas. {errorMarcaciones}
+              </p>
+            ) : null}
+
             {errorMarcaciones && filas.length === 0 ? (
               <p className="historial__vacio" role="alert">
                 {errorMarcaciones}{' '}
-                <Boton variante="fantasma" onClick={recargarMarcaciones}>Reintentar</Boton>
+                <Boton variante="fantasma" onClick={() => ciclo.current?.solicitar()}>Reintentar</Boton>
               </p>
             ) : cargandoMarcaciones && filas.length === 0 ? (
               <p className="historial__vacio" role="status">Consultando las marcaciones del día…</p>
@@ -479,18 +563,18 @@ export default function PantallaEnVivo({
               <ul className="historial">
                 {filasFiltradas.map((registro) => (
                   <li
-                    key={registro.id}
+                    key={registro.clave}
                     role="button"
                     tabIndex={0}
-                    aria-pressed={idSeleccionado === registro.id}
+                    aria-pressed={claveSeleccionada === registro.clave}
                     className={`historial__fila historial__fila--${
                       registro.valido ? 'exito' : 'error'
-                    }${idSeleccionado === registro.id ? ' historial__fila--activa' : ''}`}
-                    onClick={() => setIdSeleccionado(registro.id)}
+                    }${claveSeleccionada === registro.clave ? ' historial__fila--activa' : ''}`}
+                    onClick={() => setClaveSeleccionada(registro.clave)}
                     onKeyDown={(e) => {
                       if (e.key !== 'Enter' && e.key !== ' ') return;
                       e.preventDefault();
-                      setIdSeleccionado(registro.id);
+                      setClaveSeleccionada(registro.clave);
                     }}
                   >
                     <span className="historial__textos">
@@ -498,6 +582,7 @@ export default function PantallaEnVivo({
                       <span className="historial__sub">
                         {registro.persona.categoria}
                         {' · '}{registro.hora}
+                        {registro.origen === 'asistencia_manual' ? ' · Registro manual' : null}
                       </span>
                     </span>
                     <span className="historial__marca" aria-label={registro.titulo} data-tooltip={registro.titulo}>
