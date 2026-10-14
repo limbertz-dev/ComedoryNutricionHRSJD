@@ -21,6 +21,7 @@ from app.consultas.derecho import (
     excluye_enfermeria_hoy,
     no_es_enfermeria,
 )
+from app.consultas.horarios import estado_en, rige_en, ventanas_del_dia
 from app.core import reloj
 from app.logica.marcacion import ComidaEnCurso, resolver_comida_en_curso
 from app.modelos.comedor import (
@@ -236,14 +237,17 @@ def estado(
     )
 
 
-def _franja_vigente(horario, hora, dia):
+def _franja_vigente(horario, momento):
     """El predicado que une una lectura con un horario que la cubre.
 
-    `horario` son las columnas de un horario (`alias.c`); `hora` y `dia`,
-    expresiones sobre la marca temporal de la lectura. Solo dice si un
-    horario es CANDIDATO: puede haber varios, y elegir entre ellos es cosa de
-    `_comida_por_lectura`.
+    `horario` son las columnas de un horario (`alias.c`); `momento`, la
+    `fecha_hora` completa de la lectura. La versión cuenta si REGÍA en ese
+    instante (`rige_en`), con microsegundos: un cambio de horario no
+    reclasifica lo que ocurrió antes de guardarse. Solo dice si un horario es
+    CANDIDATO: puede haber varios en datos heredados, y elegir entre ellos es
+    cosa de `_comida_por_lectura`.
     """
+    hora = func.time(momento)
     cruza_medianoche = horario.hora_fin < horario.hora_inicio
     dentro_normal = and_(
         ~cruza_medianoche,
@@ -258,12 +262,7 @@ def _franja_vigente(horario, hora, dia):
         ),
     )
     return and_(
-        horario.activo == 1,
-        horario.vigente_desde <= dia,
-        or_(
-            horario.vigente_hasta.is_(None),
-            horario.vigente_hasta >= dia,
-        ),
+        rige_en(horario, momento),
         or_(dentro_normal, dentro_cruzada),
     )
 
@@ -317,12 +316,11 @@ def _comida_por_lectura(
     lectura = lecturas("lectura_resuelta")
     candidato = horarios("horario_candidato")
     mas_nuevo = horarios("horario_mas_nuevo")
-    hora = func.time(lectura.c.fecha_hora)
-    fecha = func.date(lectura.c.fecha_hora)
+    momento = lectura.c.fecha_hora
     hay_uno_mas_nuevo = (
         select(mas_nuevo.c.id)
         .where(
-            _franja_vigente(mas_nuevo.c, hora, fecha),
+            _franja_vigente(mas_nuevo.c, momento),
             mas_nuevo.c.vigente_desde > candidato.c.vigente_desde,
         )
         .exists()
@@ -339,7 +337,7 @@ def _comida_por_lectura(
             ).label("comida_id"),
         )
         .select_from(lectura)
-        .join(candidato, _franja_vigente(candidato.c, hora, fecha))
+        .join(candidato, _franja_vigente(candidato.c, momento))
         .where(*_del_dia(lectura.c.fecha_hora, dia))
         .where(~hay_uno_mas_nuevo)
         .group_by(lectura.c.id)
@@ -476,38 +474,6 @@ def _componer_ventana(sesion: Session, lecturas, manuales, limite: int) -> list[
     ]
 
 
-def _horarios_vigentes(
-    sesion: Session, dia: date
-) -> list[tuple[int, str, time, time]]:
-    """Una fila por comida que rige ese día, en orden cronológico.
-
-    Si una comida tiene más de un horario vigente, el de `vigente_desde` más
-    reciente (la misma regla que `resolver_comida_en_curso`).
-    """
-    filas = sesion.execute(
-        select(
-            HorarioComida.comida_id,
-            Comida.nombre,
-            HorarioComida.hora_inicio,
-            HorarioComida.hora_fin,
-        )
-        .join(Comida, Comida.id == HorarioComida.comida_id)
-        .where(HorarioComida.activo == 1)
-        .where(HorarioComida.vigente_desde <= dia)
-        .where(
-            or_(
-                HorarioComida.vigente_hasta.is_(None),
-                HorarioComida.vigente_hasta >= dia,
-            )
-        )
-        .order_by(HorarioComida.vigente_desde.desc())
-    ).all()
-    vigentes: dict[int, tuple[int, str, time, time]] = {}
-    for comida_id, nombre, inicio, fin in filas:
-        vigentes.setdefault(comida_id, (comida_id, nombre, inicio, fin))
-    return sorted(vigentes.values(), key=lambda fila: (fila[2], fila[0]))
-
-
 def _servidas_por_comida(
     sesion: Session, dia: date
 ) -> tuple[dict[int, int], dict[int, int]]:
@@ -569,27 +535,19 @@ def _rechazos_por_comida(
     return rechazos, sin_comida
 
 
-def _estado_franja(dia: date, inicio: time, fin: time, ahora: datetime) -> str:
-    """Dónde está la franja respecto al reloj: pendiente | en_curso | cerrada."""
-    abre = datetime.combine(dia, inicio)
-    cierra = datetime.combine(dia, fin)
-    if fin < inicio:
-        cierra += timedelta(days=1)
-    if ahora < abre:
-        return "pendiente"
-    if ahora < cierra:
-        return "en_curso"
-    return "cerrada"
-
-
 def comidas_del_dia(
     sesion: Session, fecha: date | None = None
 ) -> ResumenComidas:
-    """Una fila por comida vigente del día, para la supervisión.
+    """Una fila por comida con ventana efectiva ese día, para la supervisión.
 
     Solo lectura: previstas (derecho), servidas y manuales (asistencias por
     `fecha_comida`) y rechazos del día del reloj resueltos con la misma
     lógica de franja que `ultimas_marcaciones`, sin tope.
+
+    El estado sale de las VENTANAS EFECTIVAS del día (app/consultas/horarios.py),
+    no de la franja que hoy esté configurada: un horario guardado por la tarde
+    no redefine un almuerzo que ya cerró por la mañana. `hora_inicio` y
+    `hora_fin` son la franja de la versión de la última ventana.
     """
     dia = fecha or reloj.hoy()
     servidas, manuales = _servidas_por_comida(sesion, dia)
@@ -597,19 +555,19 @@ def comidas_del_dia(
     ahora = reloj.ahora()
     comidas = [
         ComidaDelDia(
-            comida_id=comida_id,
-            comida=nombre,
-            hora_inicio=inicio,
-            hora_fin=fin,
-            estado=_estado_franja(dia, inicio, fin, ahora),
-            previstas=contar_personas_con_derecho(sesion, comida_id, dia),
-            servidas=servidas.get(comida_id, 0),
-            manuales=manuales.get(comida_id, 0),
+            comida_id=c.comida_id,
+            comida=c.comida,
+            hora_inicio=c.ultima.hora_inicio,
+            hora_fin=c.ultima.hora_fin,
+            estado=estado_en(c.ventanas, ahora),
+            previstas=contar_personas_con_derecho(sesion, c.comida_id, dia),
+            servidas=servidas.get(c.comida_id, 0),
+            manuales=manuales.get(c.comida_id, 0),
             rechazos_por_motivo={
-                motivo: rechazos.get((comida_id, motivo), 0)
+                motivo: rechazos.get((c.comida_id, motivo), 0)
                 for motivo in MOTIVOS_POR_COMIDA
             },
         )
-        for comida_id, nombre, inicio, fin in _horarios_vigentes(sesion, dia)
+        for c in ventanas_del_dia(sesion, dia)
     ]
     return ResumenComidas(fecha=dia, comidas=comidas, rechazos_sin_comida=sin_comida)

@@ -14,6 +14,7 @@ Otro nombre de base: TEST_DB_NAME=otra_test (tiene que terminar en _test).
 
 import os
 import re
+from datetime import date
 from pathlib import Path
 
 # Antes de importar la app: la configuración se lee una sola vez al importar.
@@ -135,6 +136,61 @@ def crear_usuario():
             sesion.add(usuario)
             sesion.commit()
             return usuario.id
+
+    return crear
+
+
+@pytest.fixture
+def version_derecho():
+    """FIXTURE EXCEPCIONAL: inserta una versión de `reglas_derecho`.
+
+    La API ya no crea versiones de derecho (no hay POST), pero la evaluación
+    del derecho por `fecha_turno` sigue necesitando versiones pasadas, de hoy
+    y futuras para probarse. Por eso existe esta única vía interna, y solo
+    acá:
+
+      · dentro de tests/ (no hay equivalente en app/),
+      · solo contra la base `_test` (se comprueba en cada llamada),
+      · solo INSERT en reglas_derecho / reglas_derecho_novedad.
+
+    No es una escritura general: la limpieza de ambas tablas ya la hacen
+    `tablas_auth_limpias` y `reglas_en_base`.
+    """
+
+    def crear(
+        desde: date,
+        duracion_minima_horas: int,
+        *,
+        novedades: tuple[str, ...] = (),
+        excluir_enfermeria: bool = True,
+    ) -> int:
+        assert config.db_name == NOMBRE_BASE and config.db_name.endswith("_test"), (
+            "version_derecho solo escribe en la base de pruebas"
+        )
+        with SesionLocal() as sesion:
+            regla_id = sesion.execute(
+                text(
+                    "INSERT INTO reglas_derecho (vigente_desde, duracion_minima_horas, "
+                    "excluir_enfermeria, motivo, creada_por_cuenta) "
+                    "VALUES (:desde, :horas, :excluir, :motivo, NULL)"
+                ),
+                {
+                    "desde": desde,
+                    "horas": duracion_minima_horas,
+                    "excluir": 1 if excluir_enfermeria else 0,
+                    "motivo": "Versión de prueba insertada por la fixture",
+                },
+            ).lastrowid
+            for tipo in sorted(set(novedades)):
+                sesion.execute(
+                    text(
+                        "INSERT INTO reglas_derecho_novedad (regla_id, tipo_novedad) "
+                        "VALUES (:regla, :tipo)"
+                    ),
+                    {"regla": regla_id, "tipo": tipo},
+                )
+            sesion.commit()
+        return regla_id
 
     return crear
 

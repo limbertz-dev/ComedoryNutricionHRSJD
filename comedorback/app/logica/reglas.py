@@ -1,30 +1,47 @@
-"""Reglas versionadas de derecho y horarios, solo para root.
+"""Reglas de derecho (solo lectura) y horarios inmediatos, solo para root.
 
-Todo cambio es una versión nueva con `vigente_desde` hoy o futuro; nunca
-se edita ni se borra una vigente o pasada. Solo se borra una programada.
+HORARIOS. Guardar un horario cierra la versión abierta de la comida y abre otra
+desde el instante del servidor (`reloj.ahora()`, con microsegundos), dentro de
+una transacción que empieza tomando el cerrojo `horarios_comida` (tabla
+`cerrojos`). No hay fecha de vigencia, programación futura ni motivo escrito
+por el usuario; la auditoría es automática: cuenta del token y `created_at`.
+Nunca se borra ni se reescribe una versión: solo se cierra la abierta.
 
-El solape de horarios se valida contra las otras comidas vigentes en
-`vigente_desde` Y contra sus programadas posteriores dentro del período
-que la nueva versión va a cubrir.
+  · base_horario_id  la versión abierta que el cliente editó. Si ya no es esa,
+                     409 version_desactualizada: otro cambio se coló.
+  · instante         si el reloj no es posterior a toda `vigente_desde` de las
+                     versiones EFECTIVAS (activo=1), 409 instante_no_posterior.
+                     No se avanza el reloj ni se pisa una versión: se informa.
+                     Una fila inactiva, aunque sea futura, no cuenta.
+  · solape           contra la versión abierta de cada OTRA comida, serializado
+                     por el cerrojo (también con `horarios_comida` vacía).
+
+DERECHO. Solo lectura: sus versiones se resuelven en SQL por `fecha_turno`
+(app/consultas/derecho.py) y esta capa ya no crea ni borra ninguna.
 """
 
-from datetime import date, time, timedelta
+from datetime import date, datetime, time
 
-from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
+from app.consultas.horarios import rige_en, version_rige_en
 from app.core import reloj
-from app.modelos.comedor import HorarioComida
-from app.modelos.heredados import Comida, NovedadLaboral
+from app.modelos.comedor import CERROJO_HORARIOS, Cerrojo, HorarioComida
+from app.modelos.heredados import Comida
 from app.modelos.reglas import ReglaDerecho, ReglaDerechoNovedad
 from app.modelos.usuarios import UsuarioSistema
 
 DIA = 24 * 3600
 
+# Errores de MySQL que significan "otro cambio tiene el cerrojo" y no un fallo.
+ESPERA_AGOTADA = 1205
+INTERBLOQUEO = 1213
+
 
 class ErrorRegla(Exception):
-    """Un 4xx con motivo. El endpoint la traduce a ErrorAuth."""
+    """Un error con motivo. El endpoint la traduce a ErrorAuth."""
 
     def __init__(self, status_code: int, motivo: str, detail: str):
         super().__init__(detail)
@@ -33,25 +50,12 @@ class ErrorRegla(Exception):
         self.detail = detail
 
 
+def _codigo_mysql(error: Exception) -> int | None:
+    return getattr(getattr(error, "orig", None), "args", [None])[0]
+
+
 def _es_duplicado(error: IntegrityError) -> bool:
-    codigo = getattr(getattr(error, "orig", None), "args", [None])[0]
-    return codigo == 1062
-
-
-def _exigir_motivo(motivo: str | None) -> str:
-    texto = (motivo or "").strip()
-    if len(texto) < 10:
-        raise ErrorRegla(
-            422, "motivo_obligatorio", "El motivo es obligatorio, 10 o más caracteres."
-        )
-    return texto
-
-
-def _exigir_futura_o_hoy(vigente_desde: date) -> None:
-    if vigente_desde < reloj.hoy():
-        raise ErrorRegla(
-            422, "vigencia_en_el_pasado", "La vigencia no puede ser anterior a hoy."
-        )
+    return _codigo_mysql(error) == 1062
 
 
 def _novedades_por_regla(sesion: Session, ids: list[int]) -> dict[int, list[str]]:
@@ -77,6 +81,9 @@ def _usernames(sesion: Session, ids: set[int]) -> dict[int, str]:
         )
     ).all()
     return {i: u for i, u in filas}
+
+
+# --- derecho (solo lectura) ----------------------------------------------------
 
 
 def _estado(version: ReglaDerecho, vigente_id: int | None, hoy: date) -> str:
@@ -138,125 +145,7 @@ def listar_derecho(sesion: Session) -> dict:
     return {"vigente": vigente_item, "versiones": items}
 
 
-def crear_derecho(
-    sesion: Session,
-    vigente_desde: date,
-    duracion_minima_horas: int,
-    novedades_que_anulan: list[str],
-    excluir_enfermeria: bool,
-    motivo: str,
-    creada_por: UsuarioSistema,
-) -> dict:
-    texto = _exigir_motivo(motivo)
-    _exigir_futura_o_hoy(vigente_desde)
-    limpias = sorted({n.strip() for n in (novedades_que_anulan or []) if n.strip()})
-    existe = sesion.execute(
-        select(ReglaDerecho.id)
-        .where(ReglaDerecho.vigente_desde == vigente_desde)
-        .with_for_update()
-    ).scalar_one_or_none()
-    if existe is not None:
-        raise ErrorRegla(
-            409, "version_en_esa_fecha", "Ya hay una versión con esa vigencia."
-        )
-    version = ReglaDerecho(
-        vigente_desde=vigente_desde,
-        duracion_minima_horas=duracion_minima_horas,
-        excluir_enfermeria=1 if excluir_enfermeria else 0,
-        motivo=texto,
-        creada_por_cuenta=creada_por.id,
-    )
-    sesion.add(version)
-    try:
-        sesion.flush()
-    except IntegrityError as error:
-        sesion.rollback()
-        if _es_duplicado(error):
-            raise ErrorRegla(
-                409, "version_en_esa_fecha", "Ya hay una versión con esa vigencia."
-            ) from error
-        raise
-    for tipo in limpias:
-        sesion.add(ReglaDerechoNovedad(regla_id=version.id, tipo_novedad=tipo))
-    try:
-        sesion.commit()
-    except IntegrityError as error:
-        sesion.rollback()
-        if _es_duplicado(error):
-            raise ErrorRegla(
-                409, "version_en_esa_fecha", "Ya hay una versión con esa vigencia."
-            ) from error
-        raise
-    sesion.refresh(version)
-    hoy = reloj.hoy()
-    vigente_id = sesion.execute(
-        select(ReglaDerecho.id)
-        .where(ReglaDerecho.vigente_desde <= hoy)
-        .order_by(ReglaDerecho.vigente_desde.desc(), ReglaDerecho.id.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    return _version_para_respuesta(
-        version, limpias, creada_por.username, _estado(version, vigente_id, hoy)
-    )
-
-
-def eliminar_derecho(sesion: Session, version_id: int) -> None:
-    version = sesion.execute(
-        select(ReglaDerecho)
-        .where(ReglaDerecho.id == version_id)
-        .with_for_update()
-    ).scalar_one_or_none()
-    if version is None:
-        raise ErrorRegla(404, "version_inexistente", "No existe esa versión.")
-    if version.vigente_desde <= reloj.hoy():
-        raise ErrorRegla(
-            409, "version_ya_vigente", "Solo se puede borrar una versión programada."
-        )
-    sesion.execute(
-        select(ReglaDerechoNovedad.id).where(
-            ReglaDerechoNovedad.regla_id == version.id
-        )
-    )
-    for fila in (
-        sesion.execute(
-            select(ReglaDerechoNovedad).where(
-                ReglaDerechoNovedad.regla_id == version.id
-            )
-        )
-        .scalars()
-        .all()
-    ):
-        sesion.delete(fila)
-    sesion.delete(version)
-    sesion.commit()
-
-
-def listar_novedades(sesion: Session) -> list[str]:
-    hoy = reloj.hoy()
-    vigente_id = sesion.execute(
-        select(ReglaDerecho.id)
-        .where(ReglaDerecho.vigente_desde <= hoy)
-        .order_by(ReglaDerecho.vigente_desde.desc(), ReglaDerecho.id.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    en_vista = {
-        t
-        for (t,) in sesion.execute(
-            select(func.distinct(NovedadLaboral.tipo_novedad))
-        ).all()
-        if t
-    }
-    en_vigente: set[str] = set()
-    if vigente_id is not None:
-        en_vigente = {
-            t
-            for (t,) in sesion.execute(
-                select(ReglaDerechoNovedad.tipo_novedad).where(
-                    ReglaDerechoNovedad.regla_id == vigente_id
-                )
-            ).all()
-        }
-    return sorted(en_vista | en_vigente)
+# --- horarios: solape y respuesta ----------------------------------------------
 
 
 def _a_segundos(momento: time) -> int:
@@ -270,7 +159,9 @@ def _segmentos(inicio: time, fin: time) -> list[tuple[int, int]]:
     return [(ini, out)]
 
 
-def _solapan(a_ini: time, a_fin: time, b_ini: time, b_fin: time) -> bool:
+def franjas_se_solapan(a_ini: time, a_fin: time, b_ini: time, b_fin: time) -> bool:
+    """Dos franjas diarias [inicio, fin) se superponen. La que cruza la
+    medianoche (fin < inicio) cuenta como dos tramos."""
     for s1, e1 in _segmentos(a_ini, a_fin):
         for s2, e2 in _segmentos(b_ini, b_fin):
             if max(s1, s2) < min(e1, e2):
@@ -287,6 +178,14 @@ def _nombres_comidas(sesion: Session, ids: set[int]) -> dict[int, str]:
     return {i: n for i, n in filas}
 
 
+def _estado_horario(horario: HorarioComida) -> str:
+    """vigente = la versión abierta; anterior = cerrada; inactiva = fila con
+    activo=0, que nunca se aplica (no la crea este código)."""
+    if not horario.activo:
+        return "inactiva"
+    return "vigente" if horario.vigente_hasta is None else "anterior"
+
+
 def _horario_para_respuesta(
     horario: HorarioComida, comida: str | None, creada_por: str | None
 ) -> dict:
@@ -301,21 +200,17 @@ def _horario_para_respuesta(
         "vigente_hasta": horario.vigente_hasta,
         "motivo": horario.motivo,
         "creada_por": creada_por,
+        "creada": horario.created_at,
+        "estado": _estado_horario(horario),
     }
 
 
-def listar_horarios(sesion: Session, fecha: date) -> list[dict]:
+def listar_horarios(sesion: Session, momento: datetime) -> list[dict]:
+    """La versión de cada comida que regía en el instante `momento`."""
     filas = (
         sesion.execute(
             select(HorarioComida)
-            .where(HorarioComida.activo == 1)
-            .where(HorarioComida.vigente_desde <= fecha)
-            .where(
-                or_(
-                    HorarioComida.vigente_hasta.is_(None),
-                    HorarioComida.vigente_hasta >= fecha,
-                )
-            )
+            .where(rige_en(HorarioComida, momento))
             .order_by(HorarioComida.vigente_desde.desc(), HorarioComida.id.desc())
         )
         .scalars()
@@ -365,160 +260,178 @@ def historial_horarios(sesion: Session, comida_id: int) -> list[dict]:
     ]
 
 
-def _siguiente_de(
-    sesion: Session, comida_id: int, desde: date
-) -> HorarioComida | None:
-    return sesion.execute(
-        select(HorarioComida)
-        .where(HorarioComida.comida_id == comida_id)
-        .where(HorarioComida.vigente_desde > desde)
-        .order_by(HorarioComida.vigente_desde.asc(), HorarioComida.id.asc())
-        .limit(1)
-        .with_for_update()
-    ).scalar_one_or_none()
+# --- horarios: guardar ---------------------------------------------------------
 
 
-def _anterior_a(
-    sesion: Session, comida_id: int, desde: date
-) -> HorarioComida | None:
-    return sesion.execute(
-        select(HorarioComida)
-        .where(HorarioComida.comida_id == comida_id)
-        .where(HorarioComida.vigente_desde < desde)
-        .order_by(HorarioComida.vigente_desde.desc(), HorarioComida.id.desc())
-        .limit(1)
-        .with_for_update()
-    ).scalar_one_or_none()
-
-
-def _exigir_sin_solape(
-    sesion: Session,
-    comida_id: int,
-    inicio: time,
-    fin: time,
-    desde: date,
-    fin_cobertura: date | None,
-) -> None:
-    otras = (
-        sesion.execute(
-            select(HorarioComida)
-            .where(HorarioComida.comida_id != comida_id)
-            .where(HorarioComida.activo == 1)
-            .order_by(HorarioComida.comida_id, HorarioComida.vigente_desde)
-        )
-        .scalars()
-        .all()
-    )
-    fechas = {desde}
-    for fila in otras:
-        if fila.vigente_desde > desde and (
-            fin_cobertura is None or fila.vigente_desde <= fin_cobertura
-        ):
-            fechas.add(fila.vigente_desde)
-    por_comida: dict[int, list[HorarioComida]] = {}
-    for fila in otras:
-        por_comida.setdefault(fila.comida_id, []).append(fila)
-    for dia in sorted(fechas):
-        for grupo in por_comida.values():
-            candidatos = [
-                v
-                for v in grupo
-                if v.vigente_desde <= dia
-                and (v.vigente_hasta is None or v.vigente_hasta >= dia)
-            ]
-            if not candidatos:
-                continue
-            vigente = max(candidatos, key=lambda v: (v.vigente_desde, v.id))
-            if _solapan(inicio, fin, vigente.hora_inicio, vigente.hora_fin):
-                raise ErrorRegla(
-                    409,
-                    "solapa_con_otra_comida",
-                    "La franja se superpone con la de otra comida vigente.",
-                )
-
-
-def crear_horario(
+def guardar_horario(
     sesion: Session,
     comida_id: int,
     hora_inicio: time,
     hora_fin: time,
-    vigente_desde: date,
-    motivo: str,
-    creada_por: UsuarioSistema,
+    base_horario_id: int | None,
+    cuenta_id: int,
+    autor: str,
 ) -> dict:
-    texto = _exigir_motivo(motivo)
-    _exigir_futura_o_hoy(vigente_desde)
+    """Guarda el horario de una comida con efecto inmediato.
+
+    `cuenta_id` y `autor` llegan como valores simples, copiados por el
+    endpoint ANTES de entrar aquí: el rollback de abajo expira los objetos
+    ORM de la sesión, y leer `usuario.id` después abriría una lectura nueva
+    antes de tener el cerrojo.
+    """
     if hora_inicio == hora_fin:
         raise ErrorRegla(
             422, "horario_invalido", "La hora de inicio y la de fin no coinciden."
         )
+    # La autenticación dejó abierta una transacción de solo lectura, con su
+    # snapshot de REPEATABLE READ. Se termina ahora para que lo que se lea
+    # después del cerrojo sea lo último confirmado, no una foto vieja. Solo
+    # hubo SELECT: no se pierde ninguna escritura.
+    sesion.rollback()
+    try:
+        nuevo, nombre = _guardar_bajo_cerrojo(
+            sesion, comida_id, hora_inicio, hora_fin, base_horario_id, cuenta_id
+        )
+        sesion.commit()
+    except OperationalError as error:
+        sesion.rollback()
+        if _codigo_mysql(error) in (ESPERA_AGOTADA, INTERBLOQUEO):
+            raise ErrorRegla(
+                409,
+                "cambio_en_curso",
+                "Hay otro cambio de horarios en curso. Vuelva a intentarlo.",
+            ) from error
+        raise
+    except IntegrityError as error:
+        sesion.rollback()
+        if _es_duplicado(error):
+            raise ErrorRegla(
+                409,
+                "instante_no_posterior",
+                "Ya hay una versión de esta comida desde ese mismo instante.",
+            ) from error
+        raise
+    except BaseException:
+        # Suelta el cerrojo, que dura lo que la transacción.
+        sesion.rollback()
+        raise
+    sesion.refresh(nuevo)
+    return _horario_para_respuesta(nuevo, nombre, autor)
+
+
+def _guardar_bajo_cerrojo(
+    sesion: Session,
+    comida_id: int,
+    hora_inicio: time,
+    hora_fin: time,
+    base_horario_id: int | None,
+    cuenta_id: int,
+) -> tuple[HorarioComida, str]:
+    # 1. Primera sentencia de la transacción: el cerrojo. Bloqueo de registro
+    #    sobre una fila que siempre existe, exclusivo en cualquier aislamiento.
+    cerrojo = sesion.execute(
+        select(Cerrojo.nombre)
+        .where(Cerrojo.nombre == CERROJO_HORARIOS)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if cerrojo is None:
+        raise ErrorRegla(
+            500,
+            "cerrojo_ausente",
+            "Falta el cerrojo de horarios: aplique las migraciones.",
+        )
+
     nombre = sesion.execute(
         select(Comida.nombre).where(Comida.id == comida_id)
     ).scalar_one_or_none()
     if nombre is None:
         raise ErrorRegla(404, "comida_inexistente", "No existe esa comida.")
-    duplicada = sesion.execute(
-        select(HorarioComida.id)
-        .where(
-            HorarioComida.comida_id == comida_id,
-            HorarioComida.vigente_desde == vigente_desde,
+
+    # 2. Todas las versiones, con lectura actual (FOR UPDATE): son decenas de
+    #    filas y ningún otro escritor puede estar aquí.
+    versiones = (
+        sesion.execute(
+            select(HorarioComida)
+            .order_by(HorarioComida.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        .with_for_update()
-    ).scalar_one_or_none()
-    if duplicada is not None:
-        raise ErrorRegla(
-            409, "version_en_esa_fecha", "Ya hay una versión con esa vigencia."
-        )
-    siguiente = _siguiente_de(sesion, comida_id, vigente_desde)
-    fin_cobertura = siguiente.vigente_desde - timedelta(days=1) if siguiente else None
-    _exigir_sin_solape(
-        sesion, comida_id, hora_inicio, hora_fin, vigente_desde, fin_cobertura
+        .scalars()
+        .all()
     )
-    anterior = _anterior_a(sesion, comida_id, vigente_desde)
+
+    abiertas = [
+        v
+        for v in versiones
+        if v.comida_id == comida_id and v.activo and v.vigente_hasta is None
+    ]
+    if len(abiertas) > 1:
+        raise ErrorRegla(
+            409,
+            "versiones_abiertas_multiples",
+            "La comida tiene más de una versión abierta: corrija los datos antes de guardar.",
+        )
+    abierta = abiertas[0] if abiertas else None
+
+    if base_horario_id != (abierta.id if abierta else None):
+        raise ErrorRegla(
+            409,
+            "version_desactualizada",
+            "El horario cambió desde que lo abrió: recárguelo y vuelva a guardar.",
+        )
+    if (
+        abierta is not None
+        and abierta.hora_inicio == hora_inicio
+        and abierta.hora_fin == hora_fin
+    ):
+        raise ErrorRegla(409, "sin_cambios", "El horario guardado ya es ese.")
+
+    # 3. El instante. Se lee ya con el cerrojo en la mano, justo antes del
+    #    INSERT, así el orden de los instantes es el de las confirmaciones.
+    #    Sin avanzar el reloj ni tocar versiones históricas: si no es
+    #    estrictamente posterior a toda versión EFECTIVA, se informa. Una fila
+    #    inactiva (activo=0) nunca se aplica, aunque tenga una fecha futura:
+    #    no cuenta como retroceso ni bloquea los guardados. Tampoco se borra
+    #    ni se reactiva: simplemente no es parte de la historia efectiva.
+    ahora = reloj.ahora()
+    ultimo = max((v.vigente_desde for v in versiones if v.activo), default=None)
+    if ultimo is not None and ahora <= ultimo:
+        raise ErrorRegla(
+            409,
+            "instante_no_posterior",
+            (
+                f"El reloj ({ahora.isoformat()}) no es posterior a la última versión "
+                f"efectiva ({ultimo.isoformat()}); no se guardó nada."
+            ),
+        )
+
+    # 4. Solape contra la versión que rige AHORA en cada otra comida.
+    for otra in versiones:
+        if (
+            otra.comida_id != comida_id
+            and version_rige_en(otra, ahora)
+            and franjas_se_solapan(
+                hora_inicio, hora_fin, otra.hora_inicio, otra.hora_fin
+            )
+        ):
+            raise ErrorRegla(
+                409,
+                "solapa_con_otra_comida",
+                "La franja se superpone con la de otra comida vigente.",
+            )
+
+    if abierta is not None:
+        abierta.vigente_hasta = ahora
     nuevo = HorarioComida(
         comida_id=comida_id,
         hora_inicio=hora_inicio,
         hora_fin=hora_fin,
-        vigente_desde=vigente_desde,
-        vigente_hasta=fin_cobertura,
+        vigente_desde=ahora,
+        vigente_hasta=None,
         activo=1,
-        motivo=texto,
-        creada_por_cuenta=creada_por.id,
+        motivo=None,
+        creada_por_cuenta=cuenta_id,
     )
-    if anterior is not None:
-        anterior.vigente_hasta = vigente_desde - timedelta(days=1)
     sesion.add(nuevo)
-    try:
-        sesion.flush()
-    except IntegrityError as error:
-        sesion.rollback()
-        if _es_duplicado(error):
-            raise ErrorRegla(
-                409, "version_en_esa_fecha", "Ya hay una versión con esa vigencia."
-            ) from error
-        raise
-    sesion.commit()
-    sesion.refresh(nuevo)
-    return _horario_para_respuesta(nuevo, nombre, creada_por.username)
-
-
-def eliminar_horario(sesion: Session, horario_id: int) -> None:
-    horario = sesion.execute(
-        select(HorarioComida)
-        .where(HorarioComida.id == horario_id)
-        .with_for_update()
-    ).scalar_one_or_none()
-    if horario is None:
-        raise ErrorRegla(404, "version_inexistente", "No existe esa versión.")
-    if horario.vigente_desde <= reloj.hoy():
-        raise ErrorRegla(
-            409, "version_ya_vigente", "Solo se puede borrar una versión programada."
-        )
-    anterior = _anterior_a(sesion, horario.comida_id, horario.vigente_desde)
-    siguiente = _siguiente_de(sesion, horario.comida_id, horario.vigente_desde)
-    if anterior is not None:
-        anterior.vigente_hasta = (
-            siguiente.vigente_desde - timedelta(days=1) if siguiente else None
-        )
-    sesion.delete(horario)
-    sesion.commit()
+    sesion.flush()
+    return nuevo, nombre

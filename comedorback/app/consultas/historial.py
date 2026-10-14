@@ -19,12 +19,13 @@ la ausencia de derecho, y el estado es `recibida`.
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import Select, and_, func, or_, select, union
+from sqlalchemy import Select, and_, func, select, union
 from sqlalchemy.orm import Session
 
 from app.consultas.derecho import aplicar_reglas
+from app.consultas.horarios import fines_de_ventana
 from app.core import reloj
-from app.modelos.comedor import Asistencia, HorarioComida
+from app.modelos.comedor import Asistencia
 from app.modelos.heredados import (
     Comensal,
     Comida,
@@ -101,35 +102,6 @@ def _comidas(sesion: Session) -> list[ComidaListada]:
         .order_by(Comida.id)
     ).all()
     return [ComidaListada(comida_id=i, codigo=c, nombre=n) for i, c, n in filas]
-
-
-def _fin_de_ventana(sesion: Session, fecha: date) -> dict[int, datetime]:
-    """Cuándo cierra la ventana de cada comida, para esa fecha.
-
-    Si la franja cruza la medianoche, cierra al día siguiente. Una comida sin
-    horario vigente no tiene cierre: sus raciones quedan pendientes en vez de
-    contarse como no recibidas, porque no hay forma de saber si ya pasó.
-    """
-    filas = sesion.execute(
-        select(HorarioComida.comida_id, HorarioComida.hora_inicio, HorarioComida.hora_fin)
-        .where(HorarioComida.activo == 1)
-        .where(HorarioComida.vigente_desde <= fecha)
-        .where(
-            or_(
-                HorarioComida.vigente_hasta.is_(None),
-                HorarioComida.vigente_hasta >= fecha,
-            )
-        )
-        .order_by(HorarioComida.vigente_desde)
-    ).all()
-
-    fines: dict[int, datetime] = {}
-    for comida_id, inicio, fin in filas:
-        cierre = datetime.combine(fecha, fin)
-        if fin < inicio:
-            cierre += timedelta(days=1)
-        fines[comida_id] = cierre
-    return fines
 
 
 def _pagina_de_usuarios(
@@ -231,7 +203,9 @@ def historial_diario(
     if not usuarios:
         return total, comidas, []
 
-    fines = _fin_de_ventana(sesion, fecha)
+    # Cierre de la última ventana EFECTIVA de ese día: un horario guardado por
+    # la tarde no redefine una ventana que ya terminó por la mañana.
+    fines = fines_de_ventana(sesion, fecha)
     datos = _datos_de_comensales(sesion, usuarios)
 
     derechos = sesion.execute(
@@ -349,7 +323,7 @@ def historial_mensual(
 
     datos = _datos_de_comensales(sesion, usuarios)
     hoy = momento.date()
-    fines_hoy = _fin_de_ventana(sesion, hoy)
+    fines_hoy = fines_de_ventana(sesion, hoy)
 
     # Un día del mes puede estar justificado por varias asignaciones; interesa
     # el día, no cuántos turnos lo respaldan, así que se cuenta distinto.

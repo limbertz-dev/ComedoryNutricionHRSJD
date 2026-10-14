@@ -1,17 +1,124 @@
-"""La migración de auth: coincide con los modelos, se deshace y se rehace."""
+"""Las migraciones: coinciden con los modelos, se deshacen y se rehacen.
 
+La revisión `ca83b39b791c` (horarios inmediatos) se prueba entera, incluidos
+sus bloqueos: los prechecks de la subida, que se detienen sin modificar nada,
+y los de la bajada, que se niegan a perder horas o microsegundos.
+
+Estas pruebas SÍ ejecutan migraciones, pero solo sobre la base `_test`, y la
+fixture `en_head` la deja siempre en head y sin datos de horarios, pase lo que
+pase. Las filas que la API ya no puede crear (programaciones futuras, versiones
+abiertas duplicadas) se insertan con SQL crudo sobre el esquema ANTERIOR:
+fixture excepcional, solo aquí y solo contra la base de pruebas.
+"""
+
+from datetime import date, datetime, timedelta
+
+import pytest
+import sqlalchemy as sa
 from alembic import command
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Connection
 
-from app.core.db import motor
-from conftest import config_alembic
+from app.core.config import config
+from app.core.db import SesionLocal, motor
+from app.modelos.comedor import CERROJO_HORARIOS
+from app.semillas import horarios
+from conftest import config_alembic, encabezado, ingresar
+from soporte_horarios import (  # noqa: F401  fixtures y ayudas compartidas
+    a_las,
+    abierta,
+    comida_id,
+    fijar,
+    guardar,
+    reloj_libre,
+    root,
+)
 
 TABLAS_AUTH = {"usuarios_sistema", "intentos_login"}
+REVISION = "ca83b39b791c"
+REV_ANTERIOR = "f13dd53094ae"
+
+
+# --- ayudas ---------------------------------------------------------------------
+
+
+def _limpiar_para_migrar() -> None:
+    """Sin datos que bloqueen una migración, en cualquiera de los dos esquemas."""
+    with SesionLocal() as sesion:
+        sesion.execute(text("DELETE FROM asistencias"))
+        sesion.execute(text("DELETE FROM lecturas_biometricas"))
+        sesion.execute(text("DELETE FROM horarios_comida"))
+        sesion.execute(
+            text(
+                "DELETE FROM reglas_derecho_novedad WHERE regla_id IN "
+                "(SELECT id FROM reglas_derecho WHERE vigente_desde != '2000-01-01')"
+            )
+        )
+        sesion.execute(text("DELETE FROM reglas_derecho WHERE vigente_desde != '2000-01-01'"))
+        sesion.commit()
+
+
+@pytest.fixture
+def en_head(reloj_libre):
+    """La base en head y sin datos antes; en head y sin datos después."""
+    assert config.db_name.endswith("_test")
+    command.upgrade(config_alembic(), "head")
+    _limpiar_para_migrar()
+    yield config_alembic()
+    _limpiar_para_migrar()
+    command.upgrade(config_alembic(), "head")
 
 
 def _tablas() -> set[str]:
     inspect(motor).clear_cache()
     return set(inspect(motor).get_table_names())
+
+
+def _tipo(tabla: str, columna: str):
+    return next(
+        c["type"] for c in inspect(motor).get_columns(tabla) if c["name"] == columna
+    )
+
+
+def _es_datetime6(tabla: str, columna: str) -> bool:
+    tipo = _tipo(tabla, columna)
+    return isinstance(tipo, sa.DateTime) and getattr(tipo, "fsp", None) == 6
+
+
+def _es_date(tabla: str, columna: str) -> bool:
+    tipo = _tipo(tabla, columna)
+    return isinstance(tipo, sa.Date) and not isinstance(tipo, sa.DateTime)
+
+
+def _filas(consulta: str, **params) -> list[tuple]:
+    with SesionLocal() as sesion:
+        return [tuple(f) for f in sesion.execute(text(consulta), params).all()]
+
+
+def _snapshot_horarios() -> list[tuple]:
+    return _filas(
+        "SELECT comida_id, hora_inicio, hora_fin, vigente_desde, vigente_hasta, "
+        "activo, motivo, creada_por_cuenta FROM horarios_comida "
+        "ORDER BY comida_id, vigente_desde, id"
+    )
+
+
+def _snapshot_derecho() -> list[tuple]:
+    return _filas(
+        "SELECT d.id, d.vigente_desde, d.duracion_minima_horas, d.excluir_enfermeria, "
+        "d.motivo, GROUP_CONCAT(n.tipo_novedad ORDER BY n.tipo_novedad) "
+        "FROM reglas_derecho d LEFT JOIN reglas_derecho_novedad n ON n.regla_id = d.id "
+        "GROUP BY d.id ORDER BY d.id"
+    )
+
+
+def _sql(consulta: str, **params) -> None:
+    with SesionLocal() as sesion:
+        sesion.execute(text(consulta), params)
+        sesion.commit()
+
+
+# --- las migraciones coinciden con los modelos ---------------------------------------
 
 
 def test_modelos_y_migraciones_coinciden():
@@ -20,14 +127,465 @@ def test_modelos_y_migraciones_coinciden():
 
 
 def test_collation_de_las_tablas_nuevas():
-    for tabla in TABLAS_AUTH:
+    for tabla in TABLAS_AUTH | {"cerrojos"}:
         opciones = inspect(motor).get_table_options(tabla)
         assert opciones["mysql_collate"] == "utf8mb4_unicode_ci", tabla
 
 
-def test_downgrade_y_upgrade():
-    cfg = config_alembic()
+def test_head_deja_cerrojo_y_microsegundos():
+    assert "cerrojos" in _tablas()
+    assert _filas("SELECT nombre FROM cerrojos") == [(CERROJO_HORARIOS,)]
+    for tabla, columna in (
+        ("horarios_comida", "vigente_desde"),
+        ("horarios_comida", "vigente_hasta"),
+        ("lecturas_biometricas", "fecha_hora"),
+    ):
+        assert _es_datetime6(tabla, columna), (tabla, columna)
+
+
+def test_downgrade_y_upgrade(en_head):
+    """La ida y vuelta completa hasta el esquema de auth, con las tablas de
+    horarios y lecturas vacías (con horas o microsegundos, la reversión de
+    ca83b39b791c se bloquea a propósito; se prueba abajo)."""
+    cfg = en_head
     command.downgrade(cfg, "0c294cd98c3a")
     assert not (_tablas() & TABLAS_AUTH)
     command.upgrade(cfg, "head")
     assert TABLAS_AUTH <= _tablas()
+
+
+# --- reversión permitida: sin pérdida ----------------------------------------------------
+
+
+def test_reversion_permitida_cuando_todo_es_medianoche_exacta(en_head):
+    horarios.sembrar()  # cuatro versiones abiertas a las 00:00:00 del 2026-01-01
+    almuerzo = comida_id("almuerzo")
+    # Una versión cerrada y su sucesora, también a medianoche: lo que el
+    # esquema viejo podía representar.
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = '2026-03-01 00:00:00' WHERE comida_id = :c",
+        c=almuerzo,
+    )
+    _sql(
+        "INSERT INTO horarios_comida (comida_id, hora_inicio, hora_fin, vigente_desde, "
+        "vigente_hasta, activo) VALUES (:c, '12:00:00', '13:00:00', '2026-03-01 00:00:00', NULL, 1)",
+        c=almuerzo,
+    )
+    antes_horarios, antes_derecho = _snapshot_horarios(), _snapshot_derecho()
+
+    command.downgrade(en_head, REV_ANTERIOR)
+    assert "cerrojos" not in _tablas()
+    assert _es_date("horarios_comida", "vigente_desde")
+    assert _es_date("horarios_comida", "vigente_hasta")
+    assert not _es_datetime6("lecturas_biometricas", "fecha_hora")
+    # `vigente_hasta` vuelve a ser INCLUSIVO: el último día, no el primero fuera.
+    assert _filas(
+        "SELECT vigente_desde, vigente_hasta FROM horarios_comida "
+        "WHERE comida_id = :c ORDER BY vigente_desde",
+        c=almuerzo,
+    ) == [(date(2026, 1, 1), date(2026, 2, 28)), (date(2026, 3, 1), None)]
+
+    command.upgrade(en_head, "head")
+    assert _es_datetime6("horarios_comida", "vigente_desde")
+    assert _filas("SELECT nombre FROM cerrojos") == [(CERROJO_HORARIOS,)]
+    # La ida y vuelta es exacta: ni horas inventadas ni cierres corridos.
+    assert _snapshot_horarios() == antes_horarios
+    # Y el derecho no se tocó en ningún sentido.
+    assert _snapshot_derecho() == antes_derecho
+
+
+# --- reversión bloqueada: datos o precisión que se perderían -----------------------------
+
+
+def _estado_de_head_intacto(snapshot_horarios) -> None:
+    assert "cerrojos" in _tablas()
+    assert _es_datetime6("horarios_comida", "vigente_desde")
+    assert _es_datetime6("horarios_comida", "vigente_hasta")
+    assert _es_datetime6("lecturas_biometricas", "fecha_hora")
+    assert _snapshot_horarios() == snapshot_horarios
+
+
+def test_reversion_bloqueada_con_horas_intradia(cliente, root, en_head):
+    horarios.sembrar()
+    almuerzo = comida_id("almuerzo")
+    base = abierta(cliente, root, almuerzo)["horario_id"]
+    fijar(a_las(9, 30, 15, 250000))
+    assert guardar(cliente, root, almuerzo, "12:00:00", "13:00:00", base).status_code == 201
+    antes = _snapshot_horarios()
+
+    with pytest.raises(RuntimeError, match="bloqueada") as bloqueo:
+        command.downgrade(en_head, REV_ANTERIOR)
+    assert "2026-09-24 09:30:15.250000" in str(bloqueo.value)
+    # No se modificó nada: ni tipos, ni cerrojo, ni una fila.
+    _estado_de_head_intacto(antes)
+
+
+def test_reversion_bloqueada_con_microsegundos_en_lecturas(
+    cliente, cliente_simulacion, crear_usuario, en_head
+):
+    horarios.sembrar()
+    crear_usuario("coci", rol="cocinera")
+    coci = encabezado(ingresar(cliente, "coci")["access"])
+    fijar(a_las(11, 30, 0, 500000))
+    r = cliente_simulacion.post("/asistencias", json={"metodo": "biometrico"}, headers=coci)
+    assert r.status_code == 200, r.text
+    assert _filas(
+        "SELECT fecha_hora FROM lecturas_biometricas WHERE id = :i", i=r.json()["lectura_id"]
+    ) == [(a_las(11, 30, 0, 500000),)]
+    antes = _snapshot_horarios()
+
+    with pytest.raises(RuntimeError, match="microsegundos"):
+        command.downgrade(en_head, REV_ANTERIOR)
+    _estado_de_head_intacto(antes)
+    # La lectura conserva su microsegundo.
+    assert _filas("SELECT fecha_hora FROM lecturas_biometricas") == [
+        (a_las(11, 30, 0, 500000),)
+    ]
+
+
+# --- el predicado real de "hora distinta de medianoche", ejecutado en MySQL ------------------
+
+
+def _migracion():
+    """El módulo de la revisión, cargado por su ruta (sin registrarlo)."""
+    import importlib.util
+    from pathlib import Path
+
+    ruta = Path(__file__).resolve().parents[1] / "alembic" / "versions" / (
+        f"{REVISION}_horarios_inmediatos.py"
+    )
+    spec = importlib.util.spec_from_file_location("migracion_horarios_prueba", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+@pytest.mark.parametrize(
+    "valor,bloqueado",
+    [
+        ("2026-01-01 00:00:00.000000", False),
+        ("2026-01-01 00:00:00", False),
+        ("2026-01-01 00:00:00.000001", True),
+        ("2026-01-01 00:00:01", True),
+        ("2026-01-01 00:01:00", True),
+        ("2026-01-01 01:00:00", True),
+        ("2026-03-01 23:59:59.999999", True),
+        (None, False),  # NULL nunca bloquea
+    ],
+    ids=["medianoche_6", "medianoche", "un_micro", "un_segundo", "un_minuto", "una_hora", "casi_24h", "null"],
+)
+def test_predicado_de_hora_distinta_de_medianoche(valor, bloqueado):
+    """Ejecuta el predicado REAL de la migración sobre valores sintéticos,
+    para vigente_desde y para vigente_hasta (sin tocar ninguna tabla)."""
+    tiene_hora = _migracion()._tiene_hora
+    with SesionLocal() as sesion:
+        for columna in ("vigente_desde", "vigente_hasta"):
+            filas = sesion.execute(
+                text(
+                    f"SELECT 1 FROM (SELECT CAST(:v AS DATETIME(6)) AS {columna}) t "
+                    f"WHERE {tiene_hora(columna)}"
+                ),
+                {"v": valor},
+            ).all()
+            assert bool(filas) is bloqueado, (columna, valor)
+
+
+def test_predicado_sobre_la_consulta_completa_del_downgrade(en_head):
+    """Con las filas exactas del fallo real (medianoche con y sin hasta) no hay
+    nada que bloquear; con un microsegundo en cualquiera de las dos columnas,
+    sí. Usa la misma función que el downgrade, sobre `horarios_comida`."""
+    horarios.sembrar()
+    almuerzo = _preparar_con_cierre_sin_semilla(almuerzo=comida_id("almuerzo"))
+    migracion = _migracion()
+    consulta = text(
+        "SELECT id FROM horarios_comida "
+        f"WHERE {migracion._tiene_hora('vigente_desde')} OR {migracion._tiene_hora('vigente_hasta')}"
+    )
+    with SesionLocal() as sesion:
+        assert sesion.execute(consulta).all() == []
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = '2026-03-01 00:00:00.000001' "
+        "WHERE comida_id = :c AND vigente_hasta IS NOT NULL",
+        c=almuerzo,
+    )
+    with SesionLocal() as sesion:
+        assert len(sesion.execute(consulta).all()) == 1
+
+
+def _preparar_con_cierre_sin_semilla(almuerzo: int) -> int:
+    """Como `_preparar_con_cierre`, sobre una semilla ya cargada."""
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = '2026-03-01 00:00:00' WHERE comida_id = :c",
+        c=almuerzo,
+    )
+    _sql(
+        "INSERT INTO horarios_comida (comida_id, hora_inicio, hora_fin, vigente_desde, "
+        "vigente_hasta, activo) VALUES (:c, '12:00:00', '13:00:00', '2026-03-01 00:00:00', NULL, 1)",
+        c=almuerzo,
+    )
+    return almuerzo
+
+
+# --- downgrade interrumpido: el reintento no continúa ni resta otro día ----------------------
+
+
+def _preparar_con_cierre() -> int:
+    """Cuatro versiones de la semilla y, en el almuerzo, una cerrada a
+    2026-03-01 00:00 con su sucesora abierta: lo que hace visible un +/-1 día."""
+    horarios.sembrar()
+    almuerzo = comida_id("almuerzo")
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = '2026-03-01 00:00:00' WHERE comida_id = :c",
+        c=almuerzo,
+    )
+    _sql(
+        "INSERT INTO horarios_comida (comida_id, hora_inicio, hora_fin, vigente_desde, "
+        "vigente_hasta, activo) VALUES (:c, '12:00:00', '13:00:00', '2026-03-01 00:00:00', NULL, 1)",
+        c=almuerzo,
+    )
+    return almuerzo
+
+
+def _interrumpir(parche, fragmento: str, metodo: str) -> None:
+    """Hace fallar `Connection.<metodo>` cuando la sentencia contiene
+    `fragmento`: una interrupción real, a mitad del downgrade, sin tocar la
+    migración. Todo lo demás pasa tal cual."""
+    original = getattr(Connection, metodo)
+
+    def con_fallo(self, sentencia, *args, **kwargs):
+        try:
+            texto = str(sentencia)
+        except Exception:  # noqa: BLE001  sentencias que no compilan con el dialecto por defecto
+            texto = ""
+        if fragmento in texto:
+            raise RuntimeError(f"fallo simulado en: {fragmento}")
+        return original(self, sentencia, *args, **kwargs)
+
+    parche.setattr(Connection, metodo, con_fallo)
+
+
+def _interrumpir_downgrade(monkeypatch, fragmento: str, metodo: str) -> None:
+    with monkeypatch.context() as parche:
+        _interrumpir(parche, fragmento, metodo)
+        with pytest.raises(RuntimeError, match="fallo simulado"):
+            command.downgrade(config_alembic(), REV_ANTERIOR)
+    # Fuera del `with`, `Connection` vuelve a ser la de siempre.
+
+
+def _reintento_se_detiene() -> str:
+    with pytest.raises(RuntimeError, match="detenida ANTES de modificar nada") as parada:
+        command.downgrade(config_alembic(), REV_ANTERIOR)
+    mensaje = str(parada.value)
+    assert "Recuperación" in mensaje
+    assert "alembic stamp f13dd53094ae" in mensaje
+    return mensaje
+
+
+def test_downgrade_interrumpido_al_soltar_cerrojos_no_se_reintenta(en_head, monkeypatch):
+    """Se interrumpe tras convertir lecturas_biometricas y antes de soltar
+    cerrojos. El reintento se detiene sin tocar nada; la recuperación del
+    mensaje (volver al estado de la revisión) deja revertir y rehacer."""
+    _preparar_con_cierre()
+    original = _snapshot_horarios()
+
+    _interrumpir_downgrade(monkeypatch, "DROP TABLE cerrojos", "execute")
+    assert not _es_datetime6("lecturas_biometricas", "fecha_hora")  # el paso 1 sí se aplicó
+    assert "cerrojos" in _tablas()
+    assert _es_datetime6("horarios_comida", "vigente_hasta")
+    antes = _snapshot_horarios()
+    assert antes == original
+
+    mensaje = _reintento_se_detiene()
+    assert "lecturas_biometricas.fecha_hora" in mensaje
+    assert not _es_datetime6("lecturas_biometricas", "fecha_hora")
+    assert "cerrojos" in _tablas()
+    assert _snapshot_horarios() == antes
+
+    # Recuperación: volver al estado exacto de la revisión.
+    _sql("ALTER TABLE lecturas_biometricas MODIFY fecha_hora DATETIME(6) NOT NULL")
+    command.downgrade(en_head, REV_ANTERIOR)
+    command.upgrade(en_head, "head")
+    assert _snapshot_horarios() == original
+
+
+def test_downgrade_interrumpido_antes_del_alter_de_horarios(en_head, monkeypatch):
+    _preparar_con_cierre()
+    original = _snapshot_horarios()
+
+    _interrumpir_downgrade(monkeypatch, "ALTER TABLE horarios_comida", "exec_driver_sql")
+    assert "cerrojos" not in _tablas()  # el paso 2 sí se aplicó
+    assert _es_datetime6("horarios_comida", "vigente_desde")
+    antes = _snapshot_horarios()
+    assert antes == original
+
+    mensaje = _reintento_se_detiene()
+    assert "falta la tabla cerrojos" in mensaje
+    assert _es_datetime6("horarios_comida", "vigente_desde")
+    assert _snapshot_horarios() == antes
+
+    # Recuperación: completar a mano los pasos que faltan (c y d), sellar, y rehacer.
+    _sql(
+        "ALTER TABLE horarios_comida MODIFY vigente_desde DATE NOT NULL, "
+        "MODIFY vigente_hasta DATE NULL"
+    )
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = DATE_SUB(vigente_hasta, INTERVAL 1 DAY) "
+        "WHERE vigente_hasta IS NOT NULL"
+    )
+    command.stamp(en_head, REV_ANTERIOR)
+    command.upgrade(en_head, "head")
+    assert _snapshot_horarios() == original
+
+
+def test_downgrade_interrumpido_antes_del_menos_un_dia_no_lo_aplica_dos_veces(
+    en_head, monkeypatch
+):
+    """El caso que importa: ALTER ya aplicado, -1 día todavía no. Un reintento
+    ciego lo aplicaría; este se detiene y vigente_hasta NO cambia."""
+    almuerzo = _preparar_con_cierre()
+    original = _snapshot_horarios()
+
+    _interrumpir_downgrade(monkeypatch, "DATE_SUB(vigente_hasta", "execute")
+    assert _es_date("horarios_comida", "vigente_hasta")  # el ALTER sí se aplicó
+    interrumpido = _snapshot_horarios()
+    # Sin el -1 día: el cierre sigue siendo el exclusivo, 2026-03-01.
+    assert _filas(
+        "SELECT vigente_hasta FROM horarios_comida WHERE comida_id = :c AND vigente_hasta IS NOT NULL",
+        c=almuerzo,
+    ) == [(date(2026, 3, 1),)]
+
+    for _ in range(2):  # y por mucho que se reintente
+        _reintento_se_detiene()
+        assert _snapshot_horarios() == interrumpido
+
+    # Recuperación del mensaje: aplicar el -1 día UNA vez, sellar y rehacer.
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = DATE_SUB(vigente_hasta, INTERVAL 1 DAY) "
+        "WHERE vigente_hasta IS NOT NULL"
+    )
+    command.stamp(en_head, REV_ANTERIOR)
+    command.upgrade(en_head, "head")
+    assert _snapshot_horarios() == original
+
+
+def test_downgrade_completo_con_sello_perdido_no_resta_otro_dia(en_head):
+    almuerzo = _preparar_con_cierre()
+    original = _snapshot_horarios()
+
+    command.downgrade(en_head, REV_ANTERIOR)
+    revertido = _snapshot_horarios()
+    assert _filas(
+        "SELECT vigente_hasta FROM horarios_comida WHERE comida_id = :c AND vigente_hasta IS NOT NULL",
+        c=almuerzo,
+    ) == [(date(2026, 2, 28),)]
+    # Se pierde el sello (alembic_version vuelve a decir ca83b39b791c) con el
+    # esquema ya revertido.
+    command.stamp(en_head, REVISION)
+
+    _reintento_se_detiene()
+    assert _snapshot_horarios() == revertido  # NO quedó en 2026-02-27
+
+    # Solo falta el sello: es lo único que hay que hacer.
+    command.stamp(en_head, REV_ANTERIOR)
+    command.upgrade(en_head, "head")
+    assert _snapshot_horarios() == original
+
+
+# --- subida bloqueada: programaciones y datos ambiguos -------------------------------------
+
+
+def _insertar_horario_viejo(comida: int, desde: date, hasta: date | None = None) -> None:
+    """INSERT crudo sobre el esquema ANTERIOR (DATE): la API actual ya no puede
+    programar a futuro, así que solo así existe lo que un sistema viejo dejó."""
+    _sql(
+        "INSERT INTO horarios_comida (comida_id, hora_inicio, hora_fin, vigente_desde, "
+        "vigente_hasta, activo) VALUES (:c, '12:00:00', '13:00:00', :d, :h, 1)",
+        c=comida,
+        d=desde,
+        h=hasta,
+    )
+
+
+def _insertar_derecho_viejo(desde: date) -> None:
+    _sql(
+        "INSERT INTO reglas_derecho (vigente_desde, duracion_minima_horas, "
+        "excluir_enfermeria, motivo, creada_por_cuenta) "
+        "VALUES (:d, 20, 1, 'Programada por un sistema anterior', NULL)",
+        d=desde,
+    )
+
+
+def _esquema_anterior_intacto(snapshot_horarios, snapshot_derecho) -> None:
+    assert "cerrojos" not in _tablas()
+    assert _es_date("horarios_comida", "vigente_desde")
+    assert _es_date("horarios_comida", "vigente_hasta")
+    assert not _es_datetime6("lecturas_biometricas", "fecha_hora")
+    assert _snapshot_horarios() == snapshot_horarios
+    assert _snapshot_derecho() == snapshot_derecho
+
+
+FUTURO = date.today() + timedelta(days=30)
+
+
+@pytest.mark.parametrize(
+    "caso,esperado",
+    [
+        ("horario_futuro", "programadas a futuro \\(horarios_comida\\)"),
+        ("derecho_futuro", "programadas a futuro \\(reglas_derecho\\)"),
+        ("dos_abiertas", "más de una versión de horario abierta"),
+    ],
+)
+def test_subida_bloqueada_sin_modificar_nada(en_head, caso, esperado):
+    horarios.sembrar()
+    almuerzo = comida_id("almuerzo")
+    command.downgrade(en_head, REV_ANTERIOR)  # base limpia -> esquema anterior, con la semilla
+
+    if caso == "horario_futuro":
+        _insertar_horario_viejo(almuerzo, FUTURO)
+    elif caso == "derecho_futuro":
+        _insertar_derecho_viejo(FUTURO)
+    else:
+        _insertar_horario_viejo(almuerzo, date(2026, 6, 1))  # otra abierta, ya en vigor
+    antes_h, antes_d = _snapshot_horarios(), _snapshot_derecho()
+
+    with pytest.raises(RuntimeError, match=esperado) as bloqueo:
+        command.upgrade(en_head, "head")
+    assert "no cancela, desactiva ni reabre nada" in str(bloqueo.value).replace("\n", " ").replace("  ", " ")
+    # Detenida ANTES del primer DDL: ni tabla, ni tipos, ni una fila cambiada.
+    _esquema_anterior_intacto(antes_h, antes_d)
+    # La fixture limpia las filas de prueba y vuelve a head.
+
+
+def test_subida_se_detiene_ante_un_estado_parcial(en_head):
+    """Si un intento anterior dejó `cerrojos`, no se repite ningún paso (en
+    particular el +1 día de vigente_hasta): se detiene y pide revisión."""
+    command.downgrade(en_head, REV_ANTERIOR)
+    _sql("CREATE TABLE cerrojos (nombre VARCHAR(40) PRIMARY KEY)")
+    try:
+        with pytest.raises(RuntimeError, match="estado parcial"):
+            command.upgrade(en_head, "head")
+        assert _es_date("horarios_comida", "vigente_desde")
+    finally:
+        _sql("DROP TABLE IF EXISTS cerrojos")
+
+
+def test_subida_con_versiones_pasadas_o_de_hoy_no_se_bloquea(en_head):
+    """Una versión que ya rige (desde hoy o antes) no es una programación: se
+    migra a su medianoche y no se toca."""
+    horarios.sembrar()
+    almuerzo = comida_id("almuerzo")
+    command.downgrade(en_head, REV_ANTERIOR)
+    # Cierra la semilla ayer y abre una versión desde hoy: lo que hacía la API vieja.
+    ayer, hoy = date.today() - timedelta(days=1), date.today()
+    _sql("UPDATE horarios_comida SET vigente_hasta = :h WHERE comida_id = :c", h=ayer, c=almuerzo)
+    _insertar_horario_viejo(almuerzo, hoy)
+
+    command.upgrade(en_head, "head")
+    assert _filas(
+        "SELECT vigente_desde, vigente_hasta FROM horarios_comida "
+        "WHERE comida_id = :c ORDER BY vigente_desde",
+        c=almuerzo,
+    ) == [
+        (datetime(2026, 1, 1), datetime.combine(hoy, datetime.min.time())),
+        (datetime.combine(hoy, datetime.min.time()), None),
+    ]
