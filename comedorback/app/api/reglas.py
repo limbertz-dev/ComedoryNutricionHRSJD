@@ -1,39 +1,36 @@
-"""Reglas versionadas para root. Solo rol sistemas (ACCESO["reglas"]).
+"""Reglas para root. Solo rol sistemas (ACCESO["reglas"]).
 
 CONTRATO con el front (no cambiar sin avisar):
 
-    GET    /reglas/derecho                 vigente de hoy + todas, nueva a vieja
-    GET    /reglas/derecho/novedades       tipos reales para la UI
-    POST   /reglas/derecho                 201 Version
-    DELETE /reglas/derecho/{id}            204, solo programada
-    GET    /reglas/horarios?fecha=         vigente de cada comida en esa fecha
-    GET    /reglas/horarios/historial?comida_id=  todas las de esa comida
-    POST   /reglas/horarios                201, cierra la anterior
-    DELETE /reglas/horarios/{horario_id}   204, solo programado, reabre anterior
+    GET    /reglas/derecho                 versión vigente + todas, SOLO LECTURA
+    GET    /reglas/horarios?momento=       versión de cada comida que rige en
+                                           `momento` (por omisión, ahora)
+    GET    /reglas/horarios/historial?comida_id=   todas las versiones de esa comida
+    POST   /reglas/horarios                201: guarda el horario con efecto
+                                           inmediato; cierra la versión abierta
 
-La vigente se calcula con reloj.hoy(), día simulado en simulación.
-Los errores traen además `motivo`: vigencia_en_el_pasado,
-horario_invalido, solapa_con_otra_comida, version_en_esa_fecha,
-comida_inexistente, version_inexistente, version_ya_vigente,
-motivo_obligatorio.
+El derecho ya no se edita por API: POST y DELETE de /reglas/derecho y
+GET /reglas/derecho/novedades no existen (405/404). Ocultar un botón no
+alcanza; el servidor es quien lo impide. Sus versiones, valores y
+evaluación histórica no cambian.
+
+Los horarios rigen desde el instante del servidor (reloj.ahora(), día
+simulado en simulación). No hay vigencia, programación ni motivo escrito por
+el usuario. Los errores traen además `motivo`: horario_invalido,
+comida_inexistente, solapa_con_otra_comida, version_desactualizada,
+sin_cambios, instante_no_posterior, cambio_en_curso, parametro_retirado.
 """
 
-from datetime import date
+from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, status
+from fastapi import APIRouter, Query, status
 
 from app.core import reloj
 from app.core.autorizacion import ErrorAuth, UsuarioActual
 from app.core.db import SesionDep
 from app.esquemas.auth import ErrorConMotivo
-from app.esquemas.reglas import (
-    CrearHorario,
-    CrearVersionDerecho,
-    HorarioRegla,
-    ListaDerecho,
-    VersionDerecho,
-)
+from app.esquemas.reglas import CrearHorario, HorarioRegla, ListaDerecho, VersionDerecho
 from app.logica import reglas
 from app.logica.reglas import ErrorRegla
 
@@ -53,7 +50,7 @@ def _traducir(error: ErrorRegla) -> ErrorAuth:
 @router.get(
     "/derecho",
     response_model=ListaDerecho,
-    summary="Versión vigente y todas las versiones",
+    summary="Versión vigente y todas las versiones (solo lectura)",
 )
 def listar_derecho(sesion: SesionDep) -> ListaDerecho:
     try:
@@ -67,66 +64,27 @@ def listar_derecho(sesion: SesionDep) -> ListaDerecho:
 
 
 @router.get(
-    "/derecho/novedades",
-    response_model=list[str],
-    summary="Tipos de novedad reales para la UI",
-)
-def listar_novedades(sesion: SesionDep) -> list[str]:
-    return reglas.listar_novedades(sesion)
-
-
-@router.post(
-    "/derecho",
-    response_model=VersionDerecho,
-    status_code=status.HTTP_201_CREATED,
-    summary="Crear una versión de parámetros",
-    responses=CON_MOTIVO,
-)
-def crear_derecho(
-    sesion: SesionDep, datos: CrearVersionDerecho, usuario: UsuarioActual
-) -> VersionDerecho:
-    try:
-        creada = reglas.crear_derecho(
-            sesion,
-            datos.vigente_desde,
-            datos.duracion_minima_horas,
-            datos.novedades_que_anulan,
-            datos.excluir_enfermeria,
-            datos.motivo,
-            usuario,
-        )
-    except ErrorRegla as error:
-        raise _traducir(error) from error
-    return VersionDerecho(**creada)
-
-
-@router.delete(
-    "/derecho/{version_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Borrar una versión programada",
-    responses=CON_MOTIVO,
-)
-def eliminar_derecho(
-    sesion: SesionDep, version_id: Annotated[int, Path(gt=0)]
-) -> None:
-    try:
-        reglas.eliminar_derecho(sesion, version_id)
-    except ErrorRegla as error:
-        raise _traducir(error) from error
-
-
-@router.get(
     "/horarios",
     response_model=list[HorarioRegla],
-    summary="Horario vigente de cada comida en una fecha",
+    summary="Horario que rige en un instante, una fila por comida",
+    responses={422: {"model": ErrorConMotivo}},
 )
 def listar_horarios(
     sesion: SesionDep,
-    fecha: Annotated[date | None, Query(description="Por defecto, hoy")] = None,
+    momento: Annotated[
+        datetime | None, Query(description="Instante a consultar. Por defecto, ahora")
+    ] = None,
+    fecha: Annotated[str | None, Query(include_in_schema=False)] = None,
 ) -> list[HorarioRegla]:
+    if fecha is not None:
+        raise ErrorAuth(
+            422,
+            "parametro_retirado",
+            "`fecha` ya no existe: use `momento` (datetime) o no mande nada para ahora.",
+        )
     return [
         HorarioRegla(**d)
-        for d in reglas.listar_horarios(sesion, fecha or reloj.hoy())
+        for d in reglas.listar_horarios(sesion, momento or reloj.ahora())
     ]
 
 
@@ -151,37 +109,25 @@ def historial_horarios(
     "/horarios",
     response_model=HorarioRegla,
     status_code=status.HTTP_201_CREATED,
-    summary="Programar un horario nuevo",
+    summary="Guardar el horario de una comida, con efecto inmediato",
     responses=CON_MOTIVO,
 )
 def crear_horario(
     sesion: SesionDep, datos: CrearHorario, usuario: UsuarioActual
 ) -> HorarioRegla:
+    # Valores simples ANTES de la lógica: esta termina la transacción de la
+    # autenticación y el rollback expira los objetos ORM de la sesión.
+    cuenta_id, autor = usuario.id, usuario.username
     try:
-        creado = reglas.crear_horario(
+        creado = reglas.guardar_horario(
             sesion,
             datos.comida_id,
             datos.hora_inicio,
             datos.hora_fin,
-            datos.vigente_desde,
-            datos.motivo,
-            usuario,
+            datos.base_horario_id,
+            cuenta_id,
+            autor,
         )
     except ErrorRegla as error:
         raise _traducir(error) from error
     return HorarioRegla(**creado)
-
-
-@router.delete(
-    "/horarios/{horario_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Borrar un horario programado",
-    responses=CON_MOTIVO,
-)
-def eliminar_horario(
-    sesion: SesionDep, horario_id: Annotated[int, Path(gt=0)]
-) -> None:
-    try:
-        reglas.eliminar_horario(sesion, horario_id)
-    except ErrorRegla as error:
-        raise _traducir(error) from error

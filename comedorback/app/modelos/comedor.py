@@ -36,7 +36,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.mysql import BIGINT, TINYINT
+from sqlalchemy.dialects.mysql import BIGINT, DATETIME, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -44,6 +44,26 @@ from app.core.db import Base
 # Las claves de bd_turnos son BIGINT UNSIGNED: toda FK que las apunte debe
 # usar el mismo tipo o MySQL rechaza la restricción.
 ID = BIGINT(unsigned=True)
+
+# Instantes con microsegundos. Los horarios cambian en el instante en que se
+# guardan y la lectura se compara contra ese instante: si cualquiera de los
+# dos perdiera precisión, un toque de dedo pegado al corte caería en la
+# versión vecina. Las columnas existentes conservan sus valores (.000000).
+INSTANTE = DATETIME(fsp=6)
+
+# Idénticos carácter por carácter a los de la migración ca83b39b791c.
+COMENTARIO_VIGENTE_DESDE = (
+    "Primer instante en que rige esta versión, inclusive. Con microsegundos: "
+    "puede haber varios cambios el mismo día."
+)
+COMENTARIO_VIGENTE_HASTA = (
+    "Instante en que deja de regir, EXCLUSIVO. NULL = versión abierta: la que "
+    "rige desde su vigente_desde en adelante."
+)
+COMENTARIO_MOTIVO_HORARIO = (
+    "Solo las filas de R2 lo traen. Desde que los horarios rigen al guardar, "
+    "el sistema no pide motivo y queda NULL."
+)
 
 
 def opciones(comentario: str, *restricciones):
@@ -125,7 +145,14 @@ class CategoriaReporteMap(Base):
 
 
 class HorarioComida(Base):
-    """Qué franja horaria corresponde a cada tiempo de comida, con vigencia."""
+    """Qué franja horaria corresponde a cada tiempo de comida, con vigencia.
+
+    Cada fila es una versión con vigencia `[vigente_desde, vigente_hasta)` en
+    instantes, no en días. Guardar un horario cierra la versión abierta
+    (`vigente_hasta` NULL) en el instante del servidor y abre otra desde ese
+    mismo instante; nunca se programa a futuro ni se reescribe el pasado. La
+    resolución vive en app/consultas/horarios.py.
+    """
 
     __tablename__ = "horarios_comida"
     __table_args__ = opciones(
@@ -150,15 +177,15 @@ class HorarioComida(Base):
         Time,
         comment="Si es menor que hora_inicio, la franja cruza la medianoche.",
     )
-    vigente_desde: Mapped[date] = mapped_column(Date)
-    vigente_hasta: Mapped[date | None] = mapped_column(Date)
+    vigente_desde: Mapped[datetime] = mapped_column(
+        INSTANTE, comment=COMENTARIO_VIGENTE_DESDE
+    )
+    vigente_hasta: Mapped[datetime | None] = mapped_column(
+        INSTANTE, comment=COMENTARIO_VIGENTE_HASTA
+    )
     activo: Mapped[bool] = mapped_column(TINYINT(1), default=1)
     motivo: Mapped[str | None] = mapped_column(
-        String(500),
-        comment=(
-            "Por qué se creó esta versión del horario. NULL en las filas "
-            "anteriores a R2, que no lo tenían."
-        ),
+        String(500), comment=COMENTARIO_MOTIVO_HORARIO
     )
     creada_por_cuenta: Mapped[int | None] = mapped_column(
         ID,
@@ -220,7 +247,7 @@ class LecturaBiometrica(Base):
         ),
     )
     dispositivo: Mapped[str] = mapped_column(String(50))
-    fecha_hora: Mapped[datetime] = mapped_column(DateTime)
+    fecha_hora: Mapped[datetime] = mapped_column(INSTANTE)
     resultado: Mapped[str] = mapped_column(
         SAEnum("aceptada", "rechazada", name="resultado_lectura")
     )
@@ -304,5 +331,40 @@ class Asistencia(Base):
             "usuarios_sistema.id de quien la registro a mano, tomado del "
             "token. FK interna: las cuentas se dan de baja, no se borran."
         ),
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# Idénticos carácter por carácter a los de la migración ca83b39b791c.
+COMENTARIO_TABLA_CERROJOS = (
+    "Cerrojos de escritura. Quien bloquea la fila de un recurso con SELECT ... "
+    "FOR UPDATE serializa a todos los que escriban ese recurso, incluso con "
+    "sus tablas de datos vacias."
+)
+COMENTARIO_CERROJO_NOMBRE = (
+    "Recurso que protege. Lo siembra la migracion: la aplicacion no crea ni "
+    "borra filas, solo las bloquea dentro de su transaccion."
+)
+
+CERROJO_HORARIOS = "horarios_comida"
+
+
+class Cerrojo(Base):
+    """Un mutex persistente dentro de `bd_nutricion`.
+
+    `SELECT ... FOR UPDATE` sobre una tabla vacía solo toma el gap-lock del
+    supremum, que no choca con el de otra transacción: dos altas simultáneas
+    pasan las dos o terminan en deadlock, y en READ COMMITTED ni siquiera hay
+    gap-lock. Una fila que existe siempre sí: el bloqueo de registro es
+    exclusivo en cualquier aislamiento, se libera con COMMIT o ROLLBACK y lo
+    suelta el servidor si la conexión muere. No hay GET_LOCK, que pertenece a
+    la conexión y no a la transacción.
+    """
+
+    __tablename__ = "cerrojos"
+    __table_args__ = opciones(COMENTARIO_TABLA_CERROJOS)
+
+    nombre: Mapped[str] = mapped_column(
+        String(40), primary_key=True, comment=COMENTARIO_CERROJO_NOMBRE
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
