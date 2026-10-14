@@ -1,9 +1,10 @@
 """Versiones de los parámetros del derecho a comer, en `bd_nutricion`.
 
-Cada cambio es una fila nueva con `vigente_desde` hoy o futuro; nunca se
-edita ni se borra una versión ya vigente o pasada, para que informes e
-historial de días pasados no cambien. Solo se puede borrar una versión
-programada (`vigente_desde` mayor a hoy).
+SOLO LECTURA desde la API: el derecho ya no se edita por /reglas (no hay
+POST ni DELETE). Las versiones existentes, con sus valores y su historia, se
+siguen aplicando tal cual para que informes e historial de días pasados no
+cambien. Un ajuste futuro es una decisión de ingeniería (migración), no de
+una pantalla.
 
 La versión vigente para una fecha es la de `vigente_desde` máximo menor o
 igual a esa fecha. El derecho la resuelve EN SQL por `fecha_turno` (ver
