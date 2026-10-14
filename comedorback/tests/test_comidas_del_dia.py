@@ -265,15 +265,15 @@ def test_rechazos_del_dia_y_sin_comida(cliente, cliente_simulacion, tokens):
     }
     assert cuerpo["rechazos_sin_comida"] == 1
 
-    # Las mismas tres lecturas que ve el hilo del lector. La huella no
-    # reconocida fuera de horario se presenta como no_identificado (toda
-    # lectura con usuario NULL se muestra así en el hilo), mientras que
-    # comidas-del-dia la cuenta en rechazos_sin_comida.
+    # Las mismas tres lecturas que ve el hilo del lector. Cada una muestra el
+    # motivo GUARDADO: la huella fuera de horario es fuera_horario (ya no se
+    # presenta como no_identificado) y comidas-del-dia la cuenta en
+    # rechazos_sin_comida.
     r = cliente.get(
         "/pantalla/ultimas-marcaciones", params={"fecha": DIA.isoformat()}, headers=jefa
     )
     assert sorted(m["motivo"] for m in r.json()) == [
-        "no_identificado",
+        "fuera_horario",
         "no_identificado",
         "sin_derecho",
     ]

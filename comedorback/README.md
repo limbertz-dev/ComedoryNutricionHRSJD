@@ -22,7 +22,7 @@ Documentación automática de la API: `http://127.0.0.1:8000/docs`
 | `bd_nutricion` | `DB_NAME` | La base propia del comedor | Sí: la administra alembic |
 | `bd_proyecto_backend` | `DB_NAME_TURNOS` | La base del módulo de turnos (otro ingeniero) | **Nunca**: ni ALTER, ni CREATE, ni INSERT, ni FK que le apunte |
 
-`bd_nutricion` tiene exactamente **10 tablas + 9 vistas** (más `alembic_version`):
+`bd_nutricion` tiene exactamente **12 tablas + 9 vistas** (más `alembic_version`):
 
 - **Tablas propias:** `categorias_reporte`, `categoria_reporte_map`,
   `horarios_comida`, `coeficientes_racion`, `lecturas_biometricas`, `asistencias`.
@@ -30,6 +30,10 @@ Documentación automática de la API: `http://127.0.0.1:8000/docs`
   (ver [Autenticación y roles](#autenticación-y-roles)).
 - **Tablas de reglas versionadas:** `reglas_derecho`,
   `reglas_derecho_novedad` (parámetros del derecho por fecha).
+- **Cerrojos de escritura:** `cerrojos` (el mutex de los guardados de horarios).
+- **Intervenciones de cocina:** `intervenciones_lectura`, la auditoría de cada
+  intento de identificar a mano una lectura no reconocida (ver
+  [Intervenciones de cocina](#intervenciones-de-cocina)).
 - **Vistas del contrato de lectura** (`SQL SECURITY INVOKER`, leen
   `bd_proyecto_backend`): `v_comensales`, `v_categorias`, `v_servicios`,
   `v_comidas`, `v_usuario_servicios`, `v_turnos_asignados`, `v_turno_comida`,
@@ -89,7 +93,7 @@ alembic revision --autogenerate -m "descripción"
 ```
 
 La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
-`f13dd53094ae` (head):
+`e1a7c3b9d5f2` (head):
 
 | Revisión | Qué hace |
 |---|---|
@@ -100,6 +104,9 @@ La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
 | `b7c4d2e8f1a3` | `asistencias.registrado_por_cuenta` (FK a `usuarios_sistema`, RESTRICT) y comentario LEGACY en `registrado_por` |
 | `2555bc00750e` | `usuarios_sistema`: `usuario_turnos_id` (UNIQUE, referencia lógica a `users.id`), `nombre` y `creada_por_cuenta`; `v_comensales` suma la columna `login` (`users.name`) |
 | `f13dd53094ae` | `reglas_derecho` + `reglas_derecho_novedad` (parámetros de derecho versionados, versión base 2000-01-01: 12 h, permiso/baja_medica/vacacion/licencia, enfermería excluida); `horarios_comida` suma `motivo` y `creada_por_cuenta`; índice (`comida_id`, `vigente_desde`) |
+
+| `ca83b39b791c` | Horarios inmediatos: `horarios_comida.vigente_desde/hasta` y `lecturas_biometricas.fecha_hora` pasan a `DATETIME(6)`; tabla `cerrojos`. Se niega a perder horas o microsegundos al bajar |
+| `e1a7c3b9d5f2` | Intervenciones de cocina: tabla `intervenciones_lectura` (solo inserciones) y `UNIQUE(asistencias.lectura_id)`. La subida se detiene, sin tocar nada, si ya hay una lectura con dos asistencias; la bajada se niega a borrar auditoría |
 
 Reemplaza a la cadena vieja `fa64a5d4e912 → … → f6a7b8c9d0e1`, que asumía las
 tablas heredadas copiadas en la misma base y le agregaba columnas a `comidas`.
@@ -156,9 +163,9 @@ más.
 
 | Rol | Puede |
 |---|---|
-| `jefa` | Todo lo operativo: pantalla, padrón, historial, informes, marcación biométrica y manual |
-| `cocinera` | Solo `GET /pantalla/*` y `POST /asistencias` con `metodo='biometrico'`; en `/personal` recibe `carnet_identidad` y `tipo_trabajador` en null, y en `/pantalla/dia-personal` recibe `carnet_identidad` en null (esa ficha no trae `tipo_trabajador`) |
-| `sistemas` | Todo lo de la jefa, más administración de cuentas (crea cuentas de cocinera y jefa desde el padrón o sin vínculo) |
+| `jefa` | Todo lo operativo: pantalla, padrón, historial, informes, marcación biométrica y manual. Las intervenciones de cocina solo las **consulta** (`GET /intervenciones-cocina`) |
+| `cocinera` | Solo `GET /pantalla/*`, `POST /asistencias` con `metodo='biometrico'` y, ella sola, `POST /asistencias/lecturas/{id}/identificar`; en `/personal` recibe `carnet_identidad` y `tipo_trabajador` en null, y en `/pantalla/dia-personal` recibe `carnet_identidad` en null (esa ficha no trae `tipo_trabajador`) |
+| `sistemas` | Todo lo de la jefa, más administración de cuentas (crea cuentas de cocinera y jefa desde el padrón o sin vínculo). **Fuera** de las intervenciones de cocina: ni las ejecuta ni las consulta, y no recibe datos de quién las hizo |
 
 La matriz vive en `app/core/permisos.py` y se aplica router por router en
 `app/main.py` con `requiere_rol(...)`. La regla "manual solo jefatura" depende
@@ -232,6 +239,9 @@ Todos exigen `Authorization: Bearer <access>` salvo `/salud`, `/auth/login` y
 | GET | `/personal/{usuario_id}` | Ficha de un comensal |
 | GET | `/personal/{usuario_id}/derecho` | A qué comidas tiene derecho en una fecha |
 | POST | `/asistencias` | Marcar una ración |
+| POST | `/asistencias/lecturas/{lectura_id}/identificar` | Solo cocinera. Identifica una lectura no reconocida y confirma la entrega. Cabecera `Idempotency-Key` (UUID v4), cuerpo `{usuario_id}` |
+| GET | `/intervenciones-cocina` | Solo jefa. Las intervenciones de cocina (registradas y rechazadas), paginadas |
+| GET | `/pantalla/lecturas-por-identificar` | Solo cocinera. Las lecturas no reconocidas que se pueden identificar AHORA, en el servicio actual, sin depender de la fecha ni de las 100 filas de `ultimas-marcaciones` |
 | GET | `/historial/diario` | Lista nominal de un día, con los 4 estados |
 | GET | `/historial/mensual` | Resumen nominal del mes, persona por persona |
 | GET | `/reportes/periodos` | Gestiones y meses para el selector |
@@ -279,6 +289,96 @@ El orden de las validaciones no es arbitrario: `fuera_horario` (necesidad
 técnica: sin comida resuelta no se puede comprobar nada), luego `duplicado` y
 después `sin_derecho`. En el registro manual se invierten los dos últimos.
 
+### Intervenciones de cocina
+
+Cuando el lector no reconoce una huella, la lectura queda `rechazada` /
+`no_identificado` y sin usuario. La **cocinera** ve a la persona, la elige en
+el padrón y confirma la entrega con
+`POST /asistencias/lecturas/{lectura_id}/identificar`. El servidor vuelve a
+comprobar todo y, en una sola transacción, registra la asistencia vinculada a
+la lectura y una fila de auditoría en `intervenciones_lectura`. **La lectura
+original no se modifica** y nunca se dice que el lector reconoció la huella.
+La jefa **solo consulta** (`GET /intervenciones-cocina`); sistemas queda
+fuera. Esto no amplía `POST /asistencias` manual, que sigue siendo solo de
+jefatura, y el registro manual independiente de jefatura sigue separado.
+
+- **Sin nota, sin motivo escrito, sin límite de minutos.** La causa la fija el
+  servidor (`identificacion_manual_por_no_identificado`); la cuenta sale del
+  token y la hora del reloj del servidor.
+- **Mismo servicio efectivo.** La lectura tiene que pertenecer al servicio de
+  ahora: la misma comida, la misma `fecha_comida` y la misma ventana efectiva
+  (`app/consultas/servicio.py`). `lecturas_biometricas` no guarda comida ni
+  fecha, así que el servicio de la lectura se **reconstruye por horario**; no es
+  un dato histórico. Todo lo dudoso falla cerrado: `reloj_inconsistente` (el
+  reloj está antes de la lectura), `servicio_no_determinable` (ninguna ventana
+  la contiene, hay más de una, o dos formas de resolverla discrepan) y
+  `servicio_distinto`.
+- **Derecho, horario y duplicado siguen siendo obligatorios.** Una regla de la
+  persona (`sin_derecho`, `duplicado`) responde **200** con `valido: false` y
+  `resultado: "rechazada"`; un conflicto sobre la lectura
+  (`lectura_no_resoluble`, `lectura_ya_resuelta`, `servicio_*`,
+  `reloj_inconsistente`) responde **409** con `motivo`. Solo
+  `resultado: "registrada"` es una entrega: un intento rechazado nunca se
+  llama entrega.
+- **El rechazo original elegible y "ya resuelta" son dos casos.** Elegible =
+  `rechazada`, `no_identificado`, sin usuario (valores guardados, no lo que
+  muestra la pantalla). Que ya tenga una ración es otra comprobación
+  (`lectura_ya_resuelta`).
+- **Idempotencia por intento.** `Idempotency-Key` (UUID v4, por cuenta) más la
+  huella `SHA-256({lectura_id, usuario_id})`. Misma clave y misma huella:
+  devuelve lo guardado (`reintento: true`), también un rechazo, sin otra fila ni
+  otra ración, y **sin reevaluar nada** (ni la lectura, ni el padrón, ni los
+  horarios). Misma clave con otra persona: 409
+  `clave_reutilizada_con_otro_contenido`. Una lectura resuelta por otra cuenta
+  responde 409 `lectura_ya_resuelta` con `resuelta_por_mi`, nunca quién fue.
+- **Confirmación incierta.** Si algo falla al confirmar (una desconexión) no se
+  sabe qué quedó: 503 `resultado_incierto`, sin afirmar que no hubo entrega. El
+  cliente repite con la **misma** clave y recupera lo confirmado, si lo hubo.
+  Un bloqueo agotado o un interbloqueo es 409 `intervencion_en_curso`
+  (también: repetir con la misma clave).
+- **Transacción y bloqueos.** La autenticación consulta la base: el endpoint
+  copia `cuenta_id`, la lógica hace `rollback()`, recupera la clave sin
+  bloqueo y recién entonces toma `SELECT ... FOR UPDATE` sobre la fila de la
+  lectura, como primera sentencia de la transacción nueva (el snapshot de
+  REPEATABLE READ nace después del bloqueo). Ese es el único bloqueo sobre
+  filas; **nada se bloquea en el padrón, las vistas ni la base de turnos**
+  (solo SELECT planos). La ración entra dentro de un SAVEPOINT: si
+  `uq_asistencias_racion` da `IntegrityError`, el rollback se limita al
+  SAVEPOINT, la causa se averigua **consultando** (no leyendo el texto del
+  driver) y el rechazo se audita en la misma transacción, con el bloqueo
+  vigente. Detalle en `app/logica/intervencion.py`.
+- **Pantalla.** `GET /pantalla/ultimas-marcaciones` muestra ahora el `motivo`
+  **guardado** (antes toda lectura sin usuario se presentaba como
+  `no_identificado`) y separa `decision_original` (inmutable) de `estado_final`
+  / `resultado_final`. `intervencion.revision` solo crece y sube cuando alguien
+  registra una entrega de esa lectura, aunque sea otra cocinera: así el front
+  detecta el cambio de una fila que ya existía. La cocinera nunca recibe datos
+  de cuentas ajenas ni de intentos ajenos; la jefa ve quién registró;
+  sistemas recibe `intervencion: null`.
+- **Servicio nocturno.** `ultimas-marcaciones` se consulta por la fecha de la
+  lectura y corta en 100 filas; una lectura de las 23:58 sigue en el servicio a
+  las 00:30 y ya es de "ayer". Para eso existe
+  `GET /pantalla/lecturas-por-identificar` (solo cocinera): parte del servicio
+  actual y trae sus lecturas pendientes, de ayer o de hoy. Una lectura que sale
+  de esa lista dejó de ser identificable (la resolvió alguien o terminó el
+  servicio); su estado se ve en `ultimas-marcaciones?fecha=<fecha de la lectura>`.
+- **Errores de integridad.** Solo se trata como carrera un duplicado (1062) que
+  la base confirma: en la auditoría, que la clave de idempotencia ya exista; en
+  la ración, que lo explique una ración de esa persona o una asistencia de esa
+  lectura. Cualquier otro error (una FK, un valor inválido) se propaga como
+  fallo interno (500), sin disfrazarlo de `intervencion_en_curso`, y no queda
+  nada a medias.
+- **Coherencia de la auditoría.** Ninguna restricción de la base garantiza que
+  `registrada` tenga `asistencia_id` y `rechazada` no (el CHECK solo cubre
+  `motivo_rechazo`; no se verificó que MySQL admita uno sobre esa columna con
+  FK). La sostiene el único camino de inserción y la comprueban las pruebas.
+- **Métricas.** Los informes, el historial y el cupo salen de `asistencias`: la
+  ración cuenta una vez. La lectura rechazada sigue contando como rechazo (es un
+  toque de dedo, no una ración).
+
+Pendientes de decisión, **no implementados**: bloquear que una cuenta se
+identifique a sí misma y un tope de intentos rechazados por lectura.
+
 ### El derecho a comer
 
 Una asignación de turno da derecho sólo si cumple **las tres** condiciones:
@@ -308,12 +408,12 @@ solo se puede borrar una programada.
 app/
 ├─ main.py              aplicación FastAPI y endpoint /salud
 ├─ api/                 los endpoints
-├─ consultas/           consultas de lectura (padrón, derecho)
-├─ logica/              reglas del negocio (marcación)
+├─ consultas/           consultas de lectura (padrón, derecho, servicio, intervenciones)
+├─ logica/              reglas del negocio (marcación, intervención de cocina)
 ├─ esquemas/            formas de entrada y salida
 ├─ modelos/
 │  ├─ heredados.py      las 9 vistas v_* (base de turnos), SOLO LECTURA
-│  ├─ comedor.py        las 6 tablas propias del comedor
+│  ├─ comedor.py        las tablas propias del comedor (incluye intervenciones_lectura y cerrojos)
 │  ├─ usuarios.py       usuarios_sistema e intentos_login
 │  └─ reglas.py         reglas_derecho y reglas_derecho_novedad (parámetros por fecha)
 ├─ semillas/            carga de datos iniciales (python -m app.semillas)
@@ -324,7 +424,7 @@ app/
    ├─ permisos.py       la matriz rol x recurso
    ├─ db.py             motor único, sesión, Base y BaseContrato
    └─ tablas_heredadas.py   lo que no administramos + la lista de vistas v_*
-alembic/                migraciones (base 4b5a9ed9330e, head f13dd53094ae)
+alembic/                migraciones (base 4b5a9ed9330e, head e1a7c3b9d5f2)
 tests/                  pytest, contra bd_nutricion_test
 ../scripts/recrear_bd_limpia.py   receta limpia de bd_nutricion
 ```

@@ -5,13 +5,18 @@ dice qué roles lo abren):
 
   · jefa       la jefatura de nutrición. Todo lo operativo: padrón,
                historial, informes, pantalla y marcación, también la manual.
+               Las intervenciones de cocina solo las consulta (GET
+               /intervenciones-cocina): no las aprueba ni las ejecuta.
   · cocinera   el personal frente al lector. Mira la pantalla en vivo
                (GET /pantalla/*), consulta el padrón en solo lectura (GET
                /personal/*) para operar el lector y marca con el biométrico.
+               Es la única que identifica a mano una lectura no reconocida y
+               confirma la entrega (POST /asistencias/lecturas/{id}/identificar).
                Ni escrituras en el padrón, ni historial, ni informes, ni
                registro manual.
   · sistemas   soporte técnico. Todo lo de la jefa y, además, la
-               administración de cuentas de usuario y el diagnóstico técnico.
+               administración de cuentas de usuario y el diagnóstico técnico,
+               salvo las intervenciones de cocina: ahí queda fuera.
 
 La matriz se aplica en app/main.py, router por router, con `requiere_rol`
 (app/core/autorizacion.py). Las reglas finas de la marcación (manual solo
@@ -30,6 +35,16 @@ ADMINISTRACION: frozenset[str] = frozenset({"sistemas"})
 # manual salta el lector, así que queda en manos de quien responde por el
 # informe, no de quien está sirviendo.
 MARCACION_MANUAL: frozenset[str] = JEFATURA
+
+# Quién identifica a mano una lectura `no_identificado` y confirma la entrega:
+# solo la cocinera, que es quien ve a la persona frente al lector. Ni la jefa
+# ni sistemas participan. No es la marcación manual de jefatura (que sigue
+# siendo MARCACION_MANUAL y no deja vínculo con ninguna lectura).
+IDENTIFICACION_LECTURA: frozenset[str] = frozenset({"cocinera"})
+
+# Quién consulta las intervenciones de cocina: solo la jefa. Sistemas queda
+# fuera y no recibe ni los responsables ni las vistas nuevas.
+CONSULTA_INTERVENCIONES: frozenset[str] = frozenset({"jefa"})
 
 # Entornos en que una sesión humana puede declarar una marcación biométrica
 # (el simulador del navegador). Fuera de ellos, quién apoyó el dedo solo lo
@@ -68,6 +83,10 @@ ACCESO: dict[str, Regla] = {
     "admin": Regla(completo=ADMINISTRACION),
     # Reglas versionadas: solo root. Jefa y cocinera reciben 403 en /reglas/*.
     "reglas": Regla(completo=ADMINISTRACION),
+    # Intervenciones de cocina (GET /intervenciones-cocina): solo la jefa.
+    # Sistemas y cocinera reciben 403. El POST que las crea vive bajo
+    # /asistencias y lo restringe `usuario_identificador`.
+    "intervenciones": Regla(completo=CONSULTA_INTERVENCIONES),
     # Cuentas en solo lectura: jefa y sistemas. Solo existe GET /cuentas;
     # la cocinera recibe 403 y la jefa no ve cuentas de sistemas.
     "cuentas": Regla(completo=JEFATURA),

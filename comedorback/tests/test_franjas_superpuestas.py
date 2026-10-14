@@ -178,7 +178,10 @@ def test_una_fila_por_lectura_y_resolucion_por_horario(
     for momento, marcada in marcadas.items():
         fila = filas[marcada["lectura_id"]]
         assert fila["comida_id"] == esperado[momento], momento
-        assert (fila["resultado"], fila["motivo"]) == ("rechazada", "no_identificado")
+        # El motivo es el guardado: sin horario a esa hora la lectura se guardó
+        # como fuera_horario, no como no_identificado.
+        guardado = "no_identificado" if esperado[momento] is not None else "fuera_horario"
+        assert (fila["resultado"], fila["motivo"]) == ("rechazada", guardado)
     assert filas[marcadas[a_las(10, 30)]["lectura_id"]]["comida"] is None
 
     # Estables entre consultas.

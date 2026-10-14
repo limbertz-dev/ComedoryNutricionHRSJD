@@ -9,10 +9,15 @@ from fastapi import APIRouter, HTTPException, Query
 from app.consultas import historial as consultas_historial
 from app.consultas import pantalla as consultas
 from app.core import reloj
-from app.core.autorizacion import UsuarioActual
+from app.core.autorizacion import UsuarioActual, UsuarioIdentificador
 from app.core.db import SesionDep
 from app.esquemas.historial import ComensalDelDia, ComidaListada, HistorialDiario
-from app.esquemas.pantalla import ComidasDelDia, EstadoPantalla, Marcacion
+from app.esquemas.pantalla import (
+    ComidasDelDia,
+    EstadoPantalla,
+    LecturasPorIdentificar,
+    Marcacion,
+)
 from app.modelos.heredados import Comensal
 
 router = APIRouter(prefix="/pantalla", tags=["pantalla en vivo"])
@@ -58,6 +63,7 @@ def estado(
 )
 def ultimas_marcaciones(
     sesion: SesionDep,
+    usuario: UsuarioActual,
     fecha: Annotated[
         date | None,
         Query(description="Fecha a consultar. Por defecto hoy."),
@@ -75,13 +81,50 @@ def ultimas_marcaciones(
     repite entre lecturas y asistencias manuales, la clave no. Es una ventana
     de lo más reciente (hasta 100 filas), no un cursor: no garantiza entregar
     todos los eventos ocurridos entre dos consultas.
+
+    Intervenciones de cocina: `decision_original` es lo que decidió el lector
+    y no cambia; `estado_final` / `resultado_final` dicen si terminó en una
+    ración. `intervencion.revision` sube cuando alguien registra una entrega
+    de esa lectura (también otra cocinera): el front detecta el cambio
+    comparando `revision`, aunque la `clave_evento` ya existiera. La cocinera
+    no recibe datos de cuentas ajenas; la jefa ve quién registró; sistemas no
+    recibe el bloque (`intervencion: null`).
     """
     return [
         Marcacion(**asdict(m))
         for m in consultas.ultimas_marcaciones(
-            sesion, fecha=fecha, comida_id=comida_id, limite=limite
+            sesion,
+            fecha=fecha,
+            comida_id=comida_id,
+            limite=limite,
+            rol=usuario.rol,
+            cuenta_id=usuario.id,
         )
     ]
+
+
+@router.get(
+    "/lecturas-por-identificar",
+    response_model=LecturasPorIdentificar,
+    summary="Las lecturas que la cocinera puede identificar ahora",
+)
+def lecturas_por_identificar(
+    sesion: SesionDep, usuario: UsuarioIdentificador
+) -> LecturasPorIdentificar:
+    """Solo cocinera (jefa y sistemas: 403 `rol_no_autorizado`).
+
+    `ultimas-marcaciones` se consulta por la FECHA de la lectura y corta en 100
+    filas: una lectura de las 23:58 sigue siendo del servicio a las 00:30, pero
+    ya es de "ayer" y la consulta de hoy no la trae. Esta lista parte del
+    servicio actual (el mismo cómputo que el POST de identificación) y trae las
+    lecturas no reconocidas pendientes de esa ventana, de ayer o de hoy, sin
+    depender de la fecha ni de las 100 filas. Cada fila trae su `intervencion`
+    (con `revision`) para seguirla. Una lectura que sale de la lista dejó de ser
+    identificable: la resolvió alguien o terminó el servicio.
+    """
+    cuenta_id = usuario.id
+    resultado = consultas.lecturas_por_identificar(sesion, cuenta_id)
+    return LecturasPorIdentificar(**asdict(resultado))
 
 
 @router.get(
