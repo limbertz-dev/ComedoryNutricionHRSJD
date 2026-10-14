@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.core import reloj
+from app.core.config import config
 from app.core.db import SesionLocal
 from app.modelos.heredados import Comida
 from app.semillas import horarios
@@ -58,6 +59,26 @@ def limpiar_horarios() -> None:
         sesion.execute(text("DELETE FROM asistencias"))
         sesion.execute(text("DELETE FROM lecturas_biometricas"))
         sesion.execute(text("DELETE FROM horarios_comida"))
+        sesion.commit()
+
+
+def insertar_version_heredada(
+    comida: int, inicio: str, fin: str, desde: datetime, *, activo: bool
+) -> None:
+    """FIXTURE EXCEPCIONAL: una fila de `horarios_comida` que la API no puede
+    crear (una versión INACTIVA, o una activa a futuro, como las que dejó un
+    sistema anterior). INSERT crudo, solo en tests/ y solo contra la base
+    `_test`; nunca actualiza ni borra nada."""
+    assert config.db_name.endswith("_test"), "solo se escribe en la base de pruebas"
+    with SesionLocal() as sesion:
+        sesion.execute(
+            text(
+                "INSERT INTO horarios_comida (comida_id, hora_inicio, hora_fin, "
+                "vigente_desde, vigente_hasta, activo) "
+                "VALUES (:c, :i, :f, :d, NULL, :a)"
+            ),
+            {"c": comida, "i": inicio, "f": fin, "d": desde, "a": 1 if activo else 0},
+        )
         sesion.commit()
 
 

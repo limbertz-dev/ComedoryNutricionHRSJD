@@ -42,11 +42,19 @@ detiene con un mensaje en vez de repetir pasos, en particular el +1 día de
 `vigente_hasta`, que aplicado dos veces corrompe los cierres. Hacer respaldo
 antes de migrar una base real y detener la API durante la migración.
 
-DOWNGRADE. Solo si no pierde nada: se bloquea, sin tocar la base, si alguna
-`vigente_desde` o `vigente_hasta` tiene hora distinta de 00:00:00 (el primer
-cambio intradía lo bloquea) o si alguna `lecturas_biometricas.fecha_hora` tiene
-microsegundos. Con todo a medianoche exacta y sin microsegundos la reversión es
-exacta: DATE otra vez y `vigente_hasta` menos un día.
+DOWNGRADE. Solo si no pierde nada y solo desde el estado exacto de esta
+revisión. Antes de modificar nada comprueba, y se detiene con instrucciones de
+recuperación (sin reintentar ni adivinar) si:
+
+  1. la base no está en el estado de la revisión: falta la tabla cerrojos o
+     alguna de las tres columnas no es DATETIME(6). Es lo que deja un downgrade
+     interrumpido, y un reintento restaría OTRO día a `vigente_hasta`;
+  2. alguna `vigente_desde` o `vigente_hasta` tiene hora distinta de 00:00:00
+     (el primer cambio intradía lo bloquea);
+  3. alguna `lecturas_biometricas.fecha_hora` tiene microsegundos.
+
+Con todo a medianoche exacta y sin microsegundos la reversión es exacta: DATE
+otra vez y `vigente_hasta` menos un día, que es el último paso.
 
 Los prechecks necesitan una conexión viva: esta revisión no admite `--sql`
 (modo offline).
@@ -232,6 +240,62 @@ def upgrade() -> None:
     )
 
 
+COLUMNAS_INSTANTE = (
+    ("horarios_comida", "vigente_desde"),
+    ("horarios_comida", "vigente_hasta"),
+    ("lecturas_biometricas", "fecha_hora"),
+)
+
+RECUPERACION = (
+    "  No se intenta adivinar qué pasos se aplicaron. Un reintento NO es seguro: el\n"
+    "  último paso del downgrade resta un día a horarios_comida.vigente_hasta y,\n"
+    "  aplicado dos veces, corrompe los cierres.\n"
+    "\n"
+    "  Recuperación, a mano y con el respaldo previo a migrar a mano:\n"
+    "    1. Lo más simple: restaure el respaldo y reintente con la base intacta.\n"
+    "    2. O complete SOLO lo que falte, en este orden:\n"
+    "         a) lecturas_biometricas.fecha_hora -> DATETIME NOT NULL;\n"
+    "         b) DROP TABLE cerrojos;\n"
+    "         c) horarios_comida: vigente_desde DATE NOT NULL, vigente_hasta DATE NULL,\n"
+    "            motivo VARCHAR(500) NULL con el comentario anterior (ver este archivo);\n"
+    "         d) UPDATE horarios_comida SET vigente_hasta = DATE_SUB(vigente_hasta,\n"
+    "            INTERVAL 1 DAY) WHERE vigente_hasta IS NOT NULL -- SOLO si todavía no se\n"
+    "            aplicó: si en un cierre vigente_hasta es IGUAL a la vigente_desde de su\n"
+    "            sucesor (exclusivo), falta; si es un día ANTES (inclusivo), ya se aplicó.\n"
+    "    3. Con el esquema de f13dd53094ae completo: `alembic stamp f13dd53094ae`.\n"
+    "       Si todo estaba aplicado y solo falta el sello, es lo único que hay que hacer.\n"
+    "    Para volver al estado de esta revisión: restaure el respaldo o deshaga a mano\n"
+    "    los pasos aplicados y `alembic stamp ca83b39b791c`."
+)
+
+
+def _verificar_estado_de_la_revision(conexion) -> None:
+    """El downgrade solo arranca desde el estado EXACTO de esta revisión: la
+    tabla cerrojos y las tres columnas en DATETIME(6). Cualquier otra cosa es
+    un downgrade interrumpido (o un esquema tocado a mano): no se continúa,
+    porque no se puede saber si el -1 día ya se aplicó."""
+    inspector = sa.inspect(conexion)
+    anomalias = []
+    if not inspector.has_table("cerrojos"):
+        anomalias.append("falta la tabla cerrojos")
+    for tabla, columna in COLUMNAS_INSTANTE:
+        tipos = {c["name"]: c["type"] for c in inspector.get_columns(tabla)}
+        tipo = tipos.get(columna)
+        if not (isinstance(tipo, sa.DateTime) and getattr(tipo, "fsp", None) == 6):
+            anomalias.append(
+                f"{tabla}.{columna} es {type(tipo).__name__ if tipo is not None else 'inexistente'}, "
+                "no DATETIME(6)"
+            )
+    if anomalias:
+        raise RuntimeError(
+            "Reversión de ca83b39b791c detenida ANTES de modificar nada: la base no "
+            "está en el estado exacto de esta revisión (¿un downgrade interrumpido?).\n"
+            + "\n".join(f"  · {a}" for a in anomalias)
+            + "\n"
+            + RECUPERACION
+        )
+
+
 def _verificar_downgrade(conexion) -> None:
     con_hora = conexion.execute(
         sa.text(
@@ -273,11 +337,15 @@ def _verificar_downgrade(conexion) -> None:
 
 def downgrade() -> None:
     conexion = op.get_bind()
+    # Primero el estado exacto (detecta un downgrade interrumpido), después los
+    # datos que se perderían. Ambos antes de la primera modificación.
+    _verificar_estado_de_la_revision(conexion)
     _verificar_downgrade(conexion)
 
     # Lo que no toca `vigente_hasta` va primero y lo que sí, al final: el
-    # -1 día es el último paso, así un fallo anterior permite reintentar sin
-    # haberlo aplicado ya (aplicado dos veces corrompería los cierres).
+    # -1 día es el último paso. Si algo se interrumpe, el reintento NO
+    # continúa (el estado ya no es el de la revisión): se detiene arriba con
+    # instrucciones de recuperación, y el -1 día nunca se aplica dos veces.
     op.alter_column(
         "lecturas_biometricas",
         "fecha_hora",
