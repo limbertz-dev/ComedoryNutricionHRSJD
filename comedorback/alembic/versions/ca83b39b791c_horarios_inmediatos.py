@@ -296,12 +296,21 @@ def _verificar_estado_de_la_revision(conexion) -> None:
         )
 
 
+def _tiene_hora(columna: str) -> str:
+    """Predicado SQL: `columna` tiene alguna hora, minuto, segundo o microsegundo
+    distinto de cero. Componentes numéricos contra cero: no depende de cómo
+    MySQL formatee un TIME con fracción. NULL no cuenta (HOUR(NULL) es NULL)."""
+    return (
+        f"({columna} IS NOT NULL AND (HOUR({columna}) <> 0 OR MINUTE({columna}) <> 0 "
+        f"OR SECOND({columna}) <> 0 OR MICROSECOND({columna}) <> 0))"
+    )
+
+
 def _verificar_downgrade(conexion) -> None:
     con_hora = conexion.execute(
         sa.text(
             "SELECT id, comida_id, vigente_desde, vigente_hasta FROM horarios_comida "
-            "WHERE TIME(vigente_desde) <> '00:00:00' "
-            "OR (vigente_hasta IS NOT NULL AND TIME(vigente_hasta) <> '00:00:00') "
+            f"WHERE {_tiene_hora('vigente_desde')} OR {_tiene_hora('vigente_hasta')} "
             "ORDER BY id"
         )
     ).all()
