@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.consultas.derecho import Derecho, buscar_derecho
+from app.consultas.horarios import rige_en
 from app.core import reloj
 from app.modelos.comedor import (
     Asistencia,
@@ -62,6 +63,10 @@ class Resultado:
 def resolver_comida_en_curso(sesion: Session, momento: datetime) -> ComidaEnCurso | None:
     """Qué tiempo de comida corresponde al reloj, según horarios_comida.
 
+    La versión que cuenta es la que regía en el INSTANTE `momento`, con sus
+    microsegundos (`rige_en`): un horario guardado a las 16:00 no cambia lo que
+    pasó a las 15:59:59.999999 ni lo que pasó antes.
+
     Si la franja cruza la medianoche (hora_fin < hora_inicio) y la marcación cae
     en la madrugada, la ración pertenece al día ANTERIOR. Sin esto, alguien que
     marca el café nocturno a las 23:58 y otra vez a las 00:02 recibiría dos.
@@ -88,14 +93,7 @@ def resolver_comida_en_curso(sesion: Session, momento: datetime) -> ComidaEnCurs
             HorarioComida.hora_fin,
         )
         .join(Comida, Comida.id == HorarioComida.comida_id)
-        .where(HorarioComida.activo == 1)
-        .where(HorarioComida.vigente_desde <= hoy)
-        .where(
-            or_(
-                HorarioComida.vigente_hasta.is_(None),
-                HorarioComida.vigente_hasta >= hoy,
-            )
-        )
+        .where(rige_en(HorarioComida, momento))
         .where(or_(dentro_normal, dentro_cruzada))
         .order_by(HorarioComida.vigente_desde.desc())
         .limit(1)
