@@ -45,10 +45,12 @@ export default function Header({ seccion, turno, simulacion = null, children }) 
           </span>
         ) : null}
 
-        <span className="header__pastilla header__pastilla--turno">
-          <IconoReloj tamano={18} />
-          Turno {turno}
-        </span>
+        {turno === null ? null : (
+          <span className="header__pastilla header__pastilla--turno">
+            <IconoReloj tamano={18} />
+            Turno {turno}
+          </span>
+        )}
 
         {!esSupervision || !simulacion ? (
           <span className="header__pastilla">
