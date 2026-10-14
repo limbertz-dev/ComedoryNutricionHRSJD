@@ -10,7 +10,7 @@ import Supervision from './components/secciones/Supervision.jsx';
 import Administracion from './components/secciones/Administracion.jsx';
 import CuentasLectura from './components/secciones/CuentasLectura.jsx';
 import ReglasSistema from './components/secciones/ReglasSistema.jsx';
-import SaludSistema from './components/secciones/SaludSistema.jsx';
+import LectorBiometrico from './components/secciones/LectorBiometrico.jsx';
 import Dashboard from './components/secciones/Dashboard.jsx';
 import Reportes from './components/secciones/Reportes.jsx';
 import Historial from './components/secciones/Historial.jsx';
@@ -23,7 +23,13 @@ import {
   leerSeccionGuardada,
   seccionesDeRol,
 } from './navegacion.js';
-import { puedeMarcarManual, puedeOperarReloj, puedeVerSeccion, seccionInicialDeRol } from './permisos.js';
+import {
+  puedeMarcarManual,
+  puedeOperarReloj,
+  puedeVerSeccion,
+  seccionInicialDeRol,
+  usaDatosDelComedor,
+} from './permisos.js';
 import { escucharSesion } from './sesion.js';
 import { claveDelDia, protegerAccionSimulador } from './simulacion.js';
 import {
@@ -117,7 +123,10 @@ export function Panel({ rol, usuario = null }) {
   }), []);
   const [estado, despachar] = useReducer(reductorComedor, undefined, estadoInicial);
 
-  const [cargandoPersonal, setCargandoPersonal] = useState(true);
+  /* Sistemas ya no opera el comedor: no se le pide el padrón ni el cupo del
+     turno, y el encabezado no le muestra un turno que no usa. */
+  const usaComedor = usaDatosDelComedor(rol);
+  const [cargandoPersonal, setCargandoPersonal] = useState(usaComedor);
   const [errorApi, setErrorApi] = useState('');
   const [leyendo, setLeyendo] = useState(false);
   const [errorMarcacion, setErrorMarcacion] = useState('');
@@ -145,9 +154,10 @@ export function Panel({ rol, usuario = null }) {
   /* Sube cada vez que se mueve el reloj: las listas de hoy se vuelven a pedir. */
   const [versionReloj, setVersionReloj] = useState(0);
   const consultaEstado = useCallback((signal) => {
+    if (!usaComedor) return Promise.resolve(null);
     // Cada entrada a una sección vuelve a consultar el reloj y los cupos del servidor.
     return obtenerEstadoPantalla({ signal });
-  }, [seccionActiva]);
+  }, [seccionActiva, usaComedor]);
   const { datos: pantalla, cargando: cargandoEstado, error: errorEstado, recargar: recargarEstado } = useConsultaApi(consultaEstado);
 
   /* Un reloj movido cambia turno, cupo y marcaciones de hoy: todo se relee
@@ -161,6 +171,7 @@ export function Panel({ rol, usuario = null }) {
   const turno = pantalla?.fuera_de_horario ? 'Fuera de horario' : pantalla?.comida ?? 'Consultando…';
 
   useEffect(() => {
+    if (!usaComedor) return undefined;
     const controlador = new AbortController();
     setCargandoPersonal(true);
     setErrorApi('');
@@ -175,7 +186,7 @@ export function Panel({ rol, usuario = null }) {
         if (!controlador.signal.aborted) setCargandoPersonal(false);
       });
     return () => controlador.abort();
-  }, []);
+  }, [usaComedor]);
 
   /*
    * Marcación disparada desde el simulador del lector. Vive aquí, junto al
@@ -312,7 +323,7 @@ export function Panel({ rol, usuario = null }) {
       )}
 
       {esCocinera ? null : (
-        <Header seccion={seccion} turno={turno} simulacion={reloj}>
+        <Header seccion={seccion} turno={usaComedor ? turno : null} simulacion={reloj}>
           {esPantallaEnVivo && simuladorActivo ? (
             <SimuladorLector {...propiedadesSimulador} />
           ) : null}
@@ -329,7 +340,7 @@ export function Panel({ rol, usuario = null }) {
           repetirlo solo le resta a un layout sin scroll. Los errores sí se
           quedan: son los únicos que necesitan atención y acción (reintentar).
         */}
-        {permitida && (!esPantallaEnVivo || errorApi || errorEstado || bloqueoBiometrico) ? (
+        {permitida && usaComedor && (!esPantallaEnVivo || errorApi || errorEstado || bloqueoBiometrico) ? (
           <div className="app__estado-api">
             {!esPantallaEnVivo ? (
               <p id="estado-api" role="status">
@@ -396,10 +407,9 @@ export function Panel({ rol, usuario = null }) {
           {permitida && seccionActiva === 'admin'
             ? <Administracion usuarioActual={usuario} /> : null}
           {permitida && seccionActiva === 'reglas'
-            ? <ReglasSistema key={diaServidor} hoy={reloj ? diaServidor : undefined} /> : null}
-          {/* Sin `reloj`: el entorno y el reloj de negocio salen del propio diagnóstico. */}
+            ? <ReglasSistema key={diaServidor} /> : null}
           {permitida && seccionActiva === 'monitoreo'
-            ? <SaludSistema /> : null}
+            ? <LectorBiometrico /> : null}
           {permitida && seccionActiva === 'cuentas'
             ? <CuentasLectura /> : null}
         </div>

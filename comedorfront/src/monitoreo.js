@@ -1,5 +1,5 @@
 /*
- * monitoreo.js — refresco y vigencia del diagnóstico de «Salud del sistema».
+ * monitoreo.js — refresco y vigencia de la consulta de «Lector biométrico».
  *
  * Sin JSX, para probarlo con `node --test`. La vigencia se mide con los
  * relojes de este equipo desde que llegó la respuesta, nunca con la hora de
@@ -9,7 +9,7 @@
 /** Pausa entre el fin de una consulta y el inicio de la siguiente. */
 export const MS_REFRESCO_MONITOREO = 30000;
 
-/** Edad máxima de un diagnóstico, desde su recepción, para mostrarse vigente. */
+/** Edad máxima de una consulta, desde su recepción, para mostrarse reciente. */
 export const MS_ANTIGUEDAD_MAXIMA = 90000;
 
 /*

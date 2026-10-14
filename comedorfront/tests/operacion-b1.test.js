@@ -180,11 +180,12 @@ test('un fallo sin respuesta del servidor es incierto; un error HTTP no', async 
 // 2. Registro manual en Supervisión
 // -------------------------------------------------------------
 
-test('permisos: solo jefa y sistemas registran a mano; la cocinera ni ve Supervisión', () => {
+test('permisos: solo la jefa registra a mano; ni la cocinera ni sistemas ven Supervisión', () => {
   assert.equal(puedeMarcarManual('jefa'), true);
-  assert.equal(puedeMarcarManual('sistemas'), true);
+  assert.equal(puedeMarcarManual('sistemas'), false);
   assert.equal(puedeMarcarManual('cocinera'), false);
   assert.equal(puedeVerSeccion('cocinera', 'supervision'), false);
+  assert.equal(puedeVerSeccion('sistemas', 'supervision'), false);
 
   const props = { cargandoInicial: false, comidasIniciales: { comidas: [], rechazosSinComida: 0 } };
   const sinPermiso = renderToStaticMarkup(h(Supervision, props));

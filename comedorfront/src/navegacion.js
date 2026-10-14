@@ -1,5 +1,4 @@
 import {
-  IconoAlerta,
   IconoDashboard,
   IconoHistorial,
   IconoHuella,
@@ -57,7 +56,7 @@ export const SECCIONES = [
     id: 'reglas',
     etiqueta: 'Reglas del sistema',
     titulo: 'Reglas del sistema',
-    descripcion: 'Horarios y derecho a comer',
+    descripcion: 'Horarios de las comidas',
     Icono: IconoReloj,
   },
   {
@@ -69,10 +68,10 @@ export const SECCIONES = [
   },
   {
     id: 'monitoreo',
-    etiqueta: 'Salud del sistema',
-    titulo: 'Salud del sistema',
-    descripcion: 'Diagnóstico técnico del sistema',
-    Icono: IconoAlerta,
+    etiqueta: 'Lector biométrico',
+    titulo: 'Lector biométrico',
+    descripcion: 'Estado del lector de huellas',
+    Icono: IconoHuella,
   },
   {
     id: 'cuentas',

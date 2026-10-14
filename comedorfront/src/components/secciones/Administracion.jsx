@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Boton from '../ui/Boton.jsx';
 import Etiqueta from '../ui/Etiqueta.jsx';
-import { IconoAlerta, IconoBuscar, IconoCheck } from '../ui/Iconos.jsx';
+import { IconoAlerta, IconoBuscar, IconoCandado, IconoCheck, IconoRecargar, IconoUsuario } from '../ui/Iconos.jsx';
 import {
   buscarCandidatos,
   crearCuenta,
@@ -308,7 +308,7 @@ export default function Administracion({
     <div className="administracion">
       {aviso ? <AvisoAccion aviso={aviso} onCerrar={() => setAviso(null)} /> : null}
 
-      <div className="administracion__barra">
+      <div className="administracion__barra" role="search">
         <div className="administracion__buscador">
           <span className="administracion__buscador-icono" aria-hidden="true">
             <IconoBuscar tamano={15} />
@@ -333,8 +333,15 @@ export default function Administracion({
           ) : null}
         </div>
 
+        <p className="administracion__contador" role="status">
+          {sinCuentas
+            ? 'Sin cuentas'
+            : `${cuentasVisibles.length} de ${cuentas.length} ${cuentas.length === 1 ? 'cuenta' : 'cuentas'}`}
+        </p>
+
         <Boton
           variante="secundario"
+          icono={<IconoRecargar tamano={17} />}
           onClick={() => cargarCuentas({ esRefresco: true })}
           disabled={actualizando}
         >
@@ -486,6 +493,17 @@ function AvisoAccion({ aviso, onCerrar }) {
  * La clave temporal, al cerrarse su diálogo, se borra del estado del padre.
  */
 function Dialogo({ etiqueta, onCerrar, children }) {
+  const caja = useRef(null);
+
+  /* Al abrir, el foco pasa al diálogo; al cerrar, vuelve a donde estaba. */
+  useEffect(() => {
+    const previo = document.activeElement;
+    caja.current?.focus();
+    return () => {
+      if (previo instanceof HTMLElement && previo.isConnected) previo.focus();
+    };
+  }, []);
+
   useEffect(() => {
     function alTeclado(evento) {
       if (evento.key === 'Escape') onCerrar();
@@ -501,7 +519,14 @@ function Dialogo({ etiqueta, onCerrar, children }) {
         if (evento.target === evento.currentTarget) onCerrar();
       }}
     >
-      <div className="administracion__dialogo" role="dialog" aria-label={etiqueta}>
+      <div
+        ref={caja}
+        className="administracion__dialogo"
+        role="dialog"
+        aria-modal="true"
+        aria-label={etiqueta}
+        tabIndex={-1}
+      >
         {children}
       </div>
     </div>
@@ -601,7 +626,12 @@ export function DialogoNuevaCuenta({
 
   return (
     <Dialogo etiqueta="Nueva cuenta" onCerrar={onCerrar}>
-      <h2 className="administracion__dialogo-titulo">Nueva cuenta</h2>
+      <div className="administracion__dialogo-cabecera">
+        <span className="administracion__dialogo-icono administracion__dialogo-icono--acento" aria-hidden="true">
+          <IconoUsuario tamano={22} />
+        </span>
+        <h2 className="administracion__dialogo-titulo">Nueva cuenta</h2>
+      </div>
 
       <div className="administracion__pestanas" role="tablist" aria-label="Origen de la cuenta">
         <button
@@ -788,16 +818,19 @@ export function DialogoNuevaCuenta({
 
 const TEXTOS_CONFIRMACION = {
   desactivar: {
+    tono: 'aviso',
     titulo: 'Desactivar cuenta',
     mensaje: (cuenta) => `¿Desactivar la cuenta de ${cuenta.username}? No podrá ingresar hasta que se reactive.`,
     confirmar: 'Desactivar',
   },
   reactivar: {
+    tono: 'acento',
     titulo: 'Reactivar cuenta',
     mensaje: (cuenta) => `¿Reactivar la cuenta de ${cuenta.username}? Volverá a ingresar con su clave.`,
     confirmar: 'Reactivar',
   },
   reiniciar: {
+    tono: 'aviso',
     titulo: 'Reiniciar clave',
     mensaje: (cuenta) => `¿Reiniciar la clave de ${cuenta.username}? Se genera una clave temporal nueva, que se muestra una sola vez.`,
     confirmar: 'Reiniciar',
@@ -809,7 +842,12 @@ export function DialogoConfirmacion({ confirmacion, onConfirmar, onCancelar }) {
   const textos = TEXTOS_CONFIRMACION[confirmacion.tipo];
   return (
     <Dialogo etiqueta={textos.titulo} onCerrar={onCancelar}>
-      <h2 className="administracion__dialogo-titulo">{textos.titulo}</h2>
+      <div className="administracion__dialogo-cabecera">
+        <span className={`administracion__dialogo-icono administracion__dialogo-icono--${textos.tono}`} aria-hidden="true">
+          <IconoAlerta tamano={22} />
+        </span>
+        <h2 className="administracion__dialogo-titulo">{textos.titulo}</h2>
+      </div>
       <p className="administracion__dialogo-mensaje">{textos.mensaje(confirmacion.cuenta)}</p>
       <div className="administracion__dialogo-acciones">
         <Boton variante="secundario" onClick={onCancelar}>
@@ -837,7 +875,12 @@ export function DialogoClave({ usuario, valor, onCerrar }) {
 
   return (
     <Dialogo etiqueta="Clave temporal" onCerrar={onCerrar}>
-      <h2 className="administracion__dialogo-titulo">Clave temporal de {usuario}</h2>
+      <div className="administracion__dialogo-cabecera">
+        <span className="administracion__dialogo-icono administracion__dialogo-icono--acento" aria-hidden="true">
+          <IconoCandado tamano={22} />
+        </span>
+        <h2 className="administracion__dialogo-titulo">Clave temporal de {usuario}</h2>
+      </div>
       <p className="administracion__dialogo-mensaje">
         Anótela o cópiela ahora: no se volverá a mostrar.
       </p>
