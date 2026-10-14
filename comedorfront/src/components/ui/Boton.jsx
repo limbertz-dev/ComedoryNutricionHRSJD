@@ -5,7 +5,7 @@ import './Boton.css';
  * nativo del navegador: todo pasa por aquí.
  *
  * @param {'primario'|'secundario'|'fantasma'} variante
- * @param {'md'|'lg'} tamano
+ * @param {'sm'|'md'|'lg'} tamano
  */
 export default function Boton({
   children,

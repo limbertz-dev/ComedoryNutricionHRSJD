@@ -35,16 +35,18 @@ Secciones del sidebar (`src/navegacion.js`):
    (`POST /asistencias`, `metodo: 'biometrico'`); el registro a mano usa
    `metodo: 'manual'`.
 2. **Supervisión del comedor** — tabla en vivo para jefa y sistemas: pestañas
-   por comida (estado, servidas, rechazos) y las últimas 100 marcaciones con
-   filtros por resultado y nombre, refresco cada 30 s y botón Actualizar.
+   por comida (estado, aceptadas, rechazos, manuales), resumen de la pestaña
+   con su período y las últimas 100 marcaciones con filtros por resultado
+   (incluye «Manuales») y nombre, refresco cada 30 s y botón Actualizar.
    «Autorizar» solo aparece en la huella no reconocida y envía
    `autorizarMarcacionManual` (`POST /asistencias`, `metodo: 'manual'`). En
    simulación, su header lleva los controles del reloj.
-3. **Resumen** — cupo del turno y consumo por categoría (`GET /pantalla/estado`).
+3. **Resumen** — cupo del turno, raciones del día por categoría y lecturas del
+   lector, cada conteo con su período (`GET /pantalla/estado`, `src/resumen.js`).
 4. **Historial de comidas** — historial diario y mensual por comensal, paginado.
 5. **Reportes** — formulario de Estadística por rango de fechas (`GET /reportes/informe`)
-   con exportación a Excel y PDF. «Reportes de pacientes» queda como pendiente hasta que
-   exista ese módulo.
+   con exportación a Excel y PDF. Sin pestaña ni acceso a reportes de pacientes: llegan
+   con su módulo.
 6. **Reglas del sistema** — solo para sistemas: pestañas Horarios de comida y
    Derecho a comer para programar cambios con «vigente desde» (hoy o futuro) y
    motivo; solo se elimina lo programado (`GET|POST|DELETE /reglas/*`).

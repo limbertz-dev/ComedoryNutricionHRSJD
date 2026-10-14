@@ -95,8 +95,8 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 48px;
-  padding: 6px 12px;
+  height: var(--alto-control);
+  padding: 0 12px;
   color: #334155;
   text-align: left;
   background: #ffffff;
@@ -105,6 +105,10 @@
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+.order-calendar-trigger:focus-visible {
+  border-radius: 10px;
 }
 
 .order-calendar-trigger:hover,
@@ -128,6 +132,7 @@
   color: #64748b;
   font-size: 9px;
   font-weight: 800;
+  line-height: 1.2;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -136,6 +141,7 @@
   overflow: hidden;
   color: #1e293b;
   font-size: 12px;
+  line-height: 1.3;
   text-overflow: ellipsis;
   text-transform: capitalize;
   white-space: nowrap;
@@ -316,7 +322,7 @@
    ya que cada selector de fecha vive dentro de su propio .order-calendar-picker.
    Degradado esmeralda profundo a verde menta intenso. */
 .report-filter > button {
-  height: 48px;
+  height: var(--alto-control);
   padding: 0 22px;
   font-size: 14px;
   font-weight: 700;
@@ -348,6 +354,10 @@
   box-shadow: none;
 }
 
+.report-filter > button:focus-visible {
+  border-radius: 10px;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .report-controls {
@@ -362,5 +372,26 @@
   .order-calendar-picker {
     flex: 1 1 100%;
     width: 100%;
+  }
+}
+
+/* Sin desplazamientos ni entradas animadas: el cambio de color basta. */
+@media (prefers-reduced-motion: reduce) {
+  .order-calendar-popover {
+    animation: none;
+  }
+
+  .order-calendar-trigger,
+  .period-shortcuts button,
+  .order-calendar-header button,
+  .order-calendar-months button,
+  .order-calendar-days button,
+  .report-filter > button {
+    transition: none;
+  }
+
+  .report-filter > button:hover,
+  .report-filter > button:active {
+    transform: none;
   }
 }

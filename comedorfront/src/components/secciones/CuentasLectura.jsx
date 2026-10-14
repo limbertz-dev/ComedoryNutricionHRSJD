@@ -7,6 +7,7 @@ import {
   ETIQUETAS_ROL,
   estadoDeCuenta,
   filtrarCuentas,
+  contarCuentasPorEstado,
   formatoUltimoIngreso,
   ordenarCuentas,
 } from '../../cuentas.js';
@@ -94,7 +95,9 @@ export default function CuentasLectura({
     );
   }
 
-  const sinCuentas = (cuentas ?? []).length === 0;
+  const total = (cuentas ?? []).length;
+  const sinCuentas = total === 0;
+  const conteo = contarCuentasPorEstado(cuentas ?? []);
 
   return (
     <div className="cuentas">
@@ -120,7 +123,7 @@ export default function CuentasLectura({
       <div className="cuentas__barra">
         <div className="cuentas__buscador">
           <span className="cuentas__buscador-icono" aria-hidden="true">
-            <IconoBuscar tamano={15} />
+            <IconoBuscar tamano={16} />
           </span>
           <input
             type="text"
@@ -142,8 +145,11 @@ export default function CuentasLectura({
           ) : null}
         </div>
 
+        <Etiqueta tono="neutro">Solo lectura</Etiqueta>
+
         <Boton
           variante="secundario"
+          tamano="sm"
           onClick={() => cargarCuentas({ esRefresco: true })}
           disabled={actualizando}
         >
@@ -155,29 +161,49 @@ export default function CuentasLectura({
         <p className="cuentas__vacio" role="status">
           No hay cuentas registradas.
         </p>
-      ) : cuentasVisibles.length === 0 ? (
-        <p className="cuentas__vacio" role="status">
-          Ninguna cuenta coincide con la búsqueda.
-        </p>
       ) : (
-        <div className="cuentas__tabla-caja">
-          <table className="cuentas__tabla" aria-label="Cuentas del comedor">
-            <thead>
-              <tr>
-                <th scope="col">Usuario</th>
-                <th scope="col">Nombre</th>
-                <th scope="col">Rol</th>
-                <th scope="col">Estado</th>
-                <th scope="col">Último ingreso</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cuentasVisibles.map((cuenta) => (
-                <FilaCuentaLectura key={cuenta.id} cuenta={cuenta} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <section className="cuentas__panel" aria-label="Cuentas del comedor">
+          <header className="cuentas__panel-cabecera">
+            <p className="cuentas__conteo" role="status">
+              {`${cuentasVisibles.length} de ${total} ${total === 1 ? 'cuenta' : 'cuentas'}`}
+            </p>
+            <ul className="cuentas__estados" aria-label="Cuentas por estado">
+              <li><Etiqueta tono="exito">{`Activas ${conteo.activas}`}</Etiqueta></li>
+              {conteo.claveTemporal > 0 ? (
+                <li><Etiqueta tono="aviso">{`Clave temporal ${conteo.claveTemporal}`}</Etiqueta></li>
+              ) : null}
+              <li><Etiqueta tono="neutro">{`Inactivas ${conteo.inactivas}`}</Etiqueta></li>
+            </ul>
+          </header>
+
+          {cuentasVisibles.length === 0 ? (
+            <div className="cuentas__vacio cuentas__vacio--tabla" role="status">
+              <p>Ninguna cuenta coincide con la búsqueda.</p>
+              <Boton variante="secundario" tamano="sm" onClick={() => setBusqueda('')}>
+                Limpiar búsqueda
+              </Boton>
+            </div>
+          ) : (
+            <div className="cuentas__tabla-caja">
+              <table className="cuentas__tabla" aria-label="Cuentas del comedor">
+                <thead>
+                  <tr>
+                    <th scope="col">Usuario</th>
+                    <th scope="col">Nombre</th>
+                    <th scope="col">Rol</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Último ingreso</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cuentasVisibles.map((cuenta) => (
+                    <FilaCuentaLectura key={cuenta.id} cuenta={cuenta} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       )}
     </div>
   );
@@ -186,15 +212,18 @@ export default function CuentasLectura({
 /** Fila de solo lectura: datos legibles, sin acciones. */
 function FilaCuentaLectura({ cuenta }) {
   const estado = estadoDeCuenta(cuenta);
+  const nunca = cuenta.ultimoIngreso === null || cuenta.ultimoIngreso === undefined || cuenta.ultimoIngreso === '';
   return (
     <tr className={cuenta.activo ? undefined : 'cuentas__fila--inactiva'}>
-      <td className="cuentas__usuario">{cuenta.username}</td>
-      <td>{cuenta.nombre || '—'}</td>
-      <td>{ETIQUETAS_ROL[cuenta.rol] ?? cuenta.rol}</td>
-      <td>
+      <td className="cuentas__usuario" data-label="Usuario">{cuenta.username}</td>
+      <td data-label="Nombre">{cuenta.nombre || '—'}</td>
+      <td data-label="Rol">{ETIQUETAS_ROL[cuenta.rol] ?? cuenta.rol}</td>
+      <td data-label="Estado">
         <Etiqueta tono={estado.tono}>{estado.texto}</Etiqueta>
       </td>
-      <td>{formatoUltimoIngreso(cuenta.ultimoIngreso)}</td>
+      <td data-label="Último ingreso" className={nunca ? 'cuentas__nunca' : undefined}>
+        {formatoUltimoIngreso(cuenta.ultimoIngreso)}
+      </td>
     </tr>
   );
 }

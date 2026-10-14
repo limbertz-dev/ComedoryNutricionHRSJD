@@ -38,6 +38,14 @@
   border: 1px solid #fecaca;
 }
 
+/* Registro hecho a mano: azul muy oscuro de la marca, distinto del verde de lo
+   aceptado y del rojo de lo rechazado. */
+.etiqueta--manual {
+  background: var(--c-superficie-2);
+  color: var(--c-icono);
+  border: 1px solid var(--c-borde-fuerte);
+}
+
 .etiqueta--aviso {
   background: var(--c-aviso-tenue);
   color: var(--c-aviso);

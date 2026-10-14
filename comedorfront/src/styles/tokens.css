@@ -108,6 +108,15 @@
   --trans-boton: 140ms ease;
   --trans-lenta: 900ms cubic-bezier(0.22, 1, 0.36, 1);
 
+  /* --- Controles compactos ---
+     Dos alturas para toda la botonera de jefatura: la de las barras de
+     reporte (fechas, período y exportaciones comparten fila y deben medir
+     igual) y la de las barras de filtro (búsqueda, segmentos, actualizar). */
+  --alto-control: 46px;
+  --alto-control-compacto: 40px;
+  /* Anillo de foco de los campos: acento a baja opacidad sobre el borde. */
+  --s-foco: 0 0 0 3px rgba(0, 180, 115, 0.22);
+
   /* --- Medidas del layout --- */
   --ancho-sidebar: 250px;
 }
