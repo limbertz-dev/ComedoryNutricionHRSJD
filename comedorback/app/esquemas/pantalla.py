@@ -3,7 +3,7 @@
 from datetime import date, datetime, time
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Cupo(BaseModel):
@@ -45,6 +45,54 @@ class EstadoPantalla(BaseModel):
     )
 
 
+class DecisionOriginal(BaseModel):
+    """Lo que decidió el lector. Guardado e inmutable: una intervención no lo
+    sobrescribe."""
+
+    resultado: str
+    motivo: str | None = None
+    fecha_hora: datetime
+    dispositivo: str
+
+
+class ComensalRacion(BaseModel):
+    usuario_id: int | None = None
+    nombre: str | None = None
+
+
+class ResultadoFinal(BaseModel):
+    """La ración que quedó, si quedó una. Separado de `decision_original`."""
+
+    via: Literal["lector", "identificacion_manual", "registro_manual"]
+    asistencia_id: int
+    comensal: ComensalRacion
+    comida: str | None = None
+    fecha_comida: date | None = None
+    momento: datetime | None = None
+
+
+class IntervencionPantalla(BaseModel):
+    """Estado de las intervenciones de una lectura según el ROL.
+
+    Cocinera: {revision, actualizado_en, resuelta, resuelta_por_mi}. Sin
+    cuentas ajenas ni intentos ajenos. Jefa: lo mismo más `registrada_por`
+    ({cuenta_id, usuario, nombre} o null) e `intentos_rechazados`; son campos
+    extra que la cocinera no recibe. Sistemas: el bloque no existe (null).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    revision: int = Field(
+        description=(
+            "Filas de auditoría visibles al rol. Solo crece: sube cuando alguien "
+            "registra una entrega, aunque sea otra cocinera."
+        )
+    )
+    actualizado_en: datetime | None = None
+    resuelta: bool
+    resuelta_por_mi: bool
+
+
 class Marcacion(BaseModel):
     id: int = Field(
         description=(
@@ -84,6 +132,75 @@ class Marcacion(BaseModel):
             "cursor ni refleja el orden de confirmación de las transacciones."
         ),
         examples=["lectura_biometrica:7", "asistencia_manual:7"],
+    )
+    comida_origen: Literal["persistida_en_asistencia", "reconstruida_por_horario"] | None = Field(
+        default=None,
+        description=(
+            "De dónde sale `comida`. Una lectura sin asistencia no guarda comida: "
+            "se reconstruye por horario y no es un dato histórico guardado."
+        ),
+    )
+    decision_original: DecisionOriginal | None = Field(
+        default=None,
+        description="Guardada e inmutable. null en registros manuales independientes",
+    )
+    estado_final: Literal["racion_servida", "sin_racion"] = Field(
+        default="sin_racion",
+        description=(
+            "Si la fila terminó en una ración. Separado de `valido`, que sigue "
+            "siendo solo la decisión original del lector."
+        ),
+    )
+    resultado_final: ResultadoFinal | None = None
+    puede_identificar: bool = Field(
+        default=False,
+        description=(
+            "Solo true para la cocinera y para una lectura pendiente del servicio "
+            "actual. Es informativo: lo decide el POST de identificación."
+        ),
+    )
+    motivo_no_identificable: str | None = Field(
+        default=None,
+        description=(
+            "Por qué no se puede identificar: lectura_no_resoluble, "
+            "lectura_ya_resuelta, servicio_distinto, servicio_no_determinable, "
+            "reloj_inconsistente o no_aplica (registro manual). null si se puede, "
+            "o si no es cocinera y la lectura sigue pendiente."
+        ),
+    )
+    identificable_hasta: datetime | None = Field(
+        default=None,
+        description="Cierre de la ventana efectiva vigente. Informativo, no vinculante",
+    )
+    intervencion: IntervencionPantalla | None = Field(
+        default=None,
+        description="null para sistemas y para filas que no admiten intervención",
+    )
+
+
+class ServicioActual(BaseModel):
+    """El servicio en curso: la comida, su fecha_comida y la ventana efectiva."""
+
+    comida_id: int
+    comida: str
+    fecha_comida: date
+    inicio: datetime
+    fin: datetime
+
+
+class LecturasPorIdentificar(BaseModel):
+    servicio: ServicioActual | None = Field(
+        description="null si ahora no hay un servicio determinable: la lista va vacía"
+    )
+    total: int = Field(description="Cuántas lecturas se pueden identificar ahora")
+    truncado: bool = Field(
+        description="True si se llegó al tope de seguridad y puede haber más"
+    )
+    lecturas: list[Marcacion] = Field(
+        description=(
+            "Misma forma que ultimas-marcaciones, siempre con puede_identificar=true. "
+            "Más reciente primero. Incluye lecturas de ayer si el servicio cruza la medianoche"
+        )
     )
 
 

@@ -24,7 +24,11 @@ from sqlalchemy.orm import Session
 
 from app.core import seguridad
 from app.core.db import SesionDep
-from app.core.permisos import BIOMETRICO_DESDE_SESION, MARCACION_MANUAL
+from app.core.permisos import (
+    BIOMETRICO_DESDE_SESION,
+    IDENTIFICACION_LECTURA,
+    MARCACION_MANUAL,
+)
 from app.modelos.usuarios import UsuarioSistema
 
 
@@ -96,6 +100,24 @@ def usuario_actual(sesion: SesionDep, credenciales: Credenciales) -> UsuarioSist
 
 
 UsuarioActual = Annotated[UsuarioSistema, Depends(usuario_actual)]
+
+
+def usuario_identificador(usuario: UsuarioActual) -> UsuarioSistema:
+    """La cuenta que puede identificar una lectura no reconocida: solo cocinera.
+
+    Es una dependencia, no un `if` dentro del endpoint, para que el 403 salga
+    antes de que FastAPI valide la cabecera y el cuerpo: quien no tiene el rol
+    no se entera de qué le faltaba a su petición.
+    """
+    if usuario.rol not in IDENTIFICACION_LECTURA:
+        raise prohibido(
+            "rol_no_autorizado",
+            f"El rol '{usuario.rol}' no puede identificar lecturas.",
+        )
+    return usuario
+
+
+UsuarioIdentificador = Annotated[UsuarioSistema, Depends(usuario_identificador)]
 
 
 def requiere_rol(

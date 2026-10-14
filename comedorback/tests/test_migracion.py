@@ -589,3 +589,97 @@ def test_subida_con_versiones_pasadas_o_de_hoy_no_se_bloquea(en_head):
         (datetime(2026, 1, 1), datetime.combine(hoy, datetime.min.time())),
         (datetime.combine(hoy, datetime.min.time()), None),
     ]
+
+
+# --- e1a7c3b9d5f2: intervenciones de cocina y una ración por lectura -----------------------
+
+REV_INTERVENCIONES = "e1a7c3b9d5f2"
+
+
+def _unicos(tabla: str) -> set[str]:
+    return {u["name"] for u in inspect(motor).get_unique_constraints(tabla)}
+
+
+def _insertar_lectura() -> int:
+    _sql(
+        "INSERT INTO lecturas_biometricas (usuario_id, dispositivo, fecha_hora, resultado, motivo) "
+        "VALUES (NULL, 'prueba', '2026-09-24 12:30:00.000000', 'rechazada', 'no_identificado')"
+    )
+    return _filas("SELECT MAX(id) FROM lecturas_biometricas")[0][0]
+
+
+def test_head_deja_la_auditoria_y_una_racion_por_lectura():
+    assert "intervenciones_lectura" in _tablas()
+    assert "uq_asistencias_lectura_id" in _unicos("asistencias")
+    opciones = inspect(motor).get_table_options("intervenciones_lectura")
+    assert opciones["mysql_collate"] == "utf8mb4_unicode_ci"
+
+
+def test_ida_y_vuelta_de_intervenciones(en_head):
+    command.downgrade(en_head, REVISION)
+    assert "intervenciones_lectura" not in _tablas()
+    assert "uq_asistencias_lectura_id" not in _unicos("asistencias")
+    # La FK a lecturas_biometricas sigue teniendo un índice que la sostiene.
+    indices = inspect(motor).get_indexes("asistencias")
+    assert any(i["column_names"] == ["lectura_id"] for i in indices)
+
+    command.upgrade(en_head, "head")
+    assert "intervenciones_lectura" in _tablas()
+    assert "uq_asistencias_lectura_id" in _unicos("asistencias")
+    # Sin sobrantes de la bajada (el índice común): alembic no ve diferencias.
+    command.check(en_head)
+
+
+def test_bajar_se_niega_a_perder_la_auditoria(en_head, crear_usuario):
+    from uuid import uuid4
+
+    cuenta = crear_usuario("coci_migracion", rol="cocinera")
+    lectura = _insertar_lectura()
+    _sql(
+        "INSERT INTO intervenciones_lectura (lectura_id, usuario_id, cuenta_id, "
+        "clave_idempotencia, huella_solicitud, resultado, motivo_rechazo, causa, momento) "
+        "VALUES (:l, 1, :c, :k, :h, 'rechazada', 'sin_derecho', "
+        "'identificacion_manual_por_no_identificado', '2026-09-24 12:31:00.000000')",
+        l=lectura, c=cuenta, k=str(uuid4()), h="0" * 64,
+    )
+    try:
+        with pytest.raises(RuntimeError, match="perdería"):
+            command.downgrade(en_head, REVISION)
+        # No se tocó nada: la tabla y el UNIQUE siguen.
+        assert "intervenciones_lectura" in _tablas()
+        assert "uq_asistencias_lectura_id" in _unicos("asistencias")
+    finally:
+        _sql("DELETE FROM intervenciones_lectura")
+
+
+def test_subir_se_detiene_con_una_lectura_con_dos_asistencias(en_head):
+    command.downgrade(en_head, REVISION)
+    lectura = _insertar_lectura()
+    categoria = _filas("SELECT id FROM categorias_reporte LIMIT 1")[0][0]
+    for usuario in (1, 2):
+        _sql(
+            "INSERT INTO asistencias (usuario_id, fecha_comida, comida_id, categoria_reporte_id, "
+            "metodo, lectura_id, fecha_hora) "
+            "VALUES (:u, '2026-09-24', 1, :c, 'manual', :l, '2026-09-24 12:30:00')",
+            u=usuario, c=categoria, l=lectura,
+        )
+
+    with pytest.raises(RuntimeError, match="detenida ANTES de modificar nada") as parada:
+        command.upgrade(en_head, "head")
+    assert f"lectura_id {lectura}" in str(parada.value)
+    # Detenida antes del primer DDL: ni tabla ni UNIQUE, y ninguna ración tocada.
+    assert "intervenciones_lectura" not in _tablas()
+    assert "uq_asistencias_lectura_id" not in _unicos("asistencias")
+    assert _filas("SELECT COUNT(*) FROM asistencias WHERE lectura_id = :l", l=lectura) == [(2,)]
+    # La fixture limpia las filas de prueba y vuelve a head.
+
+
+def test_subir_se_detiene_ante_un_estado_parcial_de_intervenciones(en_head):
+    command.downgrade(en_head, REVISION)
+    _sql("CREATE TABLE intervenciones_lectura (id INT PRIMARY KEY)")
+    try:
+        with pytest.raises(RuntimeError, match="estado parcial"):
+            command.upgrade(en_head, "head")
+        assert "uq_asistencias_lectura_id" not in _unicos("asistencias")
+    finally:
+        _sql("DROP TABLE IF EXISTS intervenciones_lectura")

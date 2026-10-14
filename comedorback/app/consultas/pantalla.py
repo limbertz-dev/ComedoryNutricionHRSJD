@@ -13,7 +13,7 @@ informe dicen cosas distintas del mismo día.
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy import and_, case, exists, func, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.consultas.derecho import (
@@ -22,12 +22,15 @@ from app.consultas.derecho import (
     no_es_enfermeria,
 )
 from app.consultas.horarios import estado_en, rige_en, ventanas_del_dia
+from app.consultas.intervenciones import cuentas_por_id
+from app.consultas.servicio import Servicio, VentanasDelDia, evaluar_servicio
 from app.core import reloj
 from app.logica.marcacion import ComidaEnCurso, resolver_comida_en_curso
 from app.modelos.comedor import (
     Asistencia,
     CategoriaReporte,
     HorarioComida,
+    IntervencionLectura,
     LecturaBiometrica,
 )
 from app.modelos.heredados import Comensal, Comida
@@ -84,6 +87,25 @@ class Marcacion:
     dispositivo: str
     origen: str
     clave_evento: str
+    # Columnas crudas de la consulta (no salen en la API). Con valor por
+    # omisión para que `_componer_ventana` siga aceptando ramas con solo las
+    # once columnas de siempre.
+    lectura_resultado: str | None = None
+    lectura_motivo: str | None = None
+    asistencia_id: int | None = None
+    racion_usuario_id: int | None = None
+    racion_nombre: str | None = None
+    racion_fecha_comida: date | None = None
+    racion_fecha_hora: datetime | None = None
+    # Lo que calcula `_enriquecer`, según el rol.
+    comida_origen: str | None = None
+    decision_original: dict | None = None
+    estado_final: str = "sin_racion"
+    resultado_final: dict | None = None
+    puede_identificar: bool = False
+    motivo_no_identificable: str | None = None
+    identificable_hasta: datetime | None = None
+    intervencion: dict | None = None
 
 
 @dataclass
@@ -360,20 +382,28 @@ def ultimas_marcaciones(
     fecha: date | None = None,
     comida_id: int | None = None,
     limite: int = 50,
+    rol: str | None = None,
+    cuenta_id: int | None = None,
 ) -> list[Marcacion]:
     """El hilo de lo que va pasando en el lector, para la pantalla en vivo.
 
     Combina `lecturas_biometricas` con las asistencias manuales: la pantalla
     muestra los rechazos del lector y las raciones registradas por la
     jefatura en una sola secuencia cronológica. Una asistencia biométrica no
-    entra por la rama manual: aparece una sola vez, como su lectura.
+    entra por la rama manual: aparece una sola vez, como su lectura. Lo mismo
+    una asistencia vinculada por una intervención de cocina: sale como su
+    lectura, con la decisión original intacta y el resultado final aparte.
 
     Es una ventana de lo más reciente (`limite`, hasta 100), no un cursor:
     entre dos consultas pueden pasar más eventos de los que caben.
+
+    `rol` y `cuenta_id` deciden lo que se ve de las intervenciones (ver
+    `_enriquecer`); sin rol, nada de ellas.
     """
     dia = fecha or reloj.hoy()
     comida_asistencia = aliased(Comida, name="comida_asistencia")
     comida_horario = aliased(Comida, name="comida_horario")
+    comensal_racion = aliased(Comensal, name="comensal_racion")
     # Una fila por lectura ANTES de filtrar por comida y cortar el límite.
     resuelta = _comida_por_lectura(dia)
     comida_resuelta_id = _comida_de_la_lectura(resuelta)
@@ -399,19 +429,27 @@ def ultimas_marcaciones(
                 else_=comida_horario.nombre,
             ).label("comida"),
             LecturaBiometrica.resultado,
+            # El motivo GUARDADO. Antes toda lectura sin usuario se mostraba
+            # como no_identificado, también la que se guardó como
+            # fuera_horario, y eso la ofrecía como identificable.
+            LecturaBiometrica.motivo.label("motivo"),
             case(
-                (LecturaBiometrica.usuario_id.is_(None), literal("no_identificado")),
-                else_=LecturaBiometrica.motivo,
-            ).label("motivo"),
-            case(
-                (LecturaBiometrica.usuario_id.is_(None), literal(False)),
-                else_=LecturaBiometrica.resultado == "aceptada",
+                (LecturaBiometrica.resultado == "aceptada", literal(True)),
+                else_=literal(False),
             ).label("valido"),
             LecturaBiometrica.dispositivo,
+            LecturaBiometrica.resultado.label("lectura_resultado"),
+            LecturaBiometrica.motivo.label("lectura_motivo"),
+            Asistencia.id.label("asistencia_id"),
+            Asistencia.usuario_id.label("racion_usuario_id"),
+            comensal_racion.nombre_completo.label("racion_nombre"),
+            Asistencia.fecha_comida.label("racion_fecha_comida"),
+            Asistencia.fecha_hora.label("racion_fecha_hora"),
         )
         .select_from(LecturaBiometrica)
         .outerjoin(Comensal, Comensal.usuario_id == LecturaBiometrica.usuario_id)
         .outerjoin(Asistencia, Asistencia.lectura_id == LecturaBiometrica.id)
+        .outerjoin(comensal_racion, comensal_racion.usuario_id == Asistencia.usuario_id)
         .outerjoin(comida_asistencia, comida_asistencia.id == Asistencia.comida_id)
         .outerjoin(resuelta, resuelta.c.lectura_id == LecturaBiometrica.id)
         .outerjoin(comida_horario, comida_horario.id == resuelta.c.comida_id)
@@ -430,6 +468,13 @@ def ultimas_marcaciones(
             literal(None).label("motivo"),
             literal(True).label("valido"),
             literal("registro-manual").label("dispositivo"),
+            literal(None).label("lectura_resultado"),
+            literal(None).label("lectura_motivo"),
+            Asistencia.id.label("asistencia_id"),
+            Asistencia.usuario_id.label("racion_usuario_id"),
+            Comensal.nombre_completo.label("racion_nombre"),
+            Asistencia.fecha_comida.label("racion_fecha_comida"),
+            Asistencia.fecha_hora.label("racion_fecha_hora"),
         )
         .select_from(Asistencia)
         .outerjoin(Comensal, Comensal.usuario_id == Asistencia.usuario_id)
@@ -443,7 +488,8 @@ def ultimas_marcaciones(
     if comida_id is not None:
         lecturas = lecturas.where(comida_resuelta_id == comida_id)
         manuales = manuales.where(Asistencia.comida_id == comida_id)
-    return _componer_ventana(sesion, lecturas, manuales, limite)
+    filas = _componer_ventana(sesion, lecturas, manuales, limite)
+    return _enriquecer(sesion, filas, rol, cuenta_id)
 
 
 def _componer_ventana(sesion: Session, lecturas, manuales, limite: int) -> list[Marcacion]:
@@ -472,6 +518,252 @@ def _componer_ventana(sesion: Session, lecturas, manuales, limite: int) -> list[
         Marcacion(**fila, clave_evento=clave_evento(fila["origen"], fila["id"]))
         for fila in sesion.execute(ordenadas).mappings().all()
     ]
+
+
+def _es_rechazo_identificable(m: Marcacion) -> bool:
+    """El rechazo ORIGINAL es de los que cocina puede identificar: valores
+    GUARDADOS en la lectura, no lo que la pantalla presenta. No incluye si ya
+    tiene ración: eso es otro caso (`lectura_ya_resuelta`)."""
+    return (
+        m.origen == ORIGEN_LECTURA
+        and m.lectura_resultado == "rechazada"
+        and m.lectura_motivo == "no_identificado"
+        and m.usuario_id is None
+    )
+
+
+def _intervenciones_por_lectura(
+    sesion: Session, ids: list[int]
+) -> dict[int, list[tuple[int, str, datetime]]]:
+    """(cuenta_id, resultado, momento) de cada intento, por lectura. Solo
+    lectura: la tabla solo admite inserciones."""
+    if not ids:
+        return {}
+    filas = sesion.execute(
+        select(
+            IntervencionLectura.lectura_id,
+            IntervencionLectura.cuenta_id,
+            IntervencionLectura.resultado,
+            IntervencionLectura.momento,
+        )
+        .where(IntervencionLectura.lectura_id.in_(ids))
+        .order_by(IntervencionLectura.id)
+    ).all()
+    por_lectura: dict[int, list[tuple[int, str, datetime]]] = {}
+    for lectura_id, cuenta, resultado, momento in filas:
+        por_lectura.setdefault(lectura_id, []).append((cuenta, resultado, momento))
+    return por_lectura
+
+
+def _bloque_intervencion(
+    rol: str | None,
+    cuenta_id: int | None,
+    intentos: list[tuple[int, str, datetime]],
+    cuentas: dict[int, dict],
+    resuelta: bool,
+) -> dict | None:
+    """Lo que cada rol ve de las intervenciones de una lectura.
+
+    `revision` es la cantidad de filas de auditoría VISIBLES al rol. Como la
+    tabla solo admite inserciones, el conjunto solo crece y `revision` nunca
+    baja. Para la cocinera cuentan sus propios intentos y toda entrega
+    registrada: cuando OTRA cocinera registra la entrega, sube exactamente 1,
+    y un intento rechazado ajeno no cambia nada ni revela que existió. La
+    cocinera no recibe ninguna cuenta ajena, solo `resuelta_por_mi`.
+    """
+    registrada = next((i for i in intentos if i[1] == "registrada"), None)
+    if rol == "cocinera":
+        visibles = [i for i in intentos if i[0] == cuenta_id or i[1] == "registrada"]
+        return {
+            "revision": len(visibles),
+            "actualizado_en": max((i[2] for i in visibles), default=None),
+            "resuelta": resuelta,
+            "resuelta_por_mi": registrada is not None and registrada[0] == cuenta_id,
+        }
+    if rol == "jefa":
+        return {
+            "revision": len(intentos),
+            "actualizado_en": max((i[2] for i in intentos), default=None),
+            "resuelta": resuelta,
+            "resuelta_por_mi": False,
+            "registrada_por": cuentas.get(registrada[0]) if registrada else None,
+            "intentos_rechazados": sum(1 for i in intentos if i[1] == "rechazada"),
+        }
+    return None  # sistemas, o sin rol: sin bloque ni datos de responsables
+
+
+def _enriquecer(
+    sesion: Session, filas: list[Marcacion], rol: str | None, cuenta_id: int | None
+) -> list[Marcacion]:
+    """Completa cada fila con la decisión original, el resultado final y lo
+    que le toca ver a `rol` de las intervenciones.
+
+    Cocinera: `puede_identificar` con el mismo predicado que usa el POST, en
+    solo lectura (informativo: decide el POST). Jefa y sistemas nunca pueden
+    identificar. La decisión original sale de los valores guardados de la
+    lectura y no la sobrescribe ninguna intervención: el resultado final va
+    aparte.
+    """
+    ids = [m.id for m in filas if _es_rechazo_identificable(m)]
+    por_lectura = (
+        _intervenciones_por_lectura(sesion, ids) if rol in ("cocinera", "jefa") else {}
+    )
+    cuentas: dict[int, dict] = {}
+    if rol == "jefa":
+        cuentas = cuentas_por_id(
+            sesion,
+            {i[0] for intentos in por_lectura.values() for i in intentos if i[1] == "registrada"},
+        )
+    ahora = reloj.ahora()
+    ventanas: VentanasDelDia | None = None
+
+    for m in filas:
+        con_racion = m.asistencia_id is not None
+        m.estado_final = "racion_servida" if con_racion else "sin_racion"
+        es_lectura = m.origen == ORIGEN_LECTURA
+        if es_lectura:
+            m.decision_original = {
+                "resultado": m.lectura_resultado,
+                "motivo": m.lectura_motivo,
+                "fecha_hora": m.fecha_hora,
+                "dispositivo": m.dispositivo,
+            }
+            m.comida_origen = (
+                "persistida_en_asistencia"
+                if con_racion
+                else "reconstruida_por_horario"
+                if m.comida_id is not None
+                else None
+            )
+        else:
+            m.decision_original = None
+            m.comida_origen = "persistida_en_asistencia"
+            m.motivo_no_identificable = "no_aplica"
+
+        if con_racion:
+            if not es_lectura:
+                via = "registro_manual"
+            elif m.lectura_resultado == "aceptada":
+                via = "lector"
+            else:
+                via = "identificacion_manual"
+            m.resultado_final = {
+                "via": via,
+                "asistencia_id": m.asistencia_id,
+                "comensal": {"usuario_id": m.racion_usuario_id, "nombre": m.racion_nombre},
+                "comida": m.comida,
+                "fecha_comida": m.racion_fecha_comida,
+                "momento": m.racion_fecha_hora,
+            }
+
+        if not es_lectura:
+            continue
+        if not _es_rechazo_identificable(m):
+            m.motivo_no_identificable = "lectura_no_resoluble"
+            continue
+
+        m.intervencion = _bloque_intervencion(
+            rol, cuenta_id, por_lectura.get(m.id, []), cuentas, con_racion
+        )
+        if con_racion:
+            m.motivo_no_identificable = "lectura_ya_resuelta"
+            continue
+        if rol != "cocinera":
+            continue
+        ventanas = ventanas or VentanasDelDia(sesion)
+        evaluacion = evaluar_servicio(sesion, ventanas, m.fecha_hora, ahora)
+        if evaluacion.motivo is not None:
+            m.motivo_no_identificable = evaluacion.motivo
+        else:
+            m.puede_identificar = True
+            m.identificable_hasta = evaluacion.servicio.fin
+    return filas
+
+
+# Tope de seguridad de `lecturas_por_identificar`. No es la ventana de 100 filas
+# de `ultimas_marcaciones`: un servicio tiene muchas menos lecturas sin
+# reconocer que esto, y si alguna vez se llega se avisa con `truncado`.
+MAXIMO_POR_IDENTIFICAR = 500
+
+
+@dataclass
+class PorIdentificar:
+    servicio: Servicio | None
+    total: int
+    truncado: bool
+    lecturas: list[Marcacion]
+
+
+def lecturas_por_identificar(sesion: Session, cuenta_id: int | None) -> PorIdentificar:
+    """Las lecturas que la cocinera puede identificar AHORA, en el servicio
+    actual, sin mirar la fecha ni la ventana de `ultimas_marcaciones`.
+
+    `ultimas_marcaciones` se consulta por la fecha de la LECTURA y corta en
+    100 filas. Un servicio que cruza la medianoche rompe las dos cosas: la
+    lectura de las 23:58 sigue siendo del servicio a las 00:30, pero ya es de
+    "ayer" y la fecha de hoy no la trae. Esta consulta parte del servicio
+    actual (el mismo cómputo que el POST: `evaluar_servicio` con la hora de
+    ahora en los dos extremos) y trae las lecturas `no_identificado`,
+    pendientes, cuya hora cae dentro de la ventana efectiva, de ayer o de hoy.
+
+    Cada fila pasa por `_enriquecer` con el rol de cocinera, así que repite el
+    mismo predicado del POST (`puede_identificar`) y solo se devuelven las que
+    de verdad se pueden identificar. Sin servicio determinable: lista vacía.
+    """
+    ahora = reloj.ahora()
+    ventanas = VentanasDelDia(sesion)
+    actual = evaluar_servicio(sesion, ventanas, ahora, ahora)
+    if actual.motivo is not None or actual.servicio is None:
+        return PorIdentificar(servicio=None, total=0, truncado=False, lecturas=[])
+    servicio = actual.servicio
+
+    sin_racion = ~exists().where(Asistencia.lectura_id == LecturaBiometrica.id)
+    filas = sesion.execute(
+        select(
+            LecturaBiometrica.id,
+            LecturaBiometrica.fecha_hora,
+            LecturaBiometrica.dispositivo,
+        )
+        .where(
+            LecturaBiometrica.fecha_hora >= servicio.inicio,
+            LecturaBiometrica.fecha_hora <= ahora,
+            LecturaBiometrica.resultado == "rechazada",
+            LecturaBiometrica.motivo == "no_identificado",
+            LecturaBiometrica.usuario_id.is_(None),
+            sin_racion,
+        )
+        .order_by(LecturaBiometrica.fecha_hora.desc(), LecturaBiometrica.id.desc())
+        .limit(MAXIMO_POR_IDENTIFICAR)
+    ).all()
+
+    marcaciones = [
+        Marcacion(
+            id=id_,
+            fecha_hora=fecha_hora,
+            usuario_id=None,
+            nombre="Huella no reconocida",
+            categoria="Sin identificar",
+            comida_id=servicio.comida_id,
+            comida=servicio.comida,
+            resultado="rechazada",
+            motivo="no_identificado",
+            valido=False,
+            dispositivo=dispositivo,
+            origen=ORIGEN_LECTURA,
+            clave_evento=clave_evento(ORIGEN_LECTURA, id_),
+            lectura_resultado="rechazada",
+            lectura_motivo="no_identificado",
+        )
+        for id_, fecha_hora, dispositivo in filas
+    ]
+    enriquecidas = _enriquecer(sesion, marcaciones, "cocinera", cuenta_id)
+    identificables = [m for m in enriquecidas if m.puede_identificar]
+    return PorIdentificar(
+        servicio=servicio,
+        total=len(identificables),
+        truncado=len(filas) >= MAXIMO_POR_IDENTIFICAR,
+        lecturas=identificables,
+    )
 
 
 def _servidas_por_comida(
@@ -505,10 +797,11 @@ def _rechazos_por_comida(
     """
     resuelta = _comida_por_lectura(dia)
     comida_resuelta_id = _comida_de_la_lectura(resuelta)
-    motivo_presentado = case(
-        (LecturaBiometrica.usuario_id.is_(None), literal("no_identificado")),
-        else_=LecturaBiometrica.motivo,
-    )
+    # El motivo GUARDADO: una lectura sin usuario que se guardó como
+    # fuera_horario ya no se cuenta como no_identificado. Las cifras por
+    # comida no cambian (esa lectura no resuelve a ninguna y va a
+    # rechazos_sin_comida), pero deja de rotularse mal.
+    motivo_presentado = LecturaBiometrica.motivo
     rechazos: dict[tuple[int, str], int] = {}
     sin_comida = 0
     for comida_id, motivo, cantidad in sesion.execute(

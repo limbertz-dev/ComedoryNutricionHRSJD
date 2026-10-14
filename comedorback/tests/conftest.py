@@ -78,6 +78,10 @@ def base_de_prueba():
 @pytest.fixture(autouse=True)
 def tablas_auth_limpias():
     with SesionLocal() as sesion:
+        # La auditoría de intervenciones apunta (RESTRICT) a cuentas, lecturas
+        # y asistencias: se vacía primero, o los DELETE de abajo y los de las
+        # demás pruebas reventarían por la FK.
+        sesion.execute(text("DELETE FROM intervenciones_lectura"))
         # R2 deja solo la versión base (2000-01-01): los tests que asumen
         # 12 h y enfermería excluida no se enteran de versiones de otro test.
         sesion.execute(
