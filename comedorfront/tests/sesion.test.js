@@ -36,10 +36,10 @@ const ACTIVA_JEFA = { fase: 'activa', rol: 'jefa', usuario: 'ntarifa', aviso: nu
 
 // --- Guardia por rol ---
 
-test('guardia por rol: cocinera 1 sección, jefa 5, sistemas 7 con reglas, admin y monitoreo, rol desconocido ninguna', () => {
+test('guardia por rol: cocinera 1 sección, jefa 5, sistemas 3 (reglas, admin y lector), rol desconocido ninguna', () => {
   assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
   assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
-  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin', 'monitoreo']);
+  assert.deepEqual(seccionesPermitidas('sistemas'), ['reglas', 'admin', 'monitoreo']);
   assert.deepEqual(seccionesPermitidas(' Jefa '), seccionesPermitidas('jefa'));
   for (const rol of ['nutricionista', '', null, undefined, 42]) {
     assert.deepEqual(seccionesPermitidas(rol), [], `rol ${rol} debe negarse por defecto`);
@@ -54,10 +54,10 @@ test('guardia por rol: cocinera 1 sección, jefa 5, sistemas 7 con reglas, admin
   assert.equal(puedeVerSeccion('jefa', 'reportes'), true);
 });
 
-test('el modo manual se oculta a la cocinera y solo a ella', () => {
+test('el registro manual es solo de la jefa: ni cocinera ni sistemas lo tienen', () => {
   assert.equal(puedeMarcarManual('cocinera'), false);
   assert.equal(puedeMarcarManual('jefa'), true);
-  assert.equal(puedeMarcarManual('sistemas'), true);
+  assert.equal(puedeMarcarManual('sistemas'), false);
   assert.equal(puedeMarcarManual('desconocido'), false);
 });
 
@@ -68,7 +68,6 @@ test('redirect cocinera: la sección que dejó la jefa en la PC compartida la ma
   assert.equal(resolverSeccionGuardada('cocinera', null), 'vivo');
   assert.equal(resolverSeccionGuardada('jefa', 'reportes'), 'reportes');
   assert.equal(resolverSeccionGuardada('jefa', 'vivo'), 'supervision');
-  assert.equal(resolverSeccionGuardada('sistemas', 'vivo'), 'supervision');
   assert.equal(resolverSeccionGuardada('jefa', 'basura'), 'supervision');
   assert.equal(resolverSeccionGuardada('nutricionista', 'reportes'), null);
 });

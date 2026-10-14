@@ -1,103 +1,109 @@
 /*
- * R2 Reglas del sistema (solo sistemas) y Cuentas (jefa, lectura).
- * Permisos y menú, adaptadores /reglas/* y /cuentas con fetch controlado,
- * fecha mínima del servidor y renders con react-dom/server.
+ * Root simplificado: menú de tres secciones, Reglas del sistema (horario de
+ * cada comida con efecto inmediato) y Cuentas (jefa, lectura).
+ * Permisos y menú, adaptadores /reglas/horarios con fetch controlado,
+ * lógica de la pantalla con respuestas sintéticas y renders con
+ * react-dom/server. Sin API real, MySQL ni servidores.
  */
-import test, { afterEach } from 'node:test';
+import test, { afterEach, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createElement as h } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import * as api from '../src/api.js';
 import {
-  eliminarHorarioProgramado,
-  eliminarReglasDerechoProgramadas,
+  ErrorGuardadoHorario,
+  guardarHorario,
   obtenerCuentasLectura,
   obtenerHistorialHorario,
   obtenerHorariosVigentes,
-  obtenerNovedadesDisponibles,
-  obtenerReglasDerecho,
-  programarHorario,
-  programarReglasDerecho,
 } from '../src/api.js';
-import { buscarSeccion, seccionesDeRol } from '../src/navegacion.js';
-import { puedeVerSeccion, seccionesPermitidas } from '../src/permisos.js';
-import { createElement as h } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { SECCIONES, buscarSeccion, leerSeccionGuardada, seccionesDeRol } from '../src/navegacion.js';
+import {
+  puedeMarcarManual,
+  puedeVerSeccion,
+  resolverSeccionGuardada,
+  seccionesPermitidas,
+  usaDatosDelComedor,
+} from '../src/permisos.js';
+import { borrarTokens, escucharSesion } from '../src/sesion.js';
+import {
+  cargarComidas,
+  cruzaMedianoche,
+  ejecutarGuardado,
+  estadoInicialReglas,
+  formatoHora,
+  guardarComida,
+  horasConSegundos,
+  motivoSinGuardar,
+  normalizarHora,
+  recargarComidas,
+  reductorReglas,
+  resolverBase,
+  textoMomento,
+} from '../src/reglasHorarios.js';
 import { Panel } from '../src/App.jsx';
 import { ProveedorSesion } from '../src/hooks/useSesion.js';
-import ReglasSistema, {
-  DialogoHistorialHorario,
-  DialogoNuevaVersion,
-  DialogoProgramarHorario,
-  PestanaDerecho,
-  PestanaHorarios,
-  estadoHorario,
-  fechaLocal,
-  formatoDiaMes,
-  formatoFecha,
-  formatoHora,
-  minimoVigencia,
-  ordenarVersionesDerecho,
-  resumenDiferencias,
-} from '../src/components/secciones/ReglasSistema.jsx';
+import ReglasSistema, { TarjetaComida, VistaReglas } from '../src/components/secciones/ReglasSistema.jsx';
 import CuentasLectura from '../src/components/secciones/CuentasLectura.jsx';
 
+/* sessionStorage mínimo: en Node no existe y la sesión guarda los tokens ahí. */
+const almacen = new Map();
+globalThis.sessionStorage ??= {
+  getItem: (clave) => (almacen.has(clave) ? almacen.get(clave) : null),
+  setItem: (clave, valor) => almacen.set(clave, String(valor)),
+  removeItem: (clave) => almacen.delete(clave),
+};
+
 const fetchOriginal = globalThis.fetch;
+let avisos;
+let dejarDeEscuchar;
+beforeEach(() => {
+  avisos = [];
+  dejarDeEscuchar = escucharSesion((aviso) => avisos.push(aviso.tipo));
+});
 afterEach(() => {
   globalThis.fetch = fetchOriginal;
+  dejarDeEscuchar();
+  borrarTokens();
+  mock.timers.reset();
 });
 
 const json = (datos, status = 200) => new Response(JSON.stringify(datos), { status });
-const sinContenido = () => new Response(null, { status: 204 });
 
-const versionApi = (cambios = {}) => ({
-  id: 3,
-  vigente_desde: '2026-10-01',
-  duracion_minima_horas: 12,
-  novedades_que_anulan: ['vacacion'],
-  excluir_enfermeria: false,
-  motivo: 'Motivo de prueba valido',
-  creada_por: 'root',
-  creada: '2026-09-20T08:00:00',
-  estado: 'vigente',
-  ...cambios,
-});
-
-const version = (cambios = {}) => ({
-  id: 3,
-  vigenteDesde: '2026-10-01',
-  duracionMinimaHoras: 12,
-  novedadesQueAnulan: ['vacacion'],
-  excluirEnfermeria: false,
-  motivo: 'Motivo de prueba valido',
-  creadaPor: 'root',
-  creada: '2026-09-20T08:00:00',
-  estado: 'vigente',
-  ...cambios,
-});
-
+/** Respuesta sintética de GET /reglas/horarios (contrato HorarioRegla). */
 const horarioApi = (cambios = {}) => ({
   horario_id: 5,
   comida_id: 2,
   comida: 'Almuerzo',
-  hora_inicio: '11:30',
-  hora_fin: '15:00',
+  hora_inicio: '11:30:00',
+  hora_fin: '15:00:00',
   cruza_medianoche: false,
-  vigente_desde: '2026-09-01',
+  vigente_desde: '2026-10-14T08:30:15.123456',
   vigente_hasta: null,
-  motivo: 'Horario habitual',
+  motivo: null,
   creada_por: 'root',
+  creada: '2026-10-14T08:30:15.500000',
+  estado: 'vigente',
   ...cambios,
 });
 
+/** El mismo horario ya adaptado a camelCase. */
 const horario = (cambios = {}) => ({
   horarioId: 5,
   comidaId: 2,
   comida: 'Almuerzo',
-  horaInicio: '11:30',
-  horaFin: '15:00',
+  horaInicio: '11:30:00',
+  horaFin: '15:00:00',
   cruzaMedianoche: false,
-  vigenteDesde: '2026-09-01',
+  vigenteDesde: '2026-10-14T08:30:15.123456',
   vigenteHasta: null,
-  motivo: 'Horario habitual',
+  motivo: null,
   creadaPor: 'root',
+  creada: '2026-10-14T08:30:15.500000',
+  estado: 'vigente',
   ...cambios,
 });
 
@@ -112,38 +118,94 @@ const cuentaApi = (cambios = {}) => ({
   ...cambios,
 });
 
-// -------------------------------------------------------------
-// 1. Permisos y menú: reglas solo sistemas, cuentas solo jefa
-// -------------------------------------------------------------
-test('reglas es solo de sistemas y cuentas solo de la jefa', () => {
-  assert.deepEqual(seccionesPermitidas('sistemas'), ['supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin', 'monitoreo']);
-  assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
-  assert.equal(puedeVerSeccion('sistemas', 'reglas'), true);
-  assert.equal(puedeVerSeccion('sistemas', 'cuentas'), false);
-  assert.equal(puedeVerSeccion('jefa', 'cuentas'), true);
-  assert.equal(puedeVerSeccion('jefa', 'reglas'), false);
-  assert.equal(puedeVerSeccion('cocinera', 'reglas'), false);
-  assert.equal(puedeVerSeccion('cocinera', 'cuentas'), false);
+/** Tarjeta ya resuelta, como la entrega cargarComidas. */
+const comida = (cambios = {}) => {
+  const h0 = cambios.horario ?? horario();
+  return {
+    comidaId: h0.comidaId,
+    horario: h0,
+    listado: h0,
+    base: { tipo: 'abierta', horario: h0 },
+    ...cambios,
+  };
+};
 
-  const menuSistemas = seccionesDeRol('sistemas').map(({ id }) => id);
-  assert.ok(menuSistemas.indexOf('reglas') < menuSistemas.indexOf('admin'));
-  assert.ok(!menuSistemas.includes('cuentas'));
+const guardaBorrador = { inicio: '12:00', fin: '15:30' };
+/* El botón, no la frase «Guardar cambios» de la nota explicativa. */
+const BOTON_GUARDAR = /<span class="boton__texto">(?:<span[^>]*><\/span>)?Guardar cambios<\/span>/g;
+
+// -------------------------------------------------------------
+// 1. Menú de root: tres secciones; el resto de los roles, intacto
+// -------------------------------------------------------------
+test('sistemas ve solo Reglas, Administración y Lector biométrico, en ese orden', () => {
+  assert.deepEqual(seccionesPermitidas('sistemas'), ['reglas', 'admin', 'monitoreo']);
+  assert.deepEqual(seccionesDeRol('sistemas').map(({ id }) => id), ['reglas', 'admin', 'monitoreo']);
+  assert.deepEqual(seccionesDeRol('sistemas').map(({ etiqueta }) => etiqueta), [
+    'Reglas del sistema', 'Administración', 'Lector biométrico',
+  ]);
+  for (const id of ['supervision', 'dashboard', 'historial', 'reportes', 'vivo', 'cuentas']) {
+    assert.equal(puedeVerSeccion('sistemas', id), false, `sistemas no ve ${id}`);
+  }
+  assert.equal(puedeMarcarManual('sistemas'), false, 'root no registra a mano desde la interfaz');
+  assert.equal(usaDatosDelComedor('sistemas'), false);
+});
+
+test('las pantallas quitadas a root siguen existiendo para la jefa; la cocinera no cambia', () => {
+  assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
+  assert.equal(puedeMarcarManual('jefa'), true);
+  assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
+  assert.equal(puedeMarcarManual('cocinera'), false);
+  for (const id of ['supervision', 'dashboard', 'historial', 'reportes', 'vivo', 'cuentas']) {
+    assert.ok(SECCIONES.some((seccion) => seccion.id === id), `la sección ${id} no se elimina`);
+  }
+  assert.equal(usaDatosDelComedor('jefa'), true);
+  assert.equal(usaDatosDelComedor('cocinera'), true);
+  assert.equal(usaDatosDelComedor('desconocido'), false);
+
   const menuJefa = seccionesDeRol('jefa').map(({ id }) => id);
   assert.equal(menuJefa[menuJefa.length - 1], 'cuentas');
-  assert.ok(!menuJefa.includes('reglas'));
-  assert.ok(!seccionesDeRol('cocinera').some(({ id }) => id === 'reglas' || id === 'cuentas'));
+  assert.ok(!menuJefa.includes('reglas') && !menuJefa.includes('admin') && !menuJefa.includes('monitoreo'));
+});
 
+test('una sección guardada que root ya no puede abrir vuelve a Reglas', () => {
+  for (const guardada of ['supervision', 'dashboard', 'historial', 'reportes', 'vivo', 'cuentas', 'basura', null, undefined]) {
+    assert.equal(resolverSeccionGuardada('sistemas', guardada), 'reglas', `guardada ${guardada}`);
+  }
+  assert.equal(resolverSeccionGuardada('sistemas', 'admin'), 'admin');
+  assert.equal(resolverSeccionGuardada('sistemas', 'monitoreo'), 'monitoreo');
+
+  const localOriginal = globalThis.localStorage;
+  try {
+    globalThis.localStorage = { getItem: () => 'supervision', setItem: () => {}, removeItem: () => {} };
+    assert.equal(leerSeccionGuardada('sistemas'), 'reglas');
+    assert.equal(leerSeccionGuardada('jefa'), 'supervision');
+    globalThis.localStorage = { getItem: () => { throw new Error('bloqueado'); }, setItem: () => {}, removeItem: () => {} };
+    assert.equal(leerSeccionGuardada('sistemas'), 'reglas');
+  } finally {
+    if (localOriginal === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = localOriginal;
+  }
+});
+
+test('etiquetas y títulos: Reglas del sistema y Lector biométrico', () => {
   const reglas = buscarSeccion('reglas');
   assert.equal(reglas.etiqueta, 'Reglas del sistema');
   assert.equal(reglas.titulo, 'Reglas del sistema');
+  assert.doesNotMatch(reglas.descripcion, /derecho/i);
   assert.equal(typeof reglas.Icono, 'function');
+
+  const lector = buscarSeccion('monitoreo');
+  assert.equal(lector.id, 'monitoreo', 'el id interno no cambia');
+  assert.equal(lector.etiqueta, 'Lector biométrico');
+  assert.equal(lector.titulo, 'Lector biométrico');
+  assert.equal(typeof lector.Icono, 'function');
+
   const cuentas = buscarSeccion('cuentas');
   assert.equal(cuentas.etiqueta, 'Cuentas');
-  assert.equal(typeof cuentas.Icono, 'function');
 });
 
 // -------------------------------------------------------------
-// 2. obtenerCuentasLectura
+// 2. obtenerCuentasLectura (vista de la jefa, sin cambios)
 // -------------------------------------------------------------
 test('obtenerCuentasLectura adapta snake_case y rechaza formas inválidas', async () => {
   globalThis.fetch = async (url) => {
@@ -170,144 +232,64 @@ test('obtenerCuentasLectura adapta snake_case y rechaza formas inválidas', asyn
 });
 
 // -------------------------------------------------------------
-// 3. obtenerReglasDerecho y obtenerNovedadesDisponibles
+// 3. GET /reglas/horarios y /historial: contrato HorarioRegla
 // -------------------------------------------------------------
-test('obtenerReglasDerecho adapta vigente y versiones; rechaza formas inválidas', async () => {
-  globalThis.fetch = async (url) => {
-    assert.equal(new URL(url).pathname, '/reglas/derecho');
-    return json({
-      vigente: versionApi(),
-      versiones: [versionApi(), versionApi({ id: 4, estado: 'programada', vigente_desde: '2026-11-01' })],
-    });
-  };
-  const reglas = await obtenerReglasDerecho();
-  assert.equal(reglas.vigente.estado, 'vigente');
-  assert.equal(reglas.vigente.duracionMinimaHoras, 12);
-  assert.deepEqual(reglas.vigente.novedadesQueAnulan, ['vacacion']);
-  assert.deepEqual(reglas.versiones.map(({ id }) => id), [3, 4]);
-
-  globalThis.fetch = async () => json({ vigente: versionApi() });
-  await assert.rejects(obtenerReglasDerecho(), /reglas de derecho inválidas/);
-  globalThis.fetch = async () => json({ vigente: versionApi({ estado: 'futura' }), versiones: [] });
-  await assert.rejects(obtenerReglasDerecho(), /versión de derecho inválida/);
-  globalThis.fetch = async () => json({ vigente: versionApi(), versiones: [versionApi({ duracion_minima_horas: 99 })] });
-  await assert.rejects(obtenerReglasDerecho(), /versión de derecho inválida/);
-});
-
-test('obtenerNovedadesDisponibles devuelve strings y rechaza formas inválidas', async () => {
-  globalThis.fetch = async (url) => {
-    assert.equal(new URL(url).pathname, '/reglas/derecho/novedades');
-    return json(['vacacion', 'licencia']);
-  };
-  assert.deepEqual(await obtenerNovedadesDisponibles(), ['vacacion', 'licencia']);
-
-  globalThis.fetch = async () => json(['vacacion', 7]);
-  await assert.rejects(obtenerNovedadesDisponibles(), /novedades inválidas/);
-  globalThis.fetch = async () => json('vacacion');
-  await assert.rejects(obtenerNovedadesDisponibles(), /novedades inválidas/);
-});
-
-// -------------------------------------------------------------
-// 4. programarReglasDerecho: contrato exacto, guía y motivos
-// -------------------------------------------------------------
-test('programarReglasDerecho envía exactamente el contrato y adapta la 201', async () => {
-  let cuerpo;
-  let metodo;
-  globalThis.fetch = async (url, opciones) => {
-    assert.equal(new URL(url).pathname, '/reglas/derecho');
-    metodo = opciones.method;
-    cuerpo = JSON.parse(opciones.body);
-    return json(versionApi({ id: 9, estado: 'programada' }), 201);
-  };
-  const creada = await programarReglasDerecho({
-    vigenteDesde: '2026-10-01',
-    duracionMinimaHoras: 8,
-    novedadesQueAnulan: ['licencia'],
-    excluirEnfermeria: true,
-    motivo: '  Cambio de turno minimo  ',
-  });
-  assert.equal(metodo, 'POST');
-  assert.deepEqual(cuerpo, {
-    vigente_desde: '2026-10-01',
-    duracion_minima_horas: 8,
-    novedades_que_anulan: ['licencia'],
-    excluir_enfermeria: true,
-    motivo: 'Cambio de turno minimo',
-  });
-  assert.equal(creada.id, 9);
-  assert.equal(creada.estado, 'programada');
-});
-
-test('programarReglasDerecho guía en el front y traduce los motivos', async () => {
-  let llamadas = 0;
-  globalThis.fetch = async () => {
-    llamadas += 1;
-    return json(versionApi(), 201);
-  };
-  const base = { vigenteDesde: '2026-10-01', duracionMinimaHoras: 8, motivo: 'Motivo suficientemente largo' };
-  await assert.rejects(programarReglasDerecho({ ...base, duracionMinimaHoras: 0 }), /1 a 48 horas/);
-  await assert.rejects(programarReglasDerecho({ ...base, duracionMinimaHoras: 49 }), /1 a 48 horas/);
-  await assert.rejects(programarReglasDerecho({ ...base, motivo: 'corto' }), /10 caracteres/);
-  await assert.rejects(programarReglasDerecho({ ...base, vigenteDesde: '01/10/2026' }), /qué fecha rige/);
-  assert.equal(llamadas, 0);
-
-  const casos = [
-    ['vigencia_en_el_pasado', /ya pasó/],
-    ['version_en_esa_fecha', /programado para esa fecha/],
-    ['motivo_obligatorio', /motivo del cambio/],
-  ];
-  for (const [motivo, esperado] of casos) {
-    globalThis.fetch = async () => json({ detail: 'x', motivo }, 422);
-    await assert.rejects(programarReglasDerecho(base), esperado, motivo);
-  }
-});
-
-test('eliminarReglasDerechoProgramadas usa DELETE y traduce sus motivos', async () => {
-  const rutas = [];
-  globalThis.fetch = async (url, opciones) => {
-    rutas.push([new URL(url).pathname, opciones.method]);
-    return sinContenido();
-  };
-  assert.equal(await eliminarReglasDerechoProgramadas(9), null);
-  assert.deepEqual(rutas[0], ['/reglas/derecho/9', 'DELETE']);
-
-  await assert.rejects(eliminarReglasDerechoProgramadas(0), /Versión inválida/);
-
-  globalThis.fetch = async () => json({ detail: 'x', motivo: 'version_ya_vigente' }, 409);
-  await assert.rejects(eliminarReglasDerechoProgramadas(9), /ya está vigente/);
-  globalThis.fetch = async () => json({ detail: 'x', motivo: 'version_inexistente' }, 404);
-  await assert.rejects(eliminarReglasDerechoProgramadas(9), /ya no existe/);
-});
-
-// -------------------------------------------------------------
-// 5. obtenerHorariosVigentes y obtenerHistorialHorario
-// -------------------------------------------------------------
-test('obtenerHorariosVigentes adapta y acepta fecha opcional', async () => {
+test('obtenerHorariosVigentes pide /reglas/horarios sin query y adapta HorarioRegla', async () => {
   const pedidas = [];
-  globalThis.fetch = async (url) => {
-    pedidas.push(new URL(url));
+  globalThis.fetch = async (url, opciones) => {
+    pedidas.push({ url: new URL(url), metodo: opciones.method });
     return json([
       horarioApi(),
-      horarioApi({ horario_id: 6, comida_id: 3, comida: 'Cena', hora_inicio: '19:00:00', hora_fin: '06:00:00', cruza_medianoche: true, motivo: null, creada_por: null }),
+      horarioApi({
+        horario_id: 6, comida_id: 3, comida: 'Cena', hora_inicio: '19:00:00', hora_fin: '06:00:00',
+        cruza_medianoche: true, motivo: 'Dato anterior', creada_por: null, estado: 'anterior',
+        vigente_hasta: '2026-10-14T09:00:00.000001',
+      }),
+      horarioApi({ horario_id: 7, comida_id: 4, comida: null, estado: 'inactiva' }),
     ]);
   };
   const horarios = await obtenerHorariosVigentes();
-  assert.equal(pedidas[0].pathname, '/reglas/horarios');
-  assert.equal(pedidas[0].search, '');
+  assert.equal(pedidas[0].url.pathname, '/reglas/horarios');
+  assert.equal(pedidas[0].url.search, '');
+  assert.equal(pedidas[0].metodo, undefined, 'es un GET');
   assert.deepEqual(horarios[0], horario());
   assert.equal(horarios[1].cruzaMedianoche, true);
-  assert.equal(horarios[1].motivo, null);
+  assert.equal(horarios[1].estado, 'anterior');
+  assert.equal(horarios[1].vigenteHasta, '2026-10-14T09:00:00.000001');
+  assert.equal(horarios[1].creadaPor, null);
+  assert.equal(horarios[2].comida, null, 'comida nula se conserva');
+  assert.equal(horarios[2].estado, 'inactiva');
+  /* Los datetimes quedan como texto del servidor: sin zona ni conversión. */
+  assert.equal(horarios[0].vigenteDesde, '2026-10-14T08:30:15.123456');
 
+  /* La fecha como query ya no existe: aunque se la pasen, no viaja. */
   await obtenerHorariosVigentes({ fecha: '2026-10-01' });
-  assert.equal(pedidas[1].searchParams.get('fecha'), '2026-10-01');
+  assert.equal(pedidas[1].url.search, '');
+});
 
-  await assert.rejects(obtenerHorariosVigentes({ fecha: 'ayer' }), /Fecha inválida/);
-  assert.equal(pedidas.length, 2);
-
+test('el adaptador rechaza horarios con forma inválida, zonas y estados desconocidos', async () => {
   globalThis.fetch = async () => json({ total: 2 });
   await assert.rejects(obtenerHorariosVigentes(), /horarios inválidos/);
-  globalThis.fetch = async () => json([horarioApi({ hora_inicio: 'once' })]);
-  await assert.rejects(obtenerHorariosVigentes(), /horario inválido/);
+  const invalidos = [
+    { hora_inicio: 'once' },
+    { hora_inicio: '25:00:00' },
+    { hora_fin: '11:61:00' },
+    { vigente_desde: '2026-10-14T08:30:15Z' },
+    { vigente_desde: '2026-10-14T08:30:15-04:00' },
+    { vigente_desde: '2026-10-14' },
+    { vigente_desde: '2026-10-14T08:30:15.1234567' },
+    { vigente_hasta: '2026-02-31T08:00:00' },
+    { creada: null },
+    { estado: 'programada' },
+    { cruza_medianoche: 'no' },
+    { horario_id: 0 },
+    { comida: '' },
+    { motivo: 3 },
+  ];
+  for (const cambio of invalidos) {
+    globalThis.fetch = async () => json([horarioApi(cambio)]);
+    await assert.rejects(obtenerHorariosVigentes(), /horario inválido/, JSON.stringify(cambio));
+  }
 });
 
 test('obtenerHistorialHorario pide por comida y traduce comida_inexistente', async () => {
@@ -315,11 +297,11 @@ test('obtenerHistorialHorario pide por comida y traduce comida_inexistente', asy
     const pedida = new URL(url);
     assert.equal(pedida.pathname, '/reglas/horarios/historial');
     assert.equal(pedida.searchParams.get('comida_id'), '2');
-    return json([horarioApi()]);
+    return json([horarioApi(), horarioApi({ horario_id: 4, estado: 'anterior', vigente_hasta: '2026-10-14T08:30:15.123456' })]);
   };
   const versiones = await obtenerHistorialHorario(2);
-  assert.equal(versiones.length, 1);
-  assert.equal(versiones[0].horarioId, 5);
+  assert.equal(versiones.length, 2);
+  assert.equal(versiones[1].estado, 'anterior');
 
   await assert.rejects(obtenerHistorialHorario(0), /Comida inválida/);
   globalThis.fetch = async () => json({ detail: 'x', motivo: 'comida_inexistente' }, 404);
@@ -327,314 +309,665 @@ test('obtenerHistorialHorario pide por comida y traduce comida_inexistente', asy
 });
 
 // -------------------------------------------------------------
-// 6. programarHorario: contrato exacto, guía y motivos
+// 4. POST /reglas/horarios: contrato exacto y errores
 // -------------------------------------------------------------
-test('programarHorario envía exactamente el contrato y adapta la 201', async () => {
-  let cuerpo;
-  let metodo;
+test('guardarHorario envía exactamente las cuatro claves y adapta la 201', async () => {
+  const pedidos = [];
   globalThis.fetch = async (url, opciones) => {
-    assert.equal(new URL(url).pathname, '/reglas/horarios');
-    metodo = opciones.method;
-    cuerpo = JSON.parse(opciones.body);
-    return json(horarioApi({ horario_id: 11, vigente_desde: '2026-10-01' }), 201);
+    pedidos.push({ ruta: new URL(url), metodo: opciones.method, cuerpo: opciones.body, cabeceras: opciones.headers });
+    return json(horarioApi({ horario_id: 11, hora_inicio: '12:00:00', hora_fin: '15:30:00' }), 201);
   };
-  const creado = await programarHorario({
-    comidaId: 2,
-    horaInicio: '11:30',
-    horaFin: '15:00',
-    vigenteDesde: '2026-10-01',
-    motivo: '  Ajuste de cocina  ',
+  const creado = await guardarHorario({ comidaId: 2, horaInicio: '12:00', horaFin: '15:30', baseHorarioId: 5 });
+  assert.equal(pedidos[0].ruta.pathname, '/reglas/horarios');
+  assert.equal(pedidos[0].ruta.search, '');
+  assert.equal(pedidos[0].metodo, 'POST');
+  assert.equal(pedidos[0].cabeceras['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(pedidos[0].cuerpo), {
+    comida_id: 2, hora_inicio: '12:00:00', hora_fin: '15:30:00', base_horario_id: 5,
   });
-  assert.equal(metodo, 'POST');
-  assert.deepEqual(cuerpo, {
-    comida_id: 2,
-    hora_inicio: '11:30',
-    hora_fin: '15:00',
-    vigente_desde: '2026-10-01',
-    motivo: 'Ajuste de cocina',
-  });
+  assert.deepEqual(Object.keys(JSON.parse(pedidos[0].cuerpo)), ['comida_id', 'hora_inicio', 'hora_fin', 'base_horario_id']);
+  assert.doesNotMatch(pedidos[0].cuerpo, /vigente_desde|motivo|fecha/);
   assert.equal(creado.horarioId, 11);
+  assert.equal(creado.horaInicio, '12:00:00');
+
+  /* null solo cuando se sabe que no hay versión abierta; una hora con segundos viaja igual. */
+  await guardarHorario({ comidaId: 2, horaInicio: '12:00:30', horaFin: '15:30:00', baseHorarioId: null });
+  assert.deepEqual(JSON.parse(pedidos[1].cuerpo), {
+    comida_id: 2, hora_inicio: '12:00:30', hora_fin: '15:30:00', base_horario_id: null,
+  });
 });
 
-test('programarHorario guía en el front y traduce los motivos', async () => {
+test('guardarHorario valida antes de enviar y nunca manda una base desconocida', async () => {
   let llamadas = 0;
   globalThis.fetch = async () => {
     llamadas += 1;
     return json(horarioApi(), 201);
   };
-  const base = { comidaId: 2, horaInicio: '11:30', horaFin: '15:00', vigenteDesde: '2026-10-01', motivo: 'Ajuste de cocina' };
-  await assert.rejects(programarHorario({ ...base, horaFin: 'tres' }), /hora de inicio y la de fin/);
-  await assert.rejects(programarHorario({ ...base, vigenteDesde: 'mañana' }), /qué fecha rige/);
-  await assert.rejects(programarHorario({ ...base, motivo: '   ' }), /motivo del cambio/);
-  await assert.rejects(programarHorario({ ...base, comidaId: 0 }), /Comida inválida/);
-  assert.equal(llamadas, 0);
+  const base = { comidaId: 2, horaInicio: '11:30', horaFin: '15:00', baseHorarioId: 5 };
+  for (const cambio of [
+    { comidaId: 0 },
+    { comidaId: '2' },
+    { horaInicio: 'tres' },
+    { horaFin: '' },
+    { horaFin: '24:00' },
+    { baseHorarioId: undefined },
+    { baseHorarioId: 0 },
+    { baseHorarioId: '5' },
+    { baseHorarioId: -1 },
+  ]) {
+    const error = await guardarHorario({ ...base, ...cambio }).catch((e) => e);
+    assert.ok(error instanceof ErrorGuardadoHorario, JSON.stringify(cambio));
+    assert.equal(error.incierto, false, 'un rechazo local no es incierto');
+  }
+  assert.equal(llamadas, 0, 'nada de eso sale al servidor');
+});
 
+test('los 409, 422 y 404 con motivo se traducen y no son inciertos', async () => {
   const casos = [
-    ['vigencia_en_el_pasado', /ya pasó/],
-    ['horario_invalido', /no es válido/],
-    ['solapa_con_otra_comida', /se cruza con otra comida/],
-    ['version_en_esa_fecha', /programado para esa fecha/],
-    ['comida_inexistente', /ya no existe/],
-    ['motivo_obligatorio', /motivo del cambio/],
+    [409, 'version_desactualizada', /cambió desde que lo abrió/, true],
+    [409, 'sin_cambios', /no hay nada que cambiar/, false],
+    [409, 'solapa_con_otra_comida', /se superpone con la de otra comida/, false],
+    [409, 'instante_no_posterior', /no es posterior a la última versión/, false],
+    [409, 'cambio_en_curso', /otro cambio de horarios en curso/, false],
+    [409, 'versiones_abiertas_multiples', /más de una versión abierta/, true],
+    [422, 'horario_invalido', /no es válido/, false],
+    [404, 'comida_inexistente', /ya no existe/, true],
   ];
-  for (const [motivo, esperado] of casos) {
-    globalThis.fetch = async () => json({ detail: 'x', motivo }, 422);
-    await assert.rejects(programarHorario(base), esperado, motivo);
+  for (const [status, motivo, esperado, recargar] of casos) {
+    let llamadas = 0;
+    globalThis.fetch = async () => {
+      llamadas += 1;
+      return json({ detail: 'texto del servidor', motivo }, status);
+    };
+    const error = await guardarHorario({ comidaId: 2, horaInicio: '12:00', horaFin: '15:00', baseHorarioId: 5 }).catch((e) => e);
+    assert.ok(error instanceof ErrorGuardadoHorario, motivo);
+    assert.match(error.message, esperado, motivo);
+    assert.equal(error.motivo, motivo);
+    assert.equal(error.status, status);
+    assert.equal(error.incierto, false, `${motivo} es un rechazo, no un resultado incierto`);
+    assert.equal(error.recargar, recargar, `${motivo}: recargar`);
+    assert.equal(llamadas, 1, 'sin reintentos automáticos');
   }
 });
 
-test('eliminarHorarioProgramado usa DELETE y traduce sus motivos', async () => {
-  const rutas = [];
-  globalThis.fetch = async (url, opciones) => {
-    rutas.push([new URL(url).pathname, opciones.method]);
-    return sinContenido();
+test('un 422 de validación con detail en lista no rompe el mensaje', async () => {
+  globalThis.fetch = async () => json({ detail: [{ loc: ['body', 'hora_inicio'], msg: 'Field required', type: 'missing' }] }, 422);
+  const error = await guardarHorario({ comidaId: 2, horaInicio: '12:00', horaFin: '15:00', baseHorarioId: 5 }).catch((e) => e);
+  assert.equal(error.status, 422);
+  assert.equal(error.incierto, false);
+  assert.match(error.message, /no aceptó los datos enviados/);
+  assert.doesNotMatch(error.message, /\[object|Field required/);
+});
+
+test('5xx, red y respuesta ilegible son resultado incierto: no dicen que no se guardó', async () => {
+  let llamadas = 0;
+  const intento = () => guardarHorario({ comidaId: 2, horaInicio: '12:00', horaFin: '15:00', baseHorarioId: 5 }).catch((e) => e);
+  const verificar = (error, esperado) => {
+    assert.ok(error instanceof ErrorGuardadoHorario);
+    assert.equal(error.incierto, true);
+    assert.equal(error.recargar, true);
+    assert.match(error.message, esperado);
+    assert.match(error.message, /No sabemos si el cambio se guardó/);
+    assert.match(error.message, /Recargue los horarios y compruebe/);
+    assert.doesNotMatch(error.message, /no se (guardó|aplicó)\.|no quedó guardado/i);
   };
-  assert.equal(await eliminarHorarioProgramado(11), null);
-  assert.deepEqual(rutas[0], ['/reglas/horarios/11', 'DELETE']);
 
-  await assert.rejects(eliminarHorarioProgramado(-2), /Horario inválido/);
+  globalThis.fetch = async () => { llamadas += 1; return new Response('Internal Server Error', { status: 500 }); };
+  verificar(await intento(), /HTTP 500/);
+  globalThis.fetch = async () => { llamadas += 1; return json({ detail: 'x', motivo: 'cerrojo_ausente' }, 500); };
+  const cerrojo = await intento();
+  verificar(cerrojo, /falta preparar el bloqueo de horarios/);
+  assert.equal(cerrojo.motivo, 'cerrojo_ausente');
+  globalThis.fetch = async () => { llamadas += 1; return json({ detail: 'x' }, 503); };
+  verificar(await intento(), /HTTP 503/);
+  globalThis.fetch = async () => { llamadas += 1; throw new TypeError('fetch failed'); };
+  verificar(await intento(), /No se pudo conectar con la API/);
+  globalThis.fetch = async () => { llamadas += 1; return new Response('no es json', { status: 201 }); };
+  verificar(await intento(), /respuesta inválida/);
+  globalThis.fetch = async () => { llamadas += 1; return json({ horario_id: 1 }, 201); };
+  verificar(await intento(), /la respuesta no se pudo interpretar/);
+  assert.equal(llamadas, 6, 'un intento por caso: nunca se reintenta solo');
+});
 
-  globalThis.fetch = async () => json({ detail: 'x', motivo: 'version_ya_vigente' }, 409);
-  await assert.rejects(eliminarHorarioProgramado(11), /ya está vigente/);
-  globalThis.fetch = async () => json({ detail: 'x', motivo: 'version_inexistente' }, 404);
-  await assert.rejects(eliminarHorarioProgramado(11), /ya no existe/);
+test('el tiempo agotado también es incierto', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  globalThis.fetch = (_url, opciones) => new Promise((_resolver, rechazar) => {
+    opciones.signal.addEventListener('abort', () => rechazar(new DOMException('abortado', 'AbortError')));
+  });
+  const pendiente = guardarHorario({ comidaId: 2, horaInicio: '12:00', horaFin: '15:00', baseHorarioId: 5 }).catch((e) => e);
+  mock.timers.tick(15000);
+  const error = await pendiente;
+  assert.equal(error.incierto, true);
+  assert.match(error.message, /tardó demasiado/);
+  assert.match(error.message, /No sabemos si el cambio se guardó/);
+});
+
+test('401, 403 y cambio de contraseña conservan el manejo central de la sesión', async () => {
+  const pedido = () => guardarHorario({ comidaId: 2, horaInicio: '12:00', horaFin: '15:00', baseHorarioId: 5 }).catch((e) => e);
+
+  globalThis.fetch = async () => json({ detail: 'Sesión inválida.', motivo: 'token_invalido' }, 401);
+  let error = await pedido();
+  assert.equal(error.status, 401);
+  assert.equal(error.incierto, false);
+  assert.deepEqual(avisos, ['expirada']);
+
+  avisos.length = 0;
+  globalThis.fetch = async () => json({ detail: 'Rol sin permiso.', motivo: 'rol_insuficiente' }, 403);
+  error = await pedido();
+  assert.equal(error.status, 403);
+  assert.deepEqual(avisos, ['prohibido']);
+
+  avisos.length = 0;
+  globalThis.fetch = async () => json({ detail: 'Cambie su clave.', motivo: 'cambio_password_pendiente' }, 403);
+  error = await pedido();
+  assert.deepEqual(avisos, ['cambio_requerido']);
 });
 
 // -------------------------------------------------------------
-// 7. Fecha mínima: hoy del servidor en simulación, local fuera
+// 5. Lógica de la pantalla: base, guardado, incertidumbre y recarga
 // -------------------------------------------------------------
-test('el mínimo es el hoy del servidor en simulación y el local fuera', () => {
-  assert.equal(minimoVigencia('2026-08-10'), '2026-08-10');
-  assert.equal(minimoVigencia(undefined), fechaLocal());
-  assert.equal(minimoVigencia('ayer'), fechaLocal());
-  const dos = (n) => String(n).padStart(2, '0');
-  const ahora = new Date();
-  assert.equal(fechaLocal(ahora), `${ahora.getFullYear()}-${dos(ahora.getMonth() + 1)}-${dos(ahora.getDate())}`);
-  assert.equal(formatoFecha('2026-09-30'), '30/09/2026');
-  assert.equal(formatoDiaMes('2026-10-01'), '01/10');
+test('normalizarHora, formatoHora y cruce de medianoche', () => {
+  assert.equal(normalizarHora('11:30'), '11:30:00');
+  assert.equal(normalizarHora('11:30:15'), '11:30:15');
+  assert.equal(normalizarHora('24:00'), null);
+  assert.equal(normalizarHora(''), null);
   assert.equal(formatoHora('11:30:00'), '11:30');
-  assert.equal(formatoHora('11:30'), '11:30');
+  assert.equal(formatoHora('11:30:15'), '11:30:15');
+  assert.equal(horasConSegundos('11:30:00', '15:00'), false);
+  assert.equal(horasConSegundos('11:30:00', '15:00:20'), true);
+  assert.equal(cruzaMedianoche('19:00', '06:00'), true);
+  assert.equal(cruzaMedianoche('11:30', '15:00'), false);
+  assert.equal(cruzaMedianoche('11:30', '11:30'), false);
+  assert.equal(cruzaMedianoche('', '06:00'), false);
+  assert.equal(textoMomento('2026-10-14T08:30:15.123456'), '14/10/2026 08:30');
+  assert.equal(textoMomento('2026-10-14 08:30:15'), '14/10/2026 08:30');
+  assert.equal(textoMomento(null), '—');
 });
 
-test('los diálogos limitan vigente desde al hoy del servidor', () => {
-  const htmlHorario = renderToStaticMarkup(
-    h(DialogoProgramarHorario, {
-      horario: horario(),
-      hoyMinimo: '2026-09-29',
-      onProgramado() {},
-      onCerrar() {},
-    }),
+test('la base de una fila vigente no consulta el historial', async () => {
+  let consultas = 0;
+  const base = await resolverBase(horario(), { historial: async () => { consultas += 1; return []; } });
+  assert.deepEqual(base, { tipo: 'abierta', horario: horario() });
+  assert.equal(consultas, 0);
+});
+
+test('con una fila anterior (reloj atrasado) se busca la versión abierta en el historial', async () => {
+  const anterior = horario({ horarioId: 4, estado: 'anterior', vigenteHasta: '2026-10-14T08:30:15.123456' });
+  const abierta = horario({ horarioId: 9, vigenteDesde: '2026-10-14T10:00:00' });
+  const pedidas = [];
+  const historial = async (comidaId) => { pedidas.push(comidaId); return [abierta, anterior]; };
+
+  const base = await resolverBase(anterior, { historial });
+  assert.deepEqual(pedidas, [2]);
+  assert.deepEqual(base, { tipo: 'abierta', horario: abierta });
+
+  assert.deepEqual(await resolverBase(anterior, { historial: async () => [anterior] }), { tipo: 'ninguna' });
+  /* Una fila inactiva nunca cuenta como abierta. */
+  const inactiva = horario({ horarioId: 3, estado: 'inactiva' });
+  assert.deepEqual(await resolverBase(anterior, { historial: async () => [anterior, inactiva] }), { tipo: 'ninguna' });
+  assert.deepEqual(
+    await resolverBase(anterior, { historial: async () => [abierta, horario({ horarioId: 10 })] }),
+    { tipo: 'multiple' },
   );
-  assert.match(htmlHorario, /min="2026-09-29"/);
-
-  const htmlVersion = renderToStaticMarkup(
-    h(DialogoNuevaVersion, {
-      vigente: version(),
-      novedadesDisponibles: ['vacacion'],
-      hoyMinimo: '2026-09-29',
-      onProgramada() {},
-      onCerrar() {},
-    }),
-  );
-  assert.match(htmlVersion, /min="2026-09-29"/);
 });
 
-// -------------------------------------------------------------
-// 8. Render: aviso fijo, pestañas y tabla de horarios
-// -------------------------------------------------------------
-test('la sección trae el aviso fijo y las dos pestañas', () => {
-  const html = renderToStaticMarkup(h(ReglasSistema, { hoy: '2026-09-29' }));
-  assert.match(html, /Los cambios se aplican desde la fecha elegida y nunca modifican días pasados/);
-  assert.match(html, /Horarios de comida/);
-  assert.match(html, /Derecho a comer/);
-  assert.match(html, /Cargando horarios…/);
+test('si falla el historial la base queda en error: nunca se convierte en null', async () => {
+  const anterior = horario({ horarioId: 4, estado: 'anterior', vigenteHasta: '2026-10-14T08:30:15.123456' });
+  const base = await resolverBase(anterior, { historial: async () => { throw new Error('No se pudo conectar con la API.'); } });
+  assert.equal(base.tipo, 'error');
+  assert.match(base.mensaje, /No se pudo conectar/);
 
-  const htmlDerecho = renderToStaticMarkup(h(ReglasSistema, { hoy: '2026-09-29', pestanaInicial: 'derecho' }));
-  assert.match(htmlDerecho, /Los cambios se aplican desde la fecha elegida y nunca modifican días pasados/);
-  assert.match(htmlDerecho, /Cargando derecho a comer…/);
+  let envios = 0;
+  const resultado = await ejecutarGuardado({
+    comida: { ...comida({ horario: anterior }), base },
+    borrador: guardaBorrador,
+    guardar: async () => { envios += 1; return horario(); },
+  });
+  assert.equal(resultado.tipo, 'sin-base');
+  assert.equal(envios, 0, 'sin base comprobada no se envía nada');
 });
 
-test('la tabla muestra Comida, Horario, Vigente desde, Motivo y Acciones', () => {
-  const html = renderToStaticMarkup(
-    h(PestanaHorarios, {
-      hoyMinimo: '2026-09-29',
-      cargandoInicial: false,
-      horariosIniciales: [
-        horario(),
-        horario({ horarioId: 6, comidaId: 3, comida: 'Cena', horaInicio: '19:00', horaFin: '06:00', cruzaMedianoche: true, motivo: null }),
-      ],
-    }),
-  );
-  for (const columna of ['Comida', 'Horario', 'Vigente desde', 'Motivo', 'Acciones']) {
-    assert.match(html, new RegExp(columna));
-  }
-  assert.match(html, /Almuerzo/);
-  assert.match(html, /11:30–15:00/);
-  assert.match(html, /cruza medianoche/);
-  assert.match(html, /01\/09\/2026/);
-  assert.match(html, /Programar cambio/);
-  assert.match(html, /Historial/);
-});
-
-test('programar cambio anticipa Desde el DD/MM, comida y horas nuevas', () => {
-  const html = renderToStaticMarkup(
-    h(DialogoProgramarHorario, {
-      horario: horario(),
-      hoyMinimo: '2026-09-29',
-      valoresIniciales: { horaInicio: '11:30', horaFin: '15:00', vigenteDesde: '2026-10-01' },
-      onProgramado() {},
-      onCerrar() {},
-    }),
-  );
-  assert.ok(html.includes('Desde el 01/10, Almuerzo pasará a 11:30–15:00.'));
-  assert.match(html, /Hora de inicio/);
-  assert.match(html, /Hora de fin/);
-  assert.match(html, /Vigente desde/);
-  assert.match(html, /Motivo/);
-});
-
-// -------------------------------------------------------------
-// 9. Eliminar solo en programadas y con confirmación
-// -------------------------------------------------------------
-const historialMezclado = () => ([
-  horario({ horarioId: 7, vigenteDesde: '2026-10-05', vigenteHasta: null }),
-  horario({ horarioId: 5, vigenteDesde: '2026-09-01', vigenteHasta: null }),
-  horario({ horarioId: 4, vigenteDesde: '2026-08-01', vigenteHasta: '2026-08-31' }),
-]);
-
-test('el estado del horario sale de sus fechas contra el hoy', () => {
-  const [programada, vigente, anterior] = historialMezclado();
-  assert.equal(estadoHorario(programada, '2026-09-29'), 'programada');
-  assert.equal(estadoHorario(vigente, '2026-09-29'), 'vigente');
-  assert.equal(estadoHorario(anterior, '2026-09-29'), 'anterior');
-  assert.equal(estadoHorario(vigente, '2026-09-01'), 'vigente');
-});
-
-test('el historial solo ofrece Eliminar en la programada y la confirma', () => {
-  const props = {
-    horario: horario(),
-    hoy: '2026-09-29',
-    onEliminado() {},
-    onCerrar() {},
-    versionesIniciales: historialMezclado(),
-    cargandoInicial: false,
-  };
-  const html = renderToStaticMarkup(h(DialogoHistorialHorario, props));
-  assert.match(html, /Historial de Almuerzo/);
-  assert.match(html, /Programada/);
-  assert.match(html, /Vigente/);
-  assert.match(html, /Anterior/);
-  assert.equal((html.match(/>Eliminar</g) || []).length, 1);
-
-  const htmlConfirma = renderToStaticMarkup(
-    h(DialogoHistorialHorario, { ...props, confirmacionInicial: historialMezclado()[0] }),
-  );
-  assert.match(htmlConfirma, /Eliminar horario programado/);
-  assert.match(htmlConfirma, /¿Eliminar el cambio de Almuerzo que regiría desde el 05\/10\/2026\?/);
-  assert.match(htmlConfirma, />Cancelar</);
-});
-
-test('las versiones de derecho se ordenan programadas, vigente y anteriores', () => {
-  const desorden = [
-    version({ id: 1, estado: 'anterior', vigenteDesde: '2026-07-01' }),
-    version({ id: 3, estado: 'vigente', vigenteDesde: '2026-09-01' }),
-    version({ id: 5, estado: 'programada', vigenteDesde: '2026-11-01' }),
-    version({ id: 2, estado: 'anterior', vigenteDesde: '2026-08-01' }),
-    version({ id: 4, estado: 'programada', vigenteDesde: '2026-10-01' }),
+test('cargarComidas: una fila por comida, orden del servidor, y lista vacía sin inventar comidas', async () => {
+  const filas = [
+    horario({ horarioId: 1, comidaId: 1, comida: 'Desayuno', horaInicio: '06:30:00', horaFin: '08:00:00' }),
+    horario({ horarioId: 8, comidaId: 2, estado: 'anterior', vigenteHasta: '2026-10-14T09:00:00' }),
   ];
-  assert.deepEqual(ordenarVersionesDerecho(desorden).map(({ id }) => id), [4, 5, 3, 2, 1]);
+  const consultadas = [];
+  const comidas = await cargarComidas({
+    listar: async () => filas,
+    historial: async (id) => { consultadas.push(id); return [horario({ horarioId: 12, comidaId: id })]; },
+  });
+  assert.deepEqual(comidas.map(({ comidaId }) => comidaId), [1, 2]);
+  assert.deepEqual(consultadas, [2], 'solo la fila que no es la versión abierta consulta el historial');
+  assert.equal(comidas[0].base.horario.horarioId, 1);
+  assert.equal(comidas[1].base.horario.horarioId, 12);
+  assert.equal(comidas[1].horario.horarioId, 12, 'se edita la versión abierta');
+  assert.equal(comidas[1].listado.horarioId, 8);
+
+  let llamadas = 0;
+  const vacio = await cargarComidas({ listar: async () => [], historial: async () => { llamadas += 1; return []; } });
+  assert.deepEqual(vacio, []);
+  assert.equal(llamadas, 0);
 });
 
-test('la tarjeta vigente y la lista solo eliminan la programada, con confirmación', () => {
-  const props = {
-    hoyMinimo: '2026-09-29',
-    cargandoInicial: false,
-    derechoInicial: {
-      vigente: version(),
-      versiones: [
-        version({ id: 5, estado: 'programada', vigenteDesde: '2026-11-01' }),
-        version(),
-        version({ id: 1, estado: 'anterior', vigenteDesde: '2026-07-01' }),
-      ],
+test('ejecutarGuardado manda la base abierta, null solo si se comprobó que no hay, y no envía con base dudosa', async () => {
+  const enviados = [];
+  const guardar = async (datos) => { enviados.push(datos); return horario({ horarioId: 20 }); };
+
+  await ejecutarGuardado({ comida: comida(), borrador: guardaBorrador, guardar });
+  assert.deepEqual(enviados[0], { comidaId: 2, horaInicio: '12:00', horaFin: '15:30', baseHorarioId: 5 });
+
+  await ejecutarGuardado({ comida: { ...comida(), base: { tipo: 'ninguna' } }, borrador: guardaBorrador, guardar });
+  assert.equal(enviados[1].baseHorarioId, null);
+
+  for (const tipo of ['error', 'multiple']) {
+    const resultado = await ejecutarGuardado({ comida: { ...comida(), base: { tipo } }, borrador: guardaBorrador, guardar });
+    assert.equal(resultado.tipo, 'sin-base');
+  }
+  assert.equal(enviados.length, 2);
+});
+
+test('motivoSinGuardar: el orden de los motivos que bloquean el botón', () => {
+  const estado = estadoInicialReglas();
+  const c = comida();
+  assert.equal(motivoSinGuardar(estado, c, guardaBorrador), null);
+  assert.equal(motivoSinGuardar(estado, c, { inicio: '11:30', fin: '15:00' }), 'sin-cambios');
+  assert.equal(motivoSinGuardar(estado, c, { inicio: '11:30:00', fin: '15:00' }), 'sin-cambios');
+  assert.equal(motivoSinGuardar(estado, c, { inicio: '12:00', fin: '12:00' }), 'iguales');
+  assert.equal(motivoSinGuardar(estado, c, { inicio: '', fin: '12:00' }), 'incompleto');
+  assert.equal(motivoSinGuardar({ ...estado, guardando: 2 }, c, guardaBorrador), 'guardando');
+  assert.equal(motivoSinGuardar({ ...estado, guardando: 9 }, c, guardaBorrador), 'otro-envio');
+  assert.equal(motivoSinGuardar({ ...estado, actualizando: true }, c, guardaBorrador), 'actualizando');
+  assert.equal(motivoSinGuardar({ ...estado, incierto: true }, c, guardaBorrador), 'incierto');
+  assert.equal(motivoSinGuardar({ ...estado, bloqueadas: [2] }, c, guardaBorrador), 'recargar');
+  assert.equal(motivoSinGuardar(estado, { ...c, base: { tipo: 'error', mensaje: 'x' } }, guardaBorrador), 'sin-base');
+  assert.equal(motivoSinGuardar(estado, { ...c, base: { tipo: 'multiple' } }, guardaBorrador), 'multiple');
+});
+
+/** Pantalla en miniatura: reductor real, acciones registradas. */
+function banco(inicial = {}) {
+  let estado = { ...estadoInicialReglas(), fase: 'listo', comidas: [comida()], ...inicial };
+  const acciones = [];
+  return {
+    get estado() { return estado; },
+    acciones,
+    despachar(accion) {
+      acciones.push(accion.tipo);
+      estado = reductorReglas(estado, accion);
     },
-    novedadesIniciales: ['vacacion', 'licencia'],
   };
-  const html = renderToStaticMarkup(h(PestanaDerecho, props));
-  assert.match(html, /Versión vigente/);
-  assert.match(html, /Turno mínimo/);
-  assert.match(html, /12 h/);
-  assert.match(html, /vacacion/);
-  assert.match(html, /Enfermería excluida/);
-  assert.match(html, /01\/10\/2026/);
-  assert.match(html, /root/);
-  assert.match(html, /Motivo de prueba valido/);
-  assert.match(html, /Programar nueva versión/);
-  const iProgramada = html.indexOf('01/11/2026');
-  const iVigente = html.lastIndexOf('01/10/2026');
-  const iAnterior = html.indexOf('01/07/2026');
-  assert.ok(iProgramada !== -1 && iVigente !== -1 && iAnterior !== -1);
-  assert.ok(iProgramada < iVigente && iVigente < iAnterior);
-  assert.equal((html.match(/>Eliminar</g) || []).length, 1);
+}
 
-  const htmlConfirma = renderToStaticMarkup(
-    h(PestanaDerecho, {
-      ...props,
-      confirmacionInicial: version({ id: 5, estado: 'programada', vigenteDesde: '2026-11-01' }),
+test('un guardado exitoso muestra el resultado y recarga una vez', async () => {
+  const pantalla = banco();
+  let recargas = 0;
+  const resultado = await guardarComida({
+    comida: comida(),
+    borrador: guardaBorrador,
+    despachar: pantalla.despachar,
+    recargar: async () => { recargas += 1; },
+    candado: { ocupado: false },
+    guardar: async () => horario({ horarioId: 21, horaInicio: '12:00:00', horaFin: '15:30:00', vigenteDesde: '2026-10-14T10:15:00.250000' }),
+  });
+  assert.equal(resultado, 'ok');
+  assert.equal(recargas, 1);
+  assert.deepEqual(pantalla.acciones, ['GUARDADO_INICIO', 'GUARDADO_OK']);
+  const aviso = pantalla.estado.avisos[2];
+  assert.equal(aviso.tipo, 'exito');
+  assert.match(aviso.titulo, /Almuerzo: horario guardado/);
+  assert.match(aviso.detalle, /Ahora rige de 12:00 a 15:30 desde el 14\/10\/2026 10:15\./);
+  assert.equal(pantalla.estado.guardando, null);
+  assert.deepEqual(pantalla.estado.bloqueadas, [2], 'su base quedó cerrada: pide recargar para seguir');
+});
+
+test('un fallo del refresco tras el éxito no oculta el resultado guardado', async () => {
+  const pantalla = banco();
+  const guardar = async () => horario({ horarioId: 21, horaInicio: '12:00:00', horaFin: '15:30:00' });
+  await guardarComida({
+    comida: comida(),
+    borrador: guardaBorrador,
+    despachar: pantalla.despachar,
+    recargar: () => recargarComidas({
+      despachar: pantalla.despachar,
+      cargar: async () => { throw new Error('No se pudieron cargar los horarios. No se pudo conectar con la API.'); },
     }),
-  );
-  assert.match(htmlConfirma, /Eliminar versión programada/);
-  assert.match(htmlConfirma, /¿Eliminar la versión que regiría desde el 01\/11\/2026\?/);
-  assert.match(htmlConfirma, />Cancelar</);
+    candado: { ocupado: false },
+    guardar,
+  });
+  assert.deepEqual(pantalla.acciones, ['GUARDADO_INICIO', 'GUARDADO_OK', 'CARGA_INICIO', 'CARGA_ERROR']);
+  const { estado } = pantalla;
+  assert.equal(estado.avisos[2].tipo, 'exito', 'el éxito sigue a la vista');
+  assert.match(estado.fallaRefresco, /No se pudo conectar con la API/);
+  assert.equal(estado.fase, 'listo', 'las tarjetas siguen visibles');
+  assert.equal(estado.comidas.length, 1);
+  assert.equal(motivoSinGuardar(estado, estado.comidas[0], guardaBorrador), 'recargar', 'no se guarda sobre una base vieja');
+
+  /* La recarga posterior sí desbloquea y trae lo nuevo. */
+  await recargarComidas({
+    despachar: pantalla.despachar,
+    cargar: async () => [comida({ horario: horario({ horarioId: 21, horaInicio: '12:00:00', horaFin: '15:30:00' }) })],
+  });
+  assert.equal(pantalla.estado.fallaRefresco, '');
+  assert.equal(pantalla.estado.avisos[2].tipo, 'exito');
+  assert.deepEqual(pantalla.estado.bloqueadas, []);
+});
+
+test('un resultado incierto bloquea todo guardado hasta recargar, sin reintentar ni afirmar que no se guardó', async () => {
+  const otra = comida({ horario: horario({ horarioId: 6, comidaId: 3, comida: 'Cena', horaInicio: '19:00:00', horaFin: '06:00:00', cruzaMedianoche: true }) });
+  const pantalla = banco({ comidas: [comida(), otra] });
+  let envios = 0;
+  const resultado = await guardarComida({
+    comida: comida(),
+    borrador: guardaBorrador,
+    despachar: pantalla.despachar,
+    recargar: async () => assert.fail('no se recarga solo tras un resultado incierto'),
+    candado: { ocupado: false },
+    guardar: async () => {
+      envios += 1;
+      throw new ErrorGuardadoHorario('No se pudo conectar con la API. No sabemos si el cambio se guardó. Recargue los horarios y compruebe cómo quedaron antes de volver a guardar.', { incierto: true, recargar: true });
+    },
+  });
+  assert.equal(resultado, 'incierto');
+  assert.equal(envios, 1, 'un solo envío');
+  const { estado } = pantalla;
+  assert.equal(estado.avisos[2].tipo, 'incierto');
+  assert.match(estado.avisos[2].titulo, /resultado incierto/);
+  assert.doesNotMatch(`${estado.avisos[2].titulo} ${estado.avisos[2].detalle}`, /no se guardó\.|no quedó guardado/i);
+  assert.equal(estado.incierto, true);
+  assert.equal(motivoSinGuardar(estado, otra, { inicio: '20:00', fin: '06:00' }), 'incierto', 'tampoco otra comida');
+
+  /* Recargar y comprobar levanta el bloqueo y deja el aviso como recordatorio. */
+  await recargarComidas({ despachar: pantalla.despachar, cargar: async () => [comida(), otra] });
+  assert.equal(pantalla.estado.incierto, false);
+  assert.equal(pantalla.estado.avisos[2].tipo, 'aviso');
+  assert.match(pantalla.estado.avisos[2].detalle, /si el cambio quedó guardado/);
+});
+
+test('version_desactualizada no cambia la base sola: pide recargar y la tarjeta queda bloqueada', async () => {
+  const original = comida();
+  const pantalla = banco({ comidas: [original] });
+  let envios = 0;
+  await guardarComida({
+    comida: original,
+    borrador: guardaBorrador,
+    despachar: pantalla.despachar,
+    recargar: async () => assert.fail('no recarga ni reenvía sola'),
+    candado: { ocupado: false },
+    guardar: async () => {
+      envios += 1;
+      throw new ErrorGuardadoHorario('Este horario cambió desde que lo abrió. Recargue los horarios…', { motivo: 'version_desactualizada', status: 409, recargar: true });
+    },
+  });
+  assert.equal(envios, 1);
+  const { estado } = pantalla;
+  assert.equal(estado.avisos[2].tipo, 'error');
+  assert.match(estado.avisos[2].titulo, /no se guardó/);
+  assert.equal(estado.incierto, false, 'fue un rechazo claro del servidor');
+  assert.equal(estado.comidas[0].base.horario.horarioId, 5, 'la base sigue siendo la que se abrió');
+  assert.equal(motivoSinGuardar(estado, estado.comidas[0], guardaBorrador), 'recargar');
+});
+
+test('un rechazo común (solapa) deja corregir y volver a enviar sin recargar', async () => {
+  const pantalla = banco();
+  await guardarComida({
+    comida: comida(),
+    borrador: guardaBorrador,
+    despachar: pantalla.despachar,
+    recargar: async () => assert.fail('no hace falta recargar'),
+    candado: { ocupado: false },
+    guardar: async () => { throw new ErrorGuardadoHorario('Esa franja se superpone con la de otra comida.', { motivo: 'solapa_con_otra_comida', status: 409 }); },
+  });
+  assert.equal(pantalla.estado.avisos[2].tipo, 'error');
+  assert.equal(motivoSinGuardar(pantalla.estado, comida(), guardaBorrador), null);
+});
+
+test('un envío a la vez: el segundo, mientras el primero sigue, no sale', async () => {
+  const pantalla = banco();
+  const candado = { ocupado: false };
+  let envios = 0;
+  let liberar;
+  const espera = new Promise((resolver) => { liberar = resolver; });
+  const guardar = async () => { envios += 1; await espera; return horario({ horarioId: 21 }); };
+  const base = { comida: comida(), borrador: guardaBorrador, despachar: pantalla.despachar, recargar: async () => {}, candado, guardar };
+
+  const primero = guardarComida(base);
+  const segundo = await guardarComida(base);
+  assert.equal(segundo, 'ocupado');
+  assert.equal(envios, 1);
+  liberar();
+  assert.equal(await primero, 'ok');
+  assert.equal(candado.ocupado, false);
+  assert.equal(pantalla.acciones.filter((tipo) => tipo === 'GUARDADO_INICIO').length, 1);
+});
+
+test('reductor: carga inicial con error, carga vacía y refresco con datos anteriores', () => {
+  let estado = estadoInicialReglas();
+  assert.equal(estado.fase, 'cargando');
+  estado = reductorReglas(estado, { tipo: 'CARGA_ERROR', mensaje: 'No se pudieron cargar los horarios.' });
+  assert.equal(estado.fase, 'error');
+  assert.equal(estado.comidas, null);
+  estado = reductorReglas(estado, { tipo: 'CARGA_INICIO' });
+  assert.equal(estado.fase, 'cargando');
+  estado = reductorReglas(estado, { tipo: 'CARGA_OK', comidas: [] });
+  assert.equal(estado.fase, 'listo');
+  assert.deepEqual(estado.comidas, []);
+
+  estado = reductorReglas(estado, { tipo: 'CARGA_OK', comidas: [comida()] });
+  estado = reductorReglas(estado, { tipo: 'CARGA_INICIO' });
+  assert.equal(estado.fase, 'listo', 'recargar no vacía lo que ya se ve');
+  assert.equal(estado.actualizando, true);
+  estado = reductorReglas(estado, { tipo: 'CARGA_ERROR', mensaje: 'falló' });
+  assert.equal(estado.fase, 'listo');
+  assert.equal(estado.comidas.length, 1);
+  assert.equal(estado.fallaRefresco, 'falló');
+});
+
+test('recargarComidas no lanza y respeta la cancelación', async () => {
+  const pantalla = banco({ fase: 'cargando', comidas: null });
+  assert.equal(await recargarComidas({ despachar: pantalla.despachar, cargar: async () => [comida()] }), true);
+  assert.equal(pantalla.estado.fase, 'listo');
+
+  const controlador = new AbortController();
+  const tardia = banco({ fase: 'cargando', comidas: null });
+  const pendiente = recargarComidas({
+    despachar: tardia.despachar,
+    cargar: async () => { controlador.abort(); return [comida()]; },
+    signal: controlador.signal,
+  });
+  assert.equal(await pendiente, false);
+  assert.deepEqual(tardia.acciones, ['CARGA_INICIO'], 'una respuesta tardía no se publica');
 });
 
 // -------------------------------------------------------------
-// 10. Resumen de diferencias antes de confirmar
+// 6. Render: tarjetas por comida, estados y ausencia de lo retirado
 // -------------------------------------------------------------
-test('el resumen lista cada cambio contra la vigente', () => {
-  const vigente = version();
-  assert.deepEqual(resumenDiferencias(vigente, {
-    duracionMinimaHoras: 12,
-    novedadesQueAnulan: ['vacacion'],
-    excluirEnfermeria: false,
-  }), ['Sin cambios respecto a la versión vigente.']);
-  assert.deepEqual(resumenDiferencias(vigente, {
-    duracionMinimaHoras: 8,
-    novedadesQueAnulan: ['licencia'],
-    excluirEnfermeria: true,
-  }), [
-    'Turno mínimo: de 12 h a 8 h.',
-    'Novedades que anulan: se agrega «licencia».',
-    'Novedades que anulan: se quita «vacacion».',
-    'Enfermería: ahora queda excluida.',
-  ]);
+const vista = (estado, extra = {}) => renderToStaticMarkup(h(VistaReglas, {
+  estado: { ...estadoInicialReglas(), fase: 'listo', ...estado },
+  onRecargar() {},
+  onGuardar() {},
+  onCerrarAviso() {},
+  ...extra,
+})).replace(/<!-- -->/g, '');
+
+const cena = () => comida({
+  horario: horario({ horarioId: 6, comidaId: 3, comida: 'Cena', horaInicio: '19:00:00', horaFin: '06:00:00', cruzaMedianoche: true }),
 });
 
-test('el formulario muestra el resumen de cambios antes de Programar versión', () => {
-  const html = renderToStaticMarkup(
-    h(DialogoNuevaVersion, {
-      vigente: version(),
-      novedadesDisponibles: ['vacacion', 'licencia'],
-      hoyMinimo: '2026-09-29',
-      valoresIniciales: { duracionMinimaHoras: 8, novedadesQueAnulan: ['licencia'], excluirEnfermeria: true },
-      onProgramada() {},
-      onCerrar() {},
-    }),
-  );
-  assert.match(html, /Programar nueva versión/);
-  assert.match(html, /Turno mínimo \(horas\)/);
-  assert.match(html, /Novedades que anulan el derecho/);
-  assert.match(html, /Excluir a enfermería/);
-  assert.match(html, /Motivo \(10 caracteres o más\)/);
-  assert.match(html, /Resumen de cambios/);
-  assert.match(html, /Turno mínimo: de 12 h a 8 h\./);
-  assert.match(html, /se agrega «licencia»/);
-  assert.match(html, /se quita «vacacion»/);
-  assert.match(html, /ahora queda excluida/);
-  assert.match(html, />Programar versión</);
+test('cada comida es una tarjeta con nombre, inicio, fin y Guardar cambios', () => {
+  const html = vista({ comidas: [comida(), cena()] });
+  assert.match(html, /Horario de cada comida/);
+  assert.match(html, /<h3[^>]*>Almuerzo<\/h3>/);
+  assert.match(html, /<h3[^>]*>Cena<\/h3>/);
+  assert.equal((html.match(BOTON_GUARDAR) || []).length, 2);
+  assert.equal((html.match(/type="time"/g) || []).length, 4);
+  assert.match(html, />Inicio</);
+  assert.match(html, />Fin</);
+  assert.match(html, /value="11:30"/);
+  assert.match(html, /value="15:00"/);
+  assert.match(html, /value="19:00"/);
+  assert.match(html, /Vigente desde el 14\/10\/2026 08:30 · guardado por root/);
+  /* Explica que el cambio rige al guardar. */
+  assert.match(html, /se aplica\s+en el momento de guardar/);
+  assert.match(html, /no hay fecha de vigencia/);
+  /* Las etiquetas están ligadas a sus campos. */
+  assert.match(html, /<label[^>]*for="comida-2-inicio"/);
+  assert.match(html, /id="comida-2-inicio"/);
+});
+
+test('indica cuándo la comida cruza la medianoche, por el dato del servidor y por lo editado', () => {
+  const html = vista({ comidas: [comida(), cena()] });
+  assert.equal((html.match(/Cruza la medianoche: termina el día siguiente\./g) || []).length, 1, 'solo la cena');
+
+  const editada = renderToStaticMarkup(h(TarjetaComida, {
+    comida: comida(),
+    estado: { ...estadoInicialReglas(), fase: 'listo', comidas: [comida()] },
+    onGuardar() {},
+    onCerrarAviso() {},
+    borradorInicial: { inicio: '22:00', fin: '02:00' },
+  })).replace(/<!-- -->/g, '');
+  assert.match(editada, /Cruza la medianoche/);
+  assert.match(editada, /Cambios sin guardar/);
+  assert.match(editada, /aria-disabled="false"/, 'con cambios válidos el botón puede enviar');
+});
+
+test('sin calendario, motivo, borrar, programar, historial ni Derecho a comer', () => {
+  const html = vista({ comidas: [comida(), cena()] });
+  assert.doesNotMatch(html, /type="date"|<textarea|type="checkbox"/);
+  assert.doesNotMatch(html, /Motivo|motivo/);
+  assert.doesNotMatch(html, /Eliminar|Programar|Historial|historial/);
+  assert.doesNotMatch(html, /Derecho a comer|derecho/i);
+  assert.doesNotMatch(html, /role="tab"|role="dialog"/);
+});
+
+test('el botón explica por qué no guarda y conserva el foco con aria-disabled', () => {
+  const html = vista({ comidas: [comida()] });
+  assert.match(html, /aria-disabled="true"/);
+  assert.match(html, /Sin cambios por guardar\./);
+  assert.match(html, /aria-describedby="comida-2-razon"/);
+  assert.doesNotMatch(html, /<button[^>]*\sdisabled/, 'no usa disabled: el foco no se pierde');
+
+  const guardando = vista({ comidas: [comida()], guardando: 2 }, { borradores: { 2: guardaBorrador } });
+  assert.match(guardando, /Guardando…/);
+  assert.match(guardando, /Guardando…<\/span>/);
+  const otro = vista({ comidas: [comida(), cena()], guardando: 2 }, { borradores: { 2: guardaBorrador, 3: { inicio: '20:00', fin: '06:00' } } });
+  assert.match(otro, /Espere: se está guardando otra comida\./);
+});
+
+test('estados: cargando, error, vacío honesto y lista con comidas se distinguen', () => {
+  const cargando = vista({ fase: 'cargando', comidas: null });
+  assert.match(cargando, /Cargando horarios…/);
+  assert.doesNotMatch(cargando, BOTON_GUARDAR);
+
+  const error = vista({ fase: 'error', comidas: null, error: 'No se pudieron cargar los horarios. La API respondió con error HTTP 500.' });
+  assert.match(error, /role="alert"/);
+  assert.match(error, /error HTTP 500/);
+  assert.match(error, /Reintentar horarios/);
+  assert.doesNotMatch(error, BOTON_GUARDAR);
+
+  const vacio = vista({ comidas: [] });
+  assert.match(vacio, /El servidor no informó ningún horario de comida/);
+  assert.doesNotMatch(vacio, BOTON_GUARDAR);
+  assert.doesNotMatch(vacio, /type="time"/);
+  assert.doesNotMatch(vacio, /Desayuno|Almuerzo|Merienda|Cena/, 'no se inventa ninguna comida');
+});
+
+test('resultado incierto, éxito y fallo de refresco se ven aparte y sin decir "no se guardó"', () => {
+  const incierto = vista({
+    comidas: [comida()],
+    incierto: true,
+    avisos: { 2: { tipo: 'incierto', titulo: 'Almuerzo: resultado incierto', detalle: 'No sabemos si el cambio se guardó.' } },
+  });
+  assert.match(incierto, /Hay un guardado sin comprobar/);
+  assert.match(incierto, /Recargar y comprobar/);
+  assert.match(incierto, /Almuerzo: resultado incierto/);
+  assert.match(incierto, /Recargue los horarios para seguir|Recargue los horarios y compruebe/);
+  assert.doesNotMatch(incierto, /no se guardó el cambio|no quedó guardado/i);
+  assert.doesNotMatch(incierto, /reglas__aviso--exito/);
+
+  const exito = vista({
+    comidas: [comida()],
+    bloqueadas: [2],
+    fallaRefresco: 'No se pudieron cargar los horarios. No se pudo conectar con la API.',
+    avisos: { 2: { tipo: 'exito', titulo: 'Almuerzo: horario guardado', detalle: 'Ahora rige de 12:00 a 15:30 desde el 14/10/2026 10:15.' } },
+  });
+  assert.match(exito, /reglas__aviso--exito/);
+  assert.match(exito, /Almuerzo: horario guardado/);
+  assert.match(exito, /No se pudieron actualizar los horarios/);
+  assert.match(exito, /Recargue los horarios para seguir editando esta comida/);
+});
+
+test('versión más reciente por reloj atrasado, comida sin versión abierta y base dudosa se explican', () => {
+  const atrasada = comida({
+    horario: horario({ horarioId: 9 }),
+    listado: horario({ horarioId: 4, estado: 'anterior' }),
+  });
+  assert.match(vista({ comidas: [atrasada] }), /La hora del sistema está en una fecha anterior a la última versión/);
+
+  const sinAbierta = { ...comida(), base: { tipo: 'ninguna' } };
+  assert.match(vista({ comidas: [sinAbierta] }), /no tiene un horario abierto: al guardar se crea uno nuevo/);
+
+  const dudosa = { ...comida(), base: { tipo: 'error', mensaje: 'No se pudo cargar el historial del horario. HTTP 500.' } };
+  const htmlDudosa = vista({ comidas: [dudosa] }, { borradores: { 2: guardaBorrador } });
+  assert.match(htmlDudosa, /No se pudo comprobar el historial de esta comida, así que no se puede guardar/);
+  assert.match(htmlDudosa, /aria-disabled="true"/);
+
+  const multiple = { ...comida(), base: { tipo: 'multiple' } };
+  assert.match(vista({ comidas: [multiple] }), /más de un horario abierto/);
+});
+
+test('el contenedor monta con Cargando horarios… y sin efectos en el render estático', () => {
+  const html = renderToStaticMarkup(h(ReglasSistema)).replace(/<!-- -->/g, '');
+  assert.match(html, /Cargando horarios…/);
+  assert.match(html, /Horario de cada comida/);
+  assert.doesNotMatch(html, BOTON_GUARDAR);
 });
 
 // -------------------------------------------------------------
-// 11. Cuentas de la jefa: lectura, sin acciones ni Nueva cuenta
+// 7. Lo retirado no existe: ni exportado ni llamado
+// -------------------------------------------------------------
+test('api.js ya no expone ninguna llamada de escritura retirada ni la edición del derecho', () => {
+  for (const nombre of [
+    'programarHorario',
+    'eliminarHorarioProgramado',
+    'programarReglasDerecho',
+    'eliminarReglasDerechoProgramadas',
+    'obtenerNovedadesDisponibles',
+    'obtenerReglasDerecho',
+  ]) {
+    assert.equal(api[nombre], undefined, `${nombre} se retiró`);
+  }
+  assert.equal(typeof api.guardarHorario, 'function');
+});
+
+test('ninguna fuente de src llama a endpoints retirados de /reglas', () => {
+  const archivos = [];
+  const recorrer = (dir) => {
+    for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+      const ruta = join(dir, entrada.name);
+      if (entrada.isDirectory()) recorrer(ruta);
+      else if (/\.(js|jsx)$/.test(entrada.name)) archivos.push(ruta);
+    }
+  };
+  recorrer(fileURLToPath(new URL('../src', import.meta.url)));
+  assert.ok(archivos.length > 20);
+
+  const apiJs = readFileSync(join(fileURLToPath(new URL('../src', import.meta.url)), 'api.js'), 'utf8');
+  /* Todo lo de reglas vive después de su encabezado: ahí solo hay lecturas y un POST. */
+  const reglas = apiJs.slice(apiJs.indexOf('Reglas del sistema: horarios de comida'));
+  assert.doesNotMatch(reglas, /method:\s*'(DELETE|PUT|PATCH)'/);
+  assert.equal((reglas.match(/method:\s*'POST'/g) || []).length, 1, 'un solo POST: guardar el horario');
+  assert.doesNotMatch(reglas, /\/reglas\/derecho/);
+  assert.doesNotMatch(reglas, /\/reglas\/horarios\/\$\{/, 'no hay rutas /reglas/horarios/{id}');
+  assert.doesNotMatch(reglas, /fecha=|vigente_desde:|motivoLimpio/);
+
+  for (const ruta of archivos) {
+    const texto = readFileSync(ruta, 'utf8');
+    assert.doesNotMatch(texto, /programarHorario|eliminarHorarioProgramado|programarReglasDerecho|eliminarReglasDerechoProgramadas|obtenerNovedadesDisponibles|obtenerReglasDerecho/, ruta);
+  }
+});
+
+// -------------------------------------------------------------
+// 8. Cuentas de la jefa: lectura, sin acciones ni Nueva cuenta
 // -------------------------------------------------------------
 test('la tabla de lectura trae 5 columnas, busca y dice Nunca sin ingreso', () => {
   const html = renderToStaticMarkup(
@@ -677,32 +1010,38 @@ test('la tabla de lectura trae 5 columnas, busca y dice Nunca sin ingreso', () =
 });
 
 // -------------------------------------------------------------
-// 12. Montaje por rol: sistemas abre reglas, jefa abre cuentas
+// 9. Montaje por rol
 // -------------------------------------------------------------
-test('sistemas monta Reglas; jefa monta Cuentas; lo ajeno cae a Supervisión', () => {
+test('sistemas monta Reglas sin padrón ni turno; la jefa conserva su panel; lo ajeno cae a Supervisión', () => {
   const localOriginal = globalThis.localStorage;
   const montar = (rol, guardada) => {
     globalThis.localStorage = { getItem: () => guardada, setItem: () => {}, removeItem: () => {} };
     return renderToStaticMarkup(
       h(ProveedorSesion, null, h(Panel, { rol, usuario: `${rol}.test` })),
-    );
+    ).replace(/<!-- -->/g, '');
   };
   try {
     const htmlReglas = montar('sistemas', 'reglas');
-    assert.match(htmlReglas, /Los cambios se aplican desde la fecha elegida/);
+    assert.match(htmlReglas, /Horario de cada comida/);
     assert.match(htmlReglas, /Cargando horarios…/);
+    assert.doesNotMatch(htmlReglas, /Cargando padrón|comensales cargados|Consultando estado del comedor/);
+    assert.doesNotMatch(htmlReglas, /Turno /, 'sistemas no ve un turno que no usa');
+    assert.match(htmlReglas, /<h1 class="header__titulo">Reglas del sistema<\/h1>/);
+
+    for (const guardada of ['supervision', 'dashboard', 'historial', 'reportes', 'vivo', 'cuentas', 'basura']) {
+      const html = montar('sistemas', guardada);
+      assert.match(html, /Horario de cada comida/, `guardada ${guardada}: vuelve a Reglas`);
+      assert.doesNotMatch(html, /Cargando supervisión|Cargando cuentas…/, `guardada ${guardada}`);
+    }
 
     const htmlCuentas = montar('jefa', 'cuentas');
     assert.match(htmlCuentas, /Cargando cuentas…/);
     assert.doesNotMatch(htmlCuentas, /Nueva cuenta/);
+    assert.match(htmlCuentas, /Turno /, 'la jefa conserva su encabezado');
 
     const htmlJefaReglas = montar('jefa', 'reglas');
     assert.doesNotMatch(htmlJefaReglas, /Cargando horarios/);
     assert.match(htmlJefaReglas, /Cargando supervisión…/);
-
-    const htmlSistemasCuentas = montar('sistemas', 'cuentas');
-    assert.doesNotMatch(htmlSistemasCuentas, /Cargando cuentas/);
-    assert.match(htmlSistemasCuentas, /Cargando supervisión…/);
 
     const htmlCocinera = montar('cocinera', 'reglas');
     assert.doesNotMatch(htmlCocinera, /Cargando horarios/);

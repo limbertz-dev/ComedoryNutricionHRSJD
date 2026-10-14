@@ -11,19 +11,22 @@ export const IDS_SECCIONES = ['vivo', 'supervision', 'dashboard', 'historial', '
 
 /*
  * La cocinera opera el lector: solo Control Biométrico y sin el «Modo
- * manual», que autoriza raciones saltándose la huella. Jefa y sistemas
- * supervisan el comedor ('supervision') y ven además resumen, historial y
- * reportes. Sistemas edita además las reglas ('reglas'), administra
- * cuentas ('admin') y revisa la salud del sistema ('monitoreo'); la jefa ve
- * las cuentas en solo lectura ('cuentas').
+ * manual», que autoriza raciones saltándose la huella. La jefa supervisa el
+ * comedor ('supervision') y ve además resumen, historial, reportes y las
+ * cuentas en solo lectura ('cuentas'). Sistemas (root) ya no opera el
+ * comedor: edita los horarios ('reglas'), administra cuentas ('admin') y
+ * mira el lector biométrico ('monitoreo'); no registra a mano.
  * Un rol que no esté aquí no ve nada: se niega por defecto.
  */
 const SECCIONES_JEFATURA = ['supervision', 'dashboard', 'historial', 'reportes'];
 
+/* Secciones que consultan el padrón y el cupo del turno. */
+const SECCIONES_DEL_COMEDOR = ['vivo', ...SECCIONES_JEFATURA];
+
 const PERMISOS = {
   cocinera: { etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false, reloj: false },
   jefa: { etiqueta: 'Jefa de nutrición', secciones: [...SECCIONES_JEFATURA, 'cuentas'], marcacionManual: true, reloj: true },
-  sistemas: { etiqueta: 'Sistemas', secciones: [...SECCIONES_JEFATURA, 'reglas', 'admin', 'monitoreo'], marcacionManual: true, reloj: true },
+  sistemas: { etiqueta: 'Sistemas', secciones: ['reglas', 'admin', 'monitoreo'], marcacionManual: false, reloj: true },
 };
 
 const permisosDe = (rol) => (typeof rol === 'string' ? PERMISOS[rol.trim().toLowerCase()] : undefined);
@@ -52,6 +55,15 @@ export function puedeMarcarManual(rol) {
  */
 export function puedeOperarReloj(rol) {
   return permisosDe(rol)?.reloj === true;
+}
+
+/**
+ * El rol tiene alguna sección que usa el padrón o el cupo del turno. Sistemas
+ * no: no se le pide el padrón ni se le muestra el turno.
+ */
+export function usaDatosDelComedor(rol) {
+  const propias = seccionesPermitidas(rol);
+  return SECCIONES_DEL_COMEDOR.some((id) => propias.includes(id));
 }
 
 /** Primera sección del rol, o null si no tiene ninguna. */

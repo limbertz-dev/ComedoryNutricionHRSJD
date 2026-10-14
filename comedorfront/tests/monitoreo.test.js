@@ -1,7 +1,7 @@
 /*
- * R3-1 Salud del sistema (solo sistemas), contrato R3-1-20261009.
- * Permisos, adaptador GET /monitoreo/estado con fetch controlado, refresco
- * con temporizadores y documento falsos, vigencia y estados de la vista.
+ * Lector biométrico (solo sistemas): GET /monitoreo/estado reutilizado.
+ * Permisos, adaptador (solo el lector) con fetch controlado, refresco con
+ * temporizadores y documento falsos, antigüedad y estados de la vista.
  */
 import test, { afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,7 +21,7 @@ import {
 } from '../src/monitoreo.js';
 import { Panel } from '../src/App.jsx';
 import { ProveedorSesion } from '../src/hooks/useSesion.js';
-import { VistaSaludSistema } from '../src/components/secciones/SaludSistema.jsx';
+import { VistaLectorBiometrico } from '../src/components/secciones/LectorBiometrico.jsx';
 
 /* sessionStorage mínimo: en Node no existe y la sesión guarda los tokens ahí. */
 const almacen = new Map();
@@ -77,7 +77,7 @@ const ACTIVIDAD_AUSENTE = actividadApi({
 // -------------------------------------------------------------
 // 1. Permisos y montaje: solo sistemas
 // -------------------------------------------------------------
-test("solo sistemas ve 'monitoreo' en permisos y menú", () => {
+test("solo sistemas ve 'monitoreo' (Lector biométrico) en permisos y menú", () => {
   assert.equal(puedeVerSeccion('sistemas', 'monitoreo'), true);
   assert.equal(puedeVerSeccion('jefa', 'monitoreo'), false);
   assert.equal(puedeVerSeccion('cocinera', 'monitoreo'), false);
@@ -88,11 +88,13 @@ test("solo sistemas ve 'monitoreo' en permisos y menú", () => {
   assert.ok(!seccionesDeRol('cocinera').some(({ id }) => id === 'monitoreo'));
 
   const seccion = buscarSeccion('monitoreo');
-  assert.equal(seccion.titulo, 'Salud del sistema');
+  assert.equal(seccion.id, 'monitoreo', 'el id interno se conserva');
+  assert.equal(seccion.etiqueta, 'Lector biométrico');
+  assert.equal(seccion.titulo, 'Lector biométrico');
   assert.equal(typeof seccion.Icono, 'function');
 });
 
-test('sistemas monta Salud del sistema; jefa y cocinera con monitoreo guardado no', () => {
+test('sistemas monta el Lector biométrico; jefa y cocinera con monitoreo guardado no', () => {
   const localOriginal = globalThis.localStorage;
   const montar = (rol) => {
     globalThis.localStorage = { getItem: () => 'monitoreo', setItem: () => {}, removeItem: () => {} };
@@ -100,15 +102,17 @@ test('sistemas monta Salud del sistema; jefa y cocinera con monitoreo guardado n
   };
   try {
     const htmlSistemas = montar('sistemas');
-    assert.match(htmlSistemas, /Consultando el diagnóstico del sistema…/);
-    assert.match(htmlSistemas, /Actualizar diagnóstico|Actualizando diagnóstico…/);
+    assert.match(htmlSistemas, /Consultando el estado del lector…/);
+    assert.match(htmlSistemas, /Actualizar|Actualizando…/);
+    assert.match(htmlSistemas, /<h1 class="header__titulo">Lector biométrico<\/h1>/);
+    assert.doesNotMatch(htmlSistemas, /Grafana|Catálogo de la base|Actividad del día|Reloj de negocio/);
 
     const htmlJefa = montar('jefa');
-    assert.doesNotMatch(htmlJefa, /diagnóstico/);
+    assert.doesNotMatch(htmlJefa, /estado del lector/);
     assert.match(htmlJefa, /Cargando supervisión…/);
 
     const htmlCocinera = montar('cocinera');
-    assert.doesNotMatch(htmlCocinera, /diagnóstico/);
+    assert.doesNotMatch(htmlCocinera, /estado del lector/);
   } finally {
     if (localOriginal === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = localOriginal;
@@ -116,9 +120,9 @@ test('sistemas monta Salud del sistema; jefa y cocinera con monitoreo guardado n
 });
 
 // -------------------------------------------------------------
-// 2. Adaptador GET /monitoreo/estado
+// 2. Adaptador GET /monitoreo/estado: solo el lector
 // -------------------------------------------------------------
-test('obtenerEstadoMonitoreo pide /monitoreo/estado firmado y adapta el caso normal', async () => {
+test('obtenerEstadoMonitoreo pide /monitoreo/estado firmado y devuelve solo el lector', async () => {
   guardarTokens({ access: 'acc-sistemas', refresh: null, usuario: 'root' });
   let pedido;
   globalThis.fetch = async (url, opciones) => {
@@ -129,143 +133,44 @@ test('obtenerEstadoMonitoreo pide /monitoreo/estado firmado y adapta el caso nor
   assert.equal(pedido.url.pathname, '/monitoreo/estado');
   assert.equal(pedido.url.search, '');
   assert.equal(pedido.opciones.headers.Authorization, 'Bearer acc-sistemas');
-  assert.deepEqual(estado, {
-    momentoReal: '2026-10-09T14:03:10',
-    entorno: 'produccion',
-    relojNegocio: { ahora: '2026-10-09T14:03:10', fecha: '2026-10-09', simulado: false, congelado: false },
-    base: { estado: 'ok', revisionAlembic: 'f6a7b8c9d0e1', tablasPropias: 14, vistasContrato: 3, faltan: [] },
-    lector: { estado: 'desconocido', razon: 'sin_telemetria' },
-    actividad: {
-      fuente: 'lecturas_biometricas',
-      disponible: true,
-      razon: null,
-      aceptadasDia: 12,
-      rechazadasDia: 2,
-      registroMayorId: {
-        id: 345,
-        fechaHora: '2026-10-09T13:58:00',
-        resultado: 'rechazada',
-        motivo: 'duplicado',
-        createdAt: '2026-10-09T13:58:01',
-      },
-    },
-  });
+  assert.deepEqual(estado, { lector: { estado: 'desconocido', razon: 'sin_telemetria' } });
   assert.deepEqual(avisos, []);
 });
 
-test('adaptador: nulos válidos, tabla vacía, esquema incompleto y actividad no disponible', () => {
-  const vacia = adaptarEstadoMonitoreo(estadoApi({
-    base: baseApi({ revision_alembic: null }),
-    actividad: actividadApi({ aceptadas_dia: 0, rechazadas_dia: 0, registro_mayor_id: null }),
+test('el resto del diagnóstico no se valida ni se guarda: un campo ajeno no impide ver el lector', () => {
+  const ajenoInvalido = adaptarEstadoMonitoreo(estadoApi({
+    base: { estado: 'quién sabe' },
+    actividad: null,
+    reloj_negocio: 'no es un objeto',
+    entorno: 'pruebas',
+    momento_real: 'ayer',
   }));
-  assert.equal(vacia.base.revisionAlembic, null);
-  assert.equal(vacia.actividad.aceptadasDia, 0);
-  assert.equal(vacia.actividad.registroMayorId, null);
-
-  const incompleta = adaptarEstadoMonitoreo(estadoApi({
-    base: baseApi({ estado: 'incompleta', faltan: ['lecturas_biometricas', 'vw_personal'] }),
-    actividad: ACTIVIDAD_AUSENTE,
-  }));
-  assert.equal(incompleta.base.estado, 'incompleta');
-  assert.deepEqual(incompleta.base.faltan, ['lecturas_biometricas', 'vw_personal']);
-  assert.equal(incompleta.actividad.disponible, false);
-  assert.equal(incompleta.actividad.razon, 'tabla_ausente');
-  assert.equal(incompleta.actividad.aceptadasDia, null, 'null nunca se vuelve cero');
-  assert.equal(incompleta.actividad.rechazadasDia, null);
-
-  const fallida = adaptarEstadoMonitoreo(estadoApi({ actividad: { ...ACTIVIDAD_AUSENTE, razon: 'error_consulta' } }));
-  assert.equal(fallida.actividad.razon, 'error_consulta');
-  assert.equal(fallida.actividad.aceptadasDia, null);
-
-  const aceptada = adaptarEstadoMonitoreo(estadoApi({
-    actividad: actividadApi({ registro_mayor_id: { ...estadoApi().actividad.registro_mayor_id, resultado: 'aceptada', motivo: null } }),
-  }));
-  assert.equal(aceptada.actividad.registroMayorId.motivo, null);
+  assert.deepEqual(ajenoInvalido, { lector: { estado: 'desconocido', razon: 'sin_telemetria' } });
+  const sinResto = adaptarEstadoMonitoreo({ lector: { estado: 'desconocido', razon: 'sin_telemetria' } });
+  assert.deepEqual(Object.keys(sinResto), ['lector']);
 });
 
-test('adaptador rechaza cuerpos inválidos o incoherentes sin convertir tipos', async () => {
+test('el adaptador rechaza un lector distinto del contrato en vez de mostrarlo', async () => {
   const invalidos = [
     ['cuerpo', []],
     ['cuerpo', null],
-    ['momento_real', estadoApi({ momento_real: '2026-10-09T14:03:10Z' })],
-    ['momento_real', estadoApi({ momento_real: '2026-10-09T14:03:10-04:00' })],
-    ['entorno', estadoApi({ entorno: 'pruebas' })],
-    ['reloj_negocio.fecha', estadoApi({ reloj_negocio: { ...estadoApi().reloj_negocio, fecha: '2026-10-08' } })],
-    ['reloj_negocio', estadoApi({ reloj_negocio: { ...estadoApi().reloj_negocio, congelado: 'no' } })],
-    ['base.conteos', estadoApi({ base: baseApi({ tablas_propias: '14' }) })],
-    ['base.conteos', estadoApi({ base: baseApi({ vistas_contrato: -1 }) })],
-    ['base.estado', estadoApi({ base: baseApi({ faltan: ['x'] }) })],
-    ['base.faltan', estadoApi({ base: baseApi({ estado: 'incompleta', faltan: [3] }) })],
+    ['cuerpo', 'texto'],
     ['lector', estadoApi({ lector: { estado: 'conectado', razon: 'sin_telemetria' } })],
+    ['lector', estadoApi({ lector: { estado: 'desconectado', razon: 'sin_telemetria' } })],
     ['lector', estadoApi({ lector: { estado: 'desconocido', razon: null } })],
-    ['actividad.fuente', estadoApi({ actividad: actividadApi({ fuente: 'otra' }) })],
-    ['actividad.contadores', estadoApi({ actividad: actividadApi({ aceptadas_dia: '12' }) })],
-    ['actividad.contadores', estadoApi({ actividad: actividadApi({ rechazadas_dia: null }) })],
-    ['actividad.contadores', estadoApi({ actividad: actividadApi({ aceptadas_dia: 1.5 }) })],
-    ['actividad.razon', estadoApi({ actividad: actividadApi({ razon: 'tabla_ausente' }) })],
-    ['actividad.razon', estadoApi({ actividad: { ...ACTIVIDAD_AUSENTE, razon: null } })],
-    ['actividad sin datos', estadoApi({ actividad: { ...ACTIVIDAD_AUSENTE, aceptadas_dia: 0, rechazadas_dia: 0 } })],
-    ['registro_mayor_id.id', estadoApi({ actividad: actividadApi({ registro_mayor_id: { ...estadoApi().actividad.registro_mayor_id, id: 0 } }) })],
-    ['registro_mayor_id.id', estadoApi({ actividad: actividadApi({ registro_mayor_id: { ...estadoApi().actividad.registro_mayor_id, id: '345' } }) })],
-    ['registro_mayor_id.motivo', estadoApi({ actividad: actividadApi({ registro_mayor_id: { ...estadoApi().actividad.registro_mayor_id, motivo: 'otro' } }) })],
-    ['registro_mayor_id.created_at', estadoApi({ actividad: actividadApi({ registro_mayor_id: { ...estadoApi().actividad.registro_mayor_id, created_at: null } }) })],
+    ['lector', estadoApi({ lector: { estado: 'desconocido', razon: 'otra' } })],
+    ['lector', estadoApi({ lector: null })],
   ];
   for (const [campo, cuerpo] of invalidos) {
     assert.throws(() => adaptarEstadoMonitoreo(cuerpo), (error) => error.message.includes(`(${campo})`),
       `debía rechazar ${campo}`);
   }
   const sinClave = estadoApi();
-  delete sinClave.actividad;
-  assert.throws(() => adaptarEstadoMonitoreo(sinClave), /diagnóstico inválido \(actividad\)/);
+  delete sinClave.lector;
+  assert.throws(() => adaptarEstadoMonitoreo(sinClave), /estado del lector inválido \(lector\)/);
 
-  globalThis.fetch = async () => json(estadoApi({ entorno: 'pruebas' }));
-  await assert.rejects(obtenerEstadoMonitoreo(), /No se pudo obtener el diagnóstico del sistema\. .*inválido/);
-});
-
-test('adaptador: fechas imposibles se rechazan, no se normalizan', () => {
-  const conAhora = (ahora) => estadoApi({
-    reloj_negocio: { ...estadoApi().reloj_negocio, ahora, fecha: ahora.slice(0, 10) },
-  });
-  const imposibles = [
-    ['31 de febrero', '2026-02-31T12:00:00'],
-    ['29 de febrero no bisiesto', '2026-02-29T12:00:00'],
-    ['29 de febrero de 1900', '1900-02-29T12:00:00'],
-    ['31 de abril', '2026-04-31T12:00:00'],
-    ['mes 13', '2026-13-01T12:00:00'],
-    ['mes 0', '2026-00-10T12:00:00'],
-    ['día 0', '2026-10-00T12:00:00'],
-    ['hora 24', '2026-10-09T24:00:00'],
-    ['minuto 60', '2026-10-09T14:60:00'],
-    ['segundo 60', '2026-10-09T14:03:60'],
-  ];
-  for (const [caso, texto] of imposibles) {
-    assert.throws(() => adaptarEstadoMonitoreo(estadoApi({ momento_real: texto })),
-      /\(momento_real\)/, `momento_real: ${caso}`);
-    assert.throws(() => adaptarEstadoMonitoreo(conAhora(texto)), /\(reloj_negocio\.ahora\)/,
-      `reloj_negocio.ahora: ${caso}`);
-    const registro = { ...estadoApi().actividad.registro_mayor_id, fecha_hora: texto };
-    assert.throws(() => adaptarEstadoMonitoreo(estadoApi({ actividad: actividadApi({ registro_mayor_id: registro }) })),
-      /\(registro_mayor_id\.fecha_hora\)/, `fecha_hora: ${caso}`);
-  }
-  assert.throws(() => adaptarEstadoMonitoreo(estadoApi({
-    reloj_negocio: { ...estadoApi().reloj_negocio, ahora: '2026-02-31T12:00:00', fecha: '2026-02-31' },
-  })), /\(reloj_negocio\.ahora\)/);
-
-  // Válidas: bisiestos (incluido 2000), extremos del día, microsegundos y los formatos ya aceptados.
-  for (const texto of [
-    '2028-02-29T12:00:00',
-    '2000-02-29T00:00:00',
-    '2026-12-31T23:59:59',
-    '2026-10-09T14:03:10.123456',
-    '2026-10-09T14:03',
-    '2026-10-09 14:03:10',
-  ]) {
-    const estado = adaptarEstadoMonitoreo(conAhora(texto));
-    assert.equal(estado.relojNegocio.ahora, texto, 'el texto se conserva sin convertir zona');
-    assert.equal(adaptarEstadoMonitoreo(estadoApi({ momento_real: texto })).momentoReal, texto);
-  }
-  assert.throws(() => adaptarEstadoMonitoreo(estadoApi({ momento_real: '2026-10-09T14:03:10.1234567' })),
-    /\(momento_real\)/, 'más de 6 decimales');
+  globalThis.fetch = async () => json(estadoApi({ lector: { estado: 'conectado', razon: 'sin_telemetria' } }));
+  await assert.rejects(obtenerEstadoMonitoreo(), /No se pudo consultar el lector biométrico\. .*inválido/);
 });
 
 // -------------------------------------------------------------
@@ -284,7 +189,7 @@ test('403 avisa «prohibido» y conserva detail y motivo en la causa', async () 
   assert.equal(leerTokens()?.access, 'acc-jefa', 'un 403 no cierra la sesión');
 });
 
-test('401 vacía la sesión y avisa «expirada»; un 500 sin cuerpo no nombra componente', async () => {
+test('401 vacía la sesión y avisa «expirada»; un 500 sin cuerpo no inventa causas', async () => {
   guardarTokens({ access: 'acc', refresh: null, usuario: 'root' });
   globalThis.fetch = async () => json({ detail: 'Sesión inválida.', motivo: 'token_invalido' }, 401);
   await assert.rejects(obtenerEstadoMonitoreo(), (error) => error.cause.status === 401
@@ -295,8 +200,8 @@ test('401 vacía la sesión y avisa «expirada»; un 500 sin cuerpo no nombra co
   avisos.length = 0;
   globalThis.fetch = async () => new Response('Internal Server Error', { status: 500 });
   await assert.rejects(obtenerEstadoMonitoreo(), (error) => {
-    assert.equal(error.message, 'No se pudo obtener el diagnóstico del sistema. La API respondió con error HTTP 500.');
-    assert.doesNotMatch(error.message, /base|lector|actividad|MySQL/i);
+    assert.equal(error.message, 'No se pudo consultar el lector biométrico. La API respondió con error HTTP 500.');
+    assert.doesNotMatch(error.message, /base de datos|actividad|MySQL/i);
     return true;
   });
   assert.deepEqual(avisos, []);
@@ -496,12 +401,12 @@ test('estado de la vista: error, regreso y antigüedad retiran el verde; el relo
 });
 
 // -------------------------------------------------------------
-// 6. Vista: estados y textos
+// 6. Vista: solo el lector y la actualización, sin fingir conectividad
 // -------------------------------------------------------------
 const RECEPCION = { pared: new Date(2026, 9, 9, 14, 3, 12).getTime(), mono: 0 };
 const vista = ({ cuerpo = estadoApi(), estado = 'vigente', error = '', consultando = false, sinDatos = false } = {}) => (
-  renderToStaticMarkup(h(VistaSaludSistema, {
-    diagnostico: sinDatos ? null : adaptarEstadoMonitoreo(cuerpo),
+  renderToStaticMarkup(h(VistaLectorBiometrico, {
+    lector: sinDatos ? null : adaptarEstadoMonitoreo(cuerpo).lector,
     recepcion: sinDatos ? null : RECEPCION,
     error,
     consultando,
@@ -509,110 +414,73 @@ const vista = ({ cuerpo = estadoApi(), estado = 'vigente', error = '', consultan
     onActualizar() {},
   })).replace(/<!-- -->/g, '')
 );
-const regionViva = (html) => /<p class="salud__resumen-estado" role="status">(.*?)<\/p>/.exec(html)?.[1] ?? '';
+const regionViva = (html) => /<p class="lector__resumen-estado" role="status">(.*?)<\/p>/.exec(html)?.[1] ?? '';
 
-test('vista vigente: diagnóstico actualizado, sin «Todo operativo», lector sin verde y Grafana sin enlace', () => {
+test('vista vigente: lector desconocido en texto neutro, sin verde ni «desconectado»', () => {
   const html = vista();
-  assert.match(html, /Diagnóstico actualizado/);
-  assert.doesNotMatch(html, /Todo operativo/i);
-  assert.match(html, /etiqueta--exito">Respondió/);
-  assert.match(html, /Lector biométrico/);
-  assert.match(html, /etiqueta--neutro">Sin telemetría de conexión/);
-  assert.doesNotMatch(html, /desconectado/i);
-  assert.match(html, /Integración pendiente/);
-  assert.doesNotMatch(html, /<a\b|href=/);
-  assert.match(html, /Actualizar diagnóstico/);
-  assert.match(html, /Solo se comprueba su presencia en el catálogo/);
-  assert.match(html, /09\/10\/2026 14:03:10 \(sin zona horaria informada\)/);
-  assert.match(html, /14:03:12 \(reloj de este equipo\)/);
-  // La región viva no lleva horas: un refresco no se vuelve a anunciar.
+  assert.match(html, /Lector de huellas/);
+  assert.match(html, /<dd>Desconocido<\/dd>/);
+  assert.match(html, /etiqueta--neutro">Sin información de conexión/);
+  assert.match(html, /todavía no recibe señales del lector/);
+  assert.match(html, /no puede saber si está conectado/);
+  assert.match(html, /Que el estado sea desconocido no indica una falla/);
+  assert.doesNotMatch(html, /etiqueta--exito/, 'nada verde: no se sabe si el lector funciona');
+  assert.doesNotMatch(html, /desconectado|en línea|conectado correctamente|lector conectado|Todo operativo/i);
+  assert.doesNotMatch(html, /\b(conectar|enrolar|enrolamiento)\b/i, 'sin botones ficticios');
+  assert.match(html, /Actualizar/);
+  assert.match(html, /Última consulta recibida en este equipo a las 14:03:12/);
+  /* La región viva no lleva horas: un refresco no se vuelve a anunciar. */
   assert.doesNotMatch(regionViva(html), /\d{2}:\d{2}/);
+  assert.match(regionViva(html), /Consulta reciente/);
 });
 
-test('vista: con lecturas nunca afirma conectividad y el mayor id no es el último toque', () => {
-  const html = vista();
-  assert.match(html, /Registro con el id más alto/);
-  assert.match(html, /N\.º 345/);
-  assert.match(html, /no es necesariamente la última huella/);
-  assert.match(html, /Tener lecturas no prueba que el lector esté conectado/);
-  assert.doesNotMatch(html, /lector conectado|conectado correctamente|en línea/i);
-  assert.doesNotMatch(html, /última marcación del lector|último toque/i);
+test('vista: solo información del lector; nada de API, base, reloj, actividad ni Grafana', () => {
+  const html = vista({ cuerpo: estadoApi({ entorno: 'simulacion' }) });
+  for (const retirado of [
+    /Grafana/, /Integración pendiente/, /Catálogo de la base/, /Actividad del día/, /Reloj de negocio/,
+    /Respondió/, /Revisión de migración/, /Lecturas aceptadas/, /Entorno de simulación/,
+    /sin zona horaria/, /Registro con el id más alto/, /Tablas propias/, />API</,
+  ]) {
+    assert.doesNotMatch(html, retirado, String(retirado));
+  }
+  assert.doesNotMatch(html, /<a\b|href=/);
+  assert.equal((html.match(/<section class="tarjeta lector__tarjeta"/g) || []).length, 1, 'una sola tarjeta');
 });
 
-test('vista: carga inicial, diagnóstico no disponible y datos anteriores tras fallo', () => {
+test('vista: carga inicial, estado no disponible y datos anteriores tras fallo se distinguen', () => {
   const carga = vista({ sinDatos: true, estado: 'cargando', consultando: true });
-  assert.match(regionViva(carga), /Consultando el diagnóstico del sistema…/);
-  assert.match(carga, /Actualizando diagnóstico…/);
+  assert.match(regionViva(carga), /Consultando el estado del lector…/);
+  assert.match(carga, /Actualizando…/);
   assert.match(carga, /aria-disabled="true"/);
   assert.match(carga, /aria-busy="true"/);
   assert.doesNotMatch(carga, /etiqueta--exito/);
-  assert.doesNotMatch(carga, /Lector biométrico/);
+  assert.doesNotMatch(carga, /Lector de huellas|Desconocido/, 'sin datos no se muestra un estado del lector');
 
-  const sinDiagnostico = vista({ sinDatos: true, estado: 'sin-diagnostico', error: 'No se pudo obtener el diagnóstico del sistema. La API respondió con error HTTP 500.' });
-  assert.match(sinDiagnostico, /Diagnóstico no disponible/);
-  assert.match(sinDiagnostico, /role="alert"/);
-  assert.match(sinDiagnostico, /no es posible saber qué componente falló/);
-  assert.doesNotMatch(sinDiagnostico, /etiqueta--exito/);
-  assert.doesNotMatch(sinDiagnostico, /Catálogo de la base|Lector biométrico|Actividad del día/);
-  assert.match(sinDiagnostico, /Integración pendiente/);
+  const sinDatos = vista({ sinDatos: true, estado: 'sin-diagnostico', error: 'No se pudo consultar el lector biométrico. La API respondió con error HTTP 500.' });
+  assert.match(sinDatos, /Estado no disponible/);
+  assert.match(sinDatos, /role="alert"/);
+  assert.match(sinDatos, /No se pudo consultar el estado del lector\./);
+  assert.match(sinDatos, /error HTTP 500/);
+  assert.doesNotMatch(sinDatos, /etiqueta--exito/);
+  assert.doesNotMatch(sinDatos, /Lector de huellas|Desconocido/);
 
-  const anteriores = vista({ estado: 'fallo-con-datos', error: 'No se pudo obtener el diagnóstico del sistema. No se pudo conectar con la API.' });
-  assert.match(anteriores, /No se pudo actualizar el diagnóstico/);
-  assert.match(anteriores, /Se muestran los datos anteriores/);
-  assert.match(anteriores, /Respuesta anterior/);
-  assert.match(anteriores, /Presentes en el catálogo \(dato anterior\)/);
+  const anteriores = vista({ estado: 'fallo-con-datos', error: 'No se pudo consultar el lector biométrico. No se pudo conectar con la API.' });
+  assert.match(anteriores, /No se pudo actualizar el estado del lector\./);
+  assert.match(anteriores, /Se muestran los datos de la última consulta/);
+  assert.match(anteriores, /etiqueta--aviso">Dato anterior/);
+  assert.match(anteriores, /<dd>Desconocido<\/dd>/, 'los datos anteriores siguen a la vista');
   assert.doesNotMatch(anteriores, /etiqueta--exito/);
 });
 
-test('vista: datos antiguos y revalidación tampoco muestran verde', () => {
-  for (const [estado, texto] of [['antiguo', /Datos antiguos/], ['revalidando', /Revalidando/]]) {
+test('vista: datos antiguos y revalidación se marcan como anteriores, también sin verde', () => {
+  for (const [estado, texto] of [['antiguo', /Datos anteriores/], ['revalidando', /Revalidando/]]) {
     const html = vista({ estado });
     assert.match(regionViva(html), texto);
+    assert.match(html, /etiqueta--aviso">Dato anterior/, estado);
     assert.doesNotMatch(html, /etiqueta--exito/, `${estado} no debe tener verde`);
   }
-});
-
-test('vista: esquema incompleto, actividad vacía y actividad no consultable se distinguen', () => {
-  const incompleta = vista({ cuerpo: estadoApi({
-    base: baseApi({ estado: 'incompleta', faltan: ['lecturas_biometricas', 'vw_personal'] }),
-    actividad: ACTIVIDAD_AUSENTE,
-  }) });
-  assert.match(incompleta, /Esquema incompleto/);
-  assert.match(incompleta, /<code>lecturas_biometricas<\/code>/);
-  assert.match(incompleta, /<code>vw_personal<\/code>/);
-  assert.match(incompleta, /La tabla de lecturas no existe en la base/);
-  assert.match(incompleta, /no están disponibles \(no son cero\)/);
-  assert.doesNotMatch(incompleta, /<dd>0<\/dd>/);
-
-  const errorConsulta = vista({ cuerpo: estadoApi({ actividad: { ...ACTIVIDAD_AUSENTE, razon: 'error_consulta' } }) });
-  assert.match(errorConsulta, /La consulta de actividad falló/);
-  assert.doesNotMatch(errorConsulta, /<dd>0<\/dd>/);
-
-  const vacia = vista({ cuerpo: estadoApi({ actividad: actividadApi({ aceptadas_dia: 0, rechazadas_dia: 0, registro_mayor_id: null }) }) });
-  assert.match(vacia, /La tabla de lecturas está vacía/);
-  assert.match(vacia, /<dd>0<\/dd>/);
-  assert.doesNotMatch(vacia, /No disponible/);
-
-  const sinHoy = vista({ cuerpo: estadoApi({ actividad: actividadApi({ aceptadas_dia: 0, rechazadas_dia: 0 }) }) });
-  assert.match(sinHoy, /No hay lecturas en la fecha de negocio 09\/10\/2026/);
-});
-
-test('vista: entorno de simulación con reloj real se muestran como hechos separados', () => {
-  const html = vista({ cuerpo: estadoApi({ entorno: 'simulacion' }) });
-  assert.match(html, /Entorno de simulación/);
-  assert.match(html, /Esto no indica si hay o no un lector\s+físico/);
-  assert.match(html, /etiqueta--neutro">Reloj real/);
-  assert.match(html, /Real, en marcha/);
-  assert.doesNotMatch(html, /Reloj simulado/);
-  assert.doesNotMatch(html, /no hay (lector|dispositivo)|sin hardware|sin lector físico/i);
-
-  const simulado = vista({ cuerpo: estadoApi({
-    entorno: 'produccion',
-    reloj_negocio: { ahora: '2026-10-09T07:00:00', fecha: '2026-10-09', simulado: true, congelado: true },
-  }) });
-  assert.doesNotMatch(simulado, /Entorno de simulación/);
-  assert.match(simulado, /Reloj simulado/);
-  assert.match(simulado, /Simulado, congelado/);
+  assert.match(regionViva(vista({ estado: 'vigente' })), /Consulta reciente/);
+  assert.doesNotMatch(vista({ estado: 'vigente' }), /Dato anterior/);
 });
 
 test('textoFechaHoraServidor muestra la hora del servidor sin convertir zona', () => {

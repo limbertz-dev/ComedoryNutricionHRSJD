@@ -1439,22 +1439,17 @@ async function leerSalud({ signal }) {
 }
 
 /*
- * --- Monitoreo (contrato R3-1-20261009) ---
- * GET /monitoreo/estado → diagnóstico; solo sistemas, sin caché.
- * {momento_real, entorno, reloj_negocio: {ahora, fecha, simulado, congelado},
- *  base: {estado, revision_alembic, tablas_propias, vistas_contrato, faltan},
- *  lector: {estado: 'desconocido', razon: 'sin_telemetria'},
- *  actividad: {fuente, disponible, razon, aceptadas_dia, rechazadas_dia,
- *              registro_mayor_id: null | {id, fecha_hora, resultado, motivo, created_at}}}
- * Un error (sin cuerpo garantizado) no dice qué componente falló.
+ * --- Lector biométrico (GET /monitoreo/estado, solo sistemas) ---
+ * El endpoint devuelve un diagnóstico más amplio; la pantalla «Lector
+ * biométrico» solo usa `lector`:
+ *   {estado: 'desconocido', razon: 'sin_telemetria'}
+ * Hoy el sistema no recibe señales del lector, así que ese es el único valor
+ * válido: cualquier otro se rechaza en vez de mostrarse como si fuera cierto.
+ * El resto del cuerpo (base, actividad, reloj, entorno) no se valida ni se
+ * guarda: un campo ajeno al lector no debe impedir ver su estado.
  */
-const ENTORNOS = ['produccion', 'desarrollo', 'simulacion'];
-const RAZONES_ACTIVIDAD = ['tabla_ausente', 'error_consulta'];
-const RESULTADOS_LECTURA = ['aceptada', 'rechazada'];
-const MOTIVOS_LECTURA = ['duplicado', 'sin_derecho', 'fuera_horario', 'no_identificado'];
 /* Hora local sin zona: una «Z» o un desfase no están confirmados y se rechazan. */
 const FECHA_HORA_SIN_ZONA = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?$/;
-const FECHA_DIA = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DIAS_POR_MES = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 const esBisiesto = (anio) => (anio % 4 === 0 && anio % 100 !== 0) || anio % 400 === 0;
@@ -1468,11 +1463,6 @@ function esDiaValido(anio, mes, dia) {
   return dia <= (mes === 2 && esBisiesto(anio) ? 29 : DIAS_POR_MES[mes - 1]);
 }
 
-function esFecha(valor) {
-  const partes = typeof valor === 'string' ? FECHA_DIA.exec(valor) : null;
-  return partes !== null && esDiaValido(Number(partes[1]), Number(partes[2]), Number(partes[3]));
-}
-
 function esFechaHora(valor) {
   const partes = typeof valor === 'string' ? FECHA_HORA_SIN_ZONA.exec(valor) : null;
   if (!partes) return false;
@@ -1481,120 +1471,22 @@ function esFechaHora(valor) {
   return esDiaValido(anio, mes, dia) && hora <= 23 && minuto <= 59 && segundo <= 59;
 }
 
-function diagnosticoInvalido(campo) {
-  return new Error(`La API devolvió un diagnóstico inválido (${campo}).`);
-}
-
-function adaptarRegistroMayorId(dato) {
-  if (dato === null) return null;
-  if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('registro_mayor_id');
-  if (!Number.isInteger(dato.id) || dato.id <= 0) throw diagnosticoInvalido('registro_mayor_id.id');
-  if (!esFechaHora(dato.fecha_hora)) throw diagnosticoInvalido('registro_mayor_id.fecha_hora');
-  if (!RESULTADOS_LECTURA.includes(dato.resultado)) throw diagnosticoInvalido('registro_mayor_id.resultado');
-  if (dato.motivo !== null && !MOTIVOS_LECTURA.includes(dato.motivo)) {
-    throw diagnosticoInvalido('registro_mayor_id.motivo');
-  }
-  if (!esFechaHora(dato.created_at)) throw diagnosticoInvalido('registro_mayor_id.created_at');
-  return {
-    id: dato.id,
-    fechaHora: dato.fecha_hora,
-    resultado: dato.resultado,
-    motivo: dato.motivo,
-    createdAt: dato.created_at,
-  };
-}
-
-/*
- * disponible=true: razon null y contadores enteros (0 es un día sin
- * lecturas). disponible=false: razon conocida y todo en null, nunca 0.
- */
-function adaptarActividad(dato) {
-  if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('actividad');
-  if (dato.fuente !== 'lecturas_biometricas') throw diagnosticoInvalido('actividad.fuente');
-  if (typeof dato.disponible !== 'boolean') throw diagnosticoInvalido('actividad.disponible');
-  if (dato.disponible) {
-    if (dato.razon !== null) throw diagnosticoInvalido('actividad.razon');
-    if (!esEnteroNoNegativo(dato.aceptadas_dia) || !esEnteroNoNegativo(dato.rechazadas_dia)) {
-      throw diagnosticoInvalido('actividad.contadores');
-    }
-  } else {
-    if (!RAZONES_ACTIVIDAD.includes(dato.razon)) throw diagnosticoInvalido('actividad.razon');
-    if (dato.aceptadas_dia !== null || dato.rechazadas_dia !== null || dato.registro_mayor_id !== null) {
-      throw diagnosticoInvalido('actividad sin datos');
-    }
-  }
-  return {
-    fuente: dato.fuente,
-    disponible: dato.disponible,
-    razon: dato.razon,
-    aceptadasDia: dato.aceptadas_dia,
-    rechazadasDia: dato.rechazadas_dia,
-    registroMayorId: adaptarRegistroMayorId(dato.registro_mayor_id),
-  };
-}
-
-/* Presencia en el catálogo: «ok» con elementos faltantes sería contradictorio. */
-function adaptarBase(dato) {
-  if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('base');
-  if (dato.estado !== 'ok' && dato.estado !== 'incompleta') throw diagnosticoInvalido('base.estado');
-  if (dato.revision_alembic !== null
-    && (typeof dato.revision_alembic !== 'string' || dato.revision_alembic === '')) {
-    throw diagnosticoInvalido('base.revision_alembic');
-  }
-  if (!esEnteroNoNegativo(dato.tablas_propias) || !esEnteroNoNegativo(dato.vistas_contrato)) {
-    throw diagnosticoInvalido('base.conteos');
-  }
-  if (!Array.isArray(dato.faltan)
-    || !dato.faltan.every((nombre) => typeof nombre === 'string' && nombre !== '')) {
-    throw diagnosticoInvalido('base.faltan');
-  }
-  if (dato.estado === 'ok' && dato.faltan.length > 0) throw diagnosticoInvalido('base.estado');
-  return {
-    estado: dato.estado,
-    revisionAlembic: dato.revision_alembic,
-    tablasPropias: dato.tablas_propias,
-    vistasContrato: dato.vistas_contrato,
-    faltan: [...dato.faltan],
-  };
-}
-
-function adaptarRelojNegocio(dato) {
-  if (!dato || typeof dato !== 'object') throw diagnosticoInvalido('reloj_negocio');
-  if (!esFechaHora(dato.ahora)) throw diagnosticoInvalido('reloj_negocio.ahora');
-  // La fecha deriva del mismo `ahora`: si no coinciden, el diagnóstico no es coherente.
-  if (!esFecha(dato.fecha) || dato.ahora.slice(0, 10) !== dato.fecha) {
-    throw diagnosticoInvalido('reloj_negocio.fecha');
-  }
-  if (typeof dato.simulado !== 'boolean' || typeof dato.congelado !== 'boolean') {
-    throw diagnosticoInvalido('reloj_negocio');
-  }
-  return { ahora: dato.ahora, fecha: dato.fecha, simulado: dato.simulado, congelado: dato.congelado };
-}
-
 /**
- * Valida el cuerpo de GET /monitoreo/estado y lo pasa a camelCase. Las
- * horas quedan como texto del servidor (sin zona): no se convierten ni se
- * comparan entre sí. Ningún null se vuelve cero ni ningún texto, número.
+ * Valida el cuerpo de GET /monitoreo/estado y devuelve solo lo del lector.
+ * Ningún estado desconocido por el contrato se convierte en otro.
  */
 export function adaptarEstadoMonitoreo(dato) {
-  if (!dato || typeof dato !== 'object' || Array.isArray(dato)) throw diagnosticoInvalido('cuerpo');
-  if (!esFechaHora(dato.momento_real)) throw diagnosticoInvalido('momento_real');
-  if (!ENTORNOS.includes(dato.entorno)) throw diagnosticoInvalido('entorno');
-  if (dato.lector?.estado !== 'desconocido' || dato.lector?.razon !== 'sin_telemetria') {
-    throw diagnosticoInvalido('lector');
+  if (!dato || typeof dato !== 'object' || Array.isArray(dato)) {
+    throw new Error('La API devolvió un estado del lector inválido (cuerpo).');
   }
-  return {
-    momentoReal: dato.momento_real,
-    entorno: dato.entorno,
-    relojNegocio: adaptarRelojNegocio(dato.reloj_negocio),
-    base: adaptarBase(dato.base),
-    lector: { estado: dato.lector.estado, razon: dato.lector.razon },
-    actividad: adaptarActividad(dato.actividad),
-  };
+  if (dato.lector?.estado !== 'desconocido' || dato.lector?.razon !== 'sin_telemetria') {
+    throw new Error('La API devolvió un estado del lector inválido (lector).');
+  }
+  return { lector: { estado: dato.lector.estado, razon: dato.lector.razon } };
 }
 
 /**
- * GET /monitoreo/estado: diagnóstico técnico para sistemas. Pasa por
+ * GET /monitoreo/estado: estado del lector para sistemas. Pasa por
  * `solicitarApi` sin `manejoPropio`, así 401/403/428 siguen el manejo
  * central de la sesión. El error conserva su causa (con `status`).
  */
@@ -1603,7 +1495,7 @@ export async function obtenerEstadoMonitoreo({ signal } = {}) {
     return adaptarEstadoMonitoreo(await solicitarApi('/monitoreo/estado', { signal }));
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new Error(`No se pudo obtener el diagnóstico del sistema. ${error.message}`, { cause: error });
+    throw new Error(`No se pudo consultar el lector biométrico. ${error.message}`, { cause: error });
   }
 }
 
@@ -1899,95 +1791,57 @@ export function volverARelojReal({ signal } = {}) {
 }
 
 /* ------------------------------------------------------------------ *
- * Reglas del sistema (R2): horarios de comida y derecho a comer
+ * Reglas del sistema: horarios de comida (solo sistemas)
  *
- * GET  /cuentas → [CuentaLecturaApi] (para la jefa; sin cuentas sistemas)
- * GET  /reglas/derecho → {vigente, versiones}
- * GET  /reglas/derecho/novedades → [str]
- * POST /reglas/derecho {vigente_desde, duracion_minima_horas,
- *   novedades_que_anulan, excluir_enfermeria, motivo} → 201 VersionApi
- * DELETE /reglas/derecho/{id} → 204 (solo programadas)
- * GET  /reglas/horarios?fecha= → [HorarioApi]
- * GET  /reglas/horarios/historial?comida_id= → [HorarioApi]
- * POST /reglas/horarios {comida_id, hora_inicio, hora_fin,
- *   vigente_desde, motivo} → 201
- * DELETE /reglas/horarios/{horario_id} → 204 (solo programados)
+ * GET  /reglas/horarios → [HorarioRegla]   (sin query: la versión de cada
+ *   comida que rige a la hora del servidor, una fila por comida)
+ * GET  /reglas/horarios/historial?comida_id= → [HorarioRegla]
+ * POST /reglas/horarios {comida_id, hora_inicio, hora_fin, base_horario_id}
+ *   → 201 HorarioRegla. Las cuatro claves son obligatorias y no hay otras:
+ *   el horario rige desde el instante en que el servidor lo guarda.
  *
- * VersionApi = {id, vigente_desde, duracion_minima_horas,
- *   novedades_que_anulan, excluir_enfermeria, motivo, creada_por|null,
- *   creada, estado: programada|vigente|anterior}
- * HorarioApi = {horario_id, comida_id, comida, hora_inicio, hora_fin,
- *   cruza_medianoche, vigente_desde, vigente_hasta|null, motivo|null,
- *   creada_por|null}
+ * HorarioRegla = {horario_id, comida_id, comida|null, hora_inicio "HH:MM:SS",
+ *   hora_fin, cruza_medianoche, vigente_desde (datetime sin zona),
+ *   vigente_hasta|null, motivo|null, creada_por|null, creada,
+ *   estado: vigente|anterior|inactiva}
+ *
+ * Los horarios ya no se programan ni se borran, y el derecho a comer dejó
+ * de ser editable desde la interfaz: acá no queda ninguna llamada de
+ * escritura a esas rutas. El backend decide y valida; acá solo se adapta
+ * snake_case, se valida la forma y se traducen los motivos.
+ *
+ * GET /cuentas → [CuentaLecturaApi] (para la jefa; sin cuentas sistemas)
  * CuentaLecturaApi = {id, username, nombre|null, rol, activo,
  *   debe_cambiar, ultimo_ingreso|null}
- *
- * El backend decide y valida; acá solo se adapta snake_case, se valida
- * la forma y se traducen los motivos a español claro. Cada cambio es una
- * versión nueva con "vigente desde" de hoy o futura, nunca hacia atrás.
  * ------------------------------------------------------------------ */
 
-/** Motivos del backend con el texto que lee jefatura y sistemas. */
-const MOTIVOS_REGLAS = {
-  vigencia_en_el_pasado: 'La fecha elegida ya pasó. Elija hoy o un día futuro.',
-  horario_invalido: 'El horario no es válido. Revise la hora de inicio y la de fin.',
-  solapa_con_otra_comida: 'Ese horario se cruza con otra comida. Elija horas que no se solapen.',
-  version_en_esa_fecha: 'Ya hay un cambio programado para esa fecha.',
-  comida_inexistente: 'Esa comida ya no existe. Actualice la lista.',
-  version_inexistente: 'Esa versión ya no existe. Actualice la lista.',
-  version_ya_vigente: 'Esa versión ya está vigente y no se puede eliminar.',
-  motivo_obligatorio: 'Escriba el motivo del cambio.',
-};
-
-/** Texto claro del motivo, o null si no es un motivo conocido. */
-function mensajeDeMotivoReglas(motivo) {
-  return typeof motivo === 'string' ? MOTIVOS_REGLAS[motivo] ?? null : null;
+/** Hora de la API: "11:30" o "11:30:00", con rangos válidos. */
+function esHoraApi(valor) {
+  const partes = typeof valor === 'string' ? /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(valor) : null;
+  return partes !== null && Number(partes[1]) <= 23 && Number(partes[2]) <= 59
+    && (partes[3] === undefined || Number(partes[3]) <= 59);
 }
 
-/** Hora de la API: "11:30" o "11:30:00". */
-const HORA_API = /^\d{2}:\d{2}(:\d{2})?$/;
+const ESTADOS_HORARIO = ['vigente', 'anterior', 'inactiva'];
 
-const ESTADOS_VERSION = ['programada', 'vigente', 'anterior'];
-
-function adaptarVersionDerecho(dato) {
-  if (!Number.isInteger(dato?.id) || dato.id <= 0
-    || typeof dato.vigente_desde !== 'string' || !FECHA_API.test(dato.vigente_desde)
-    || !Number.isInteger(dato.duracion_minima_horas) || dato.duracion_minima_horas < 1
-    || dato.duracion_minima_horas > 48
-    || !Array.isArray(dato.novedades_que_anulan)
-    || dato.novedades_que_anulan.some((novedad) => typeof novedad !== 'string' || novedad.length === 0)
-    || typeof dato.excluir_enfermeria !== 'boolean'
-    || typeof dato.motivo !== 'string' || dato.motivo.length === 0
-    || !(dato.creada_por === null || typeof dato.creada_por === 'string')
-    || typeof dato.creada !== 'string' || dato.creada.length === 0
-    || !ESTADOS_VERSION.includes(dato.estado)) {
-    throw new Error('La API devolvió una versión de derecho inválida.');
-  }
-  return {
-    id: dato.id,
-    vigenteDesde: dato.vigente_desde,
-    duracionMinimaHoras: dato.duracion_minima_horas,
-    novedadesQueAnulan: [...dato.novedades_que_anulan],
-    excluirEnfermeria: dato.excluir_enfermeria,
-    motivo: dato.motivo,
-    creadaPor: dato.creada_por,
-    creada: dato.creada,
-    estado: dato.estado,
-  };
-}
-
+/*
+ * vigente_desde, vigente_hasta y creada son datetimes del servidor sin zona
+ * y con hasta 6 decimales: se validan y se conservan como texto, sin
+ * convertirlos a UTC ni a la zona de este equipo.
+ */
 function adaptarHorario(dato) {
   if (!Number.isInteger(dato?.horario_id) || dato.horario_id <= 0
     || !Number.isInteger(dato.comida_id) || dato.comida_id <= 0
-    || typeof dato.comida !== 'string' || dato.comida.length === 0
-    || typeof dato.hora_inicio !== 'string' || !HORA_API.test(dato.hora_inicio)
-    || typeof dato.hora_fin !== 'string' || !HORA_API.test(dato.hora_fin)
+    || !(dato.comida === null || (typeof dato.comida === 'string' && dato.comida.length > 0))
+    || !esHoraApi(dato.hora_inicio)
+    || !esHoraApi(dato.hora_fin)
     || typeof dato.cruza_medianoche !== 'boolean'
-    || typeof dato.vigente_desde !== 'string' || !FECHA_API.test(dato.vigente_desde)
-    || !(dato.vigente_hasta === null
-      || (typeof dato.vigente_hasta === 'string' && FECHA_API.test(dato.vigente_hasta)))
+    || !esFechaHora(dato.vigente_desde)
+    || !(dato.vigente_hasta === null || esFechaHora(dato.vigente_hasta))
     || !(dato.motivo === null || typeof dato.motivo === 'string')
-    || !(dato.creada_por === null || typeof dato.creada_por === 'string')) {
+    || !(dato.creada_por === null || typeof dato.creada_por === 'string')
+    || !esFechaHora(dato.creada)
+    || !ESTADOS_HORARIO.includes(dato.estado)) {
     throw new Error('La API devolvió un horario inválido.');
   }
   return {
@@ -2001,6 +1855,8 @@ function adaptarHorario(dato) {
     vigenteHasta: dato.vigente_hasta,
     motivo: dato.motivo,
     creadaPor: dato.creada_por,
+    creada: dato.creada,
+    estado: dato.estado,
   };
 }
 
@@ -2039,116 +1895,15 @@ export async function obtenerCuentasLectura({ signal } = {}) {
   }
 }
 
-/** GET /reglas/derecho: versión vigente y todas las versiones. */
-export async function obtenerReglasDerecho({ signal } = {}) {
-  try {
-    const dato = await solicitarApi('/reglas/derecho', { signal });
-    if (!dato || typeof dato !== 'object' || !Array.isArray(dato.versiones)) {
-      throw new Error('La API devolvió reglas de derecho inválidas.');
-    }
-    return {
-      vigente: adaptarVersionDerecho(dato.vigente),
-      versiones: dato.versiones.map(adaptarVersionDerecho),
-    };
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    throw new Error(`No se pudieron cargar las reglas de derecho. ${error.message}`);
-  }
-}
+/** Motivos del historial con el texto que lee sistemas. */
+const MOTIVOS_HISTORIAL = {
+  comida_inexistente: 'Esa comida ya no existe. Actualice la lista.',
+};
 
-/** GET /reglas/derecho/novedades: novedades que se pueden marcar. */
-export async function obtenerNovedadesDisponibles({ signal } = {}) {
+/** GET /reglas/horarios: la versión de cada comida que rige ahora. Sin query. */
+export async function obtenerHorariosVigentes({ signal } = {}) {
   try {
-    const novedades = await solicitarApi('/reglas/derecho/novedades', { signal });
-    if (!Array.isArray(novedades)
-      || novedades.some((novedad) => typeof novedad !== 'string' || novedad.length === 0)) {
-      throw new Error('La API devolvió novedades inválidas.');
-    }
-    return [...novedades];
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    throw new Error(`No se pudieron cargar las novedades. ${error.message}`);
-  }
-}
-
-/**
- * POST /reglas/derecho: programa una versión nueva. Guía local (rango
- * 1–48 h, motivo de 10+ caracteres); el servidor valida y decide.
- */
-export async function programarReglasDerecho({
-  vigenteDesde,
-  duracionMinimaHoras,
-  novedadesQueAnulan = [],
-  excluirEnfermeria = false,
-  motivo,
-} = {}, { signal } = {}) {
-  if (typeof vigenteDesde !== 'string' || !FECHA_API.test(vigenteDesde)) {
-    throw new Error('Elija desde qué fecha rige la versión.');
-  }
-  if (!Number.isInteger(duracionMinimaHoras) || duracionMinimaHoras < 1 || duracionMinimaHoras > 48) {
-    throw new Error('El turno mínimo es de 1 a 48 horas.');
-  }
-  if (!Array.isArray(novedadesQueAnulan)
-    || novedadesQueAnulan.some((novedad) => typeof novedad !== 'string' || novedad.length === 0)) {
-    throw new Error('Las novedades elegidas no son válidas.');
-  }
-  if (typeof excluirEnfermeria !== 'boolean') {
-    throw new Error('La exclusión de enfermería no es válida.');
-  }
-  const motivoLimpio = typeof motivo === 'string' ? motivo.trim() : '';
-  if (motivoLimpio.length < 10) {
-    throw new Error('Escriba el motivo del cambio (10 caracteres o más).');
-  }
-  try {
-    return adaptarVersionDerecho(await solicitarApi('/reglas/derecho', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        vigente_desde: vigenteDesde,
-        duracion_minima_horas: duracionMinimaHoras,
-        novedades_que_anulan: novedadesQueAnulan,
-        excluir_enfermeria: excluirEnfermeria,
-        motivo: motivoLimpio,
-      }),
-      signal,
-    }));
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
-    if (mensaje) throw new Error(mensaje);
-    throw new Error(`No se pudo programar la versión. ${error.message}`);
-  }
-}
-
-/** DELETE /reglas/derecho/{id}: elimina una versión programada. */
-export async function eliminarReglasDerechoProgramadas(id, { signal } = {}) {
-  if (!Number.isInteger(id) || id <= 0) {
-    throw new Error('Versión inválida.');
-  }
-  try {
-    await solicitarApi(`/reglas/derecho/${id}`, { method: 'DELETE', signal });
-    return null;
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
-    if (mensaje) throw new Error(mensaje);
-    throw new Error(`No se pudo eliminar la versión. ${error.message}`);
-  }
-}
-
-/**
- * GET /reglas/horarios: horarios que rigen. Sin `fecha` el servidor usa
- * su hoy; con ella ("YYYY-MM-DD"), los de ese día.
- */
-export async function obtenerHorariosVigentes({ fecha, signal } = {}) {
-  if (fecha !== undefined && (typeof fecha !== 'string' || !FECHA_API.test(fecha))) {
-    throw new Error('Fecha inválida para consultar los horarios.');
-  }
-  try {
-    const horarios = await solicitarApi(
-      `/reglas/horarios${fecha === undefined ? '' : `?fecha=${fecha}`}`,
-      { signal },
-    );
+    const horarios = await solicitarApi('/reglas/horarios', { signal });
     if (!Array.isArray(horarios)) {
       throw new Error('La API devolvió horarios inválidos.');
     }
@@ -2159,7 +1914,7 @@ export async function obtenerHorariosVigentes({ fecha, signal } = {}) {
   }
 }
 
-/** GET /reglas/horarios/historial: versiones de una comida, con programadas. */
+/** GET /reglas/horarios/historial: todas las versiones de una comida. */
 export async function obtenerHistorialHorario(comidaId, { signal } = {}) {
   if (!Number.isInteger(comidaId) || comidaId <= 0) {
     throw new Error('Comida inválida.');
@@ -2172,70 +1927,142 @@ export async function obtenerHistorialHorario(comidaId, { signal } = {}) {
     return versiones.map(adaptarHorario);
   } catch (error) {
     if (signal?.aborted) throw error;
-    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
+    const mensaje = MOTIVOS_HISTORIAL[error.datos?.motivo];
     if (mensaje) throw new Error(mensaje);
     throw new Error(`No se pudo cargar el historial del horario. ${error.message}`);
   }
 }
 
 /**
- * POST /reglas/horarios: programa un horario nuevo desde una fecha.
- * Guía local (horas, fecha, motivo); el servidor valida y decide.
+ * Fallo de POST /reglas/horarios. `incierto` es true cuando el servidor pudo
+ * haber guardado el cambio sin que lo sepamos (red, tiempo agotado, 5xx o una
+ * respuesta ilegible): entonces nadie debe afirmar que no se guardó y hay que
+ * recargar y comprobar antes de volver a enviar. `recargar` pide releer los
+ * horarios antes de otro intento. `motivo` es el del servidor, si lo hubo.
  */
-export async function programarHorario({
+export class ErrorGuardadoHorario extends Error {
+  constructor(mensaje, { motivo = null, status = null, incierto = false, recargar = false } = {}) {
+    super(mensaje);
+    this.name = 'ErrorGuardadoHorario';
+    this.motivo = motivo;
+    this.status = status;
+    this.incierto = incierto;
+    this.recargar = recargar;
+  }
+}
+
+const RECARGAR_Y_COMPROBAR = 'Recargue los horarios y compruebe cómo quedaron antes de volver a guardar.';
+
+/* 4xx con motivo: el servidor rechazó el cambio y no escribió nada. */
+const MOTIVOS_GUARDADO = {
+  version_desactualizada: {
+    texto: 'Este horario cambió desde que lo abrió. Recargue los horarios, revise los valores actuales y vuelva a guardar si todavía corresponde.',
+    recargar: true,
+  },
+  sin_cambios: { texto: 'El horario guardado ya es ese: no hay nada que cambiar.' },
+  solapa_con_otra_comida: { texto: 'Esa franja se superpone con la de otra comida. Elija horas que no se crucen.' },
+  instante_no_posterior: {
+    texto: 'El reloj del sistema no es posterior a la última versión guardada de los horarios, por eso el cambio no se aplicó. Si el reloj está en simulación, debe estar más adelante que ese último cambio.',
+  },
+  cambio_en_curso: { texto: 'Hay otro cambio de horarios en curso. Espere unos segundos y vuelva a intentarlo.' },
+  versiones_abiertas_multiples: {
+    texto: 'Esta comida tiene más de una versión abierta en la base de datos. Hay que corregir esos datos antes de guardar: avise a soporte.',
+    recargar: true,
+  },
+  horario_invalido: { texto: 'El horario no es válido. Revise la hora de inicio y la de fin: no pueden ser iguales.' },
+  comida_inexistente: { texto: 'Esa comida ya no existe. Recargue los horarios.', recargar: true },
+};
+
+/** Convierte lo que lanzó la petición en un ErrorGuardadoHorario. */
+function errorDeGuardado(error) {
+  if (!(error instanceof ErrorApi)) {
+    /* Sin respuesta del servidor (red, tiempo agotado, cuerpo ilegible): no se sabe. */
+    return new ErrorGuardadoHorario(
+      `${error.message} No sabemos si el cambio se guardó. ${RECARGAR_Y_COMPROBAR}`,
+      { incierto: true, recargar: true },
+    );
+  }
+  const motivo = typeof error.datos?.motivo === 'string' ? error.datos.motivo : null;
+  if (error.status >= 500) {
+    const causa = motivo === 'cerrojo_ausente'
+      ? 'El servidor no pudo completar el cambio: falta preparar el bloqueo de horarios (migraciones sin aplicar).'
+      : `El servidor respondió con un error (HTTP ${error.status}).`;
+    return new ErrorGuardadoHorario(
+      `${causa} No sabemos si el cambio se guardó. ${RECARGAR_Y_COMPROBAR}`,
+      { motivo, status: error.status, incierto: true, recargar: true },
+    );
+  }
+  const conocido = MOTIVOS_GUARDADO[motivo];
+  if (conocido) {
+    return new ErrorGuardadoHorario(conocido.texto, {
+      motivo, status: error.status, recargar: conocido.recargar === true,
+    });
+  }
+  if (error.status === 422 && Array.isArray(error.datos?.detail)) {
+    return new ErrorGuardadoHorario(
+      'El servidor no aceptó los datos enviados. Revise la hora de inicio y la de fin.',
+      { motivo, status: 422 },
+    );
+  }
+  const detalle = typeof error.datos?.detail === 'string' && error.datos.detail
+    ? error.datos.detail
+    : error.message;
+  return new ErrorGuardadoHorario(`No se pudo guardar el horario. ${detalle}`, { motivo, status: error.status });
+}
+
+/** "11:30" → "11:30:00"; "11:30:15" queda igual; otra forma → null. */
+function horaConSegundos(valor) {
+  if (!esHoraApi(valor)) return null;
+  return valor.length === 5 ? `${valor}:00` : valor;
+}
+
+/**
+ * POST /reglas/horarios: guarda el horario de una comida con efecto
+ * inmediato. `baseHorarioId` es el `horario_id` de la versión abierta que se
+ * editó, o null solo si se comprobó que la comida no tiene ninguna; si no se
+ * sabe, no se envía. Un envío, sin reintentos: si el resultado es incierto,
+ * el error lo dice (`incierto`) y quien llama debe recargar y comprobar.
+ */
+export async function guardarHorario({
   comidaId,
   horaInicio,
   horaFin,
-  vigenteDesde,
-  motivo,
+  baseHorarioId,
 } = {}, { signal } = {}) {
   if (!Number.isInteger(comidaId) || comidaId <= 0) {
-    throw new Error('Comida inválida.');
+    throw new ErrorGuardadoHorario('Comida inválida.');
   }
-  if (typeof horaInicio !== 'string' || !HORA_API.test(horaInicio)
-    || typeof horaFin !== 'string' || !HORA_API.test(horaFin)) {
-    throw new Error('Escriba la hora de inicio y la de fin.');
+  const inicio = horaConSegundos(horaInicio);
+  const fin = horaConSegundos(horaFin);
+  if (inicio === null || fin === null) {
+    throw new ErrorGuardadoHorario('Escriba la hora de inicio y la de fin.');
   }
-  if (typeof vigenteDesde !== 'string' || !FECHA_API.test(vigenteDesde)) {
-    throw new Error('Elija desde qué fecha rige el horario.');
+  if (baseHorarioId !== null && (!Number.isInteger(baseHorarioId) || baseHorarioId <= 0)) {
+    throw new ErrorGuardadoHorario('No se sabe qué versión del horario se está editando. Recargue los horarios.');
   }
-  const motivoLimpio = typeof motivo === 'string' ? motivo.trim() : '';
-  if (!motivoLimpio) {
-    throw new Error(MOTIVOS_REGLAS.motivo_obligatorio);
-  }
+  let cuerpo;
   try {
-    return adaptarHorario(await solicitarApi('/reglas/horarios', {
+    cuerpo = await solicitarApi('/reglas/horarios', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         comida_id: comidaId,
-        hora_inicio: horaInicio,
-        hora_fin: horaFin,
-        vigente_desde: vigenteDesde,
-        motivo: motivoLimpio,
+        hora_inicio: inicio,
+        hora_fin: fin,
+        base_horario_id: baseHorarioId,
       }),
       signal,
-    }));
+    });
   } catch (error) {
     if (signal?.aborted) throw error;
-    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
-    if (mensaje) throw new Error(mensaje);
-    throw new Error(`No se pudo programar el horario. ${error.message}`);
-  }
-}
-
-/** DELETE /reglas/horarios/{horario_id}: elimina un horario programado. */
-export async function eliminarHorarioProgramado(horarioId, { signal } = {}) {
-  if (!Number.isInteger(horarioId) || horarioId <= 0) {
-    throw new Error('Horario inválido.');
+    throw errorDeGuardado(error);
   }
   try {
-    await solicitarApi(`/reglas/horarios/${horarioId}`, { method: 'DELETE', signal });
-    return null;
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    const mensaje = mensajeDeMotivoReglas(error.datos?.motivo);
-    if (mensaje) throw new Error(mensaje);
-    throw new Error(`No se pudo eliminar el horario. ${error.message}`);
+    return adaptarHorario(cuerpo);
+  } catch {
+    throw new ErrorGuardadoHorario(
+      `El servidor respondió, pero la respuesta no se pudo interpretar. No sabemos si el cambio se guardó. ${RECARGAR_Y_COMPROBAR}`,
+      { incierto: true, recargar: true },
+    );
   }
 }
