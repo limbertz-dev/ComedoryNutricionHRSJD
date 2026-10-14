@@ -4,7 +4,8 @@ CONTRATO con el front (no cambiar sin avisar):
 
     GET    /reglas/derecho                 versión vigente + todas, SOLO LECTURA
     GET    /reglas/horarios?momento=       versión de cada comida que rige en
-                                           `momento` (por omisión, ahora)
+                                           `momento` (por omisión, ahora);
+                                           datetime SIN zona: con Z o desfase, 422
     GET    /reglas/horarios/historial?comida_id=   todas las versiones de esa comida
     POST   /reglas/horarios                201: guarda el horario con efecto
                                            inmediato; cierra la versión abierta
@@ -18,7 +19,8 @@ Los horarios rigen desde el instante del servidor (reloj.ahora(), día
 simulado en simulación). No hay vigencia, programación ni motivo escrito por
 el usuario. Los errores traen además `motivo`: horario_invalido,
 comida_inexistente, solapa_con_otra_comida, version_desactualizada,
-sin_cambios, instante_no_posterior, cambio_en_curso, parametro_retirado.
+sin_cambios, instante_no_posterior, cambio_en_curso, parametro_retirado,
+momento_con_zona.
 """
 
 from datetime import datetime
@@ -72,7 +74,14 @@ def listar_derecho(sesion: SesionDep) -> ListaDerecho:
 def listar_horarios(
     sesion: SesionDep,
     momento: Annotated[
-        datetime | None, Query(description="Instante a consultar. Por defecto, ahora")
+        datetime | None,
+        Query(
+            description=(
+                "Instante a consultar, hora local del servidor y SIN zona: "
+                "'2026-09-24T16:00:00.250000'. Con 'Z' o desfase, 422 "
+                "momento_con_zona. Por defecto, ahora"
+            )
+        ),
     ] = None,
     fecha: Annotated[str | None, Query(include_in_schema=False)] = None,
 ) -> list[HorarioRegla]:
@@ -82,9 +91,18 @@ def listar_horarios(
             "parametro_retirado",
             "`fecha` ya no existe: use `momento` (datetime) o no mande nada para ahora.",
         )
+    if momento is not None and momento.tzinfo is not None:
+        # 'Z' o desfase: el reloj del negocio es hora local sin zona, y un
+        # instante con zona no se puede comparar con ella sin adivinar.
+        raise ErrorAuth(
+            422,
+            "momento_con_zona",
+            "`momento` va sin zona horaria (hora local del servidor): "
+            "sin 'Z' ni desfase, por ejemplo 2026-09-24T16:00:00.250000.",
+        )
     return [
         HorarioRegla(**d)
-        for d in reglas.listar_horarios(sesion, momento or reloj.ahora())
+        for d in reglas.listar_horarios(sesion, reloj.ahora() if momento is None else momento)
     ]
 
 

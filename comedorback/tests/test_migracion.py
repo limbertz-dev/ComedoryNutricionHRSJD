@@ -17,6 +17,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from sqlalchemy import inspect, text
+from sqlalchemy.engine import Connection
 
 from app.core.config import config
 from app.core.db import SesionLocal, motor
@@ -240,6 +241,171 @@ def test_reversion_bloqueada_con_microsegundos_en_lecturas(
     assert _filas("SELECT fecha_hora FROM lecturas_biometricas") == [
         (a_las(11, 30, 0, 500000),)
     ]
+
+
+# --- downgrade interrumpido: el reintento no continúa ni resta otro día ----------------------
+
+
+def _preparar_con_cierre() -> int:
+    """Cuatro versiones de la semilla y, en el almuerzo, una cerrada a
+    2026-03-01 00:00 con su sucesora abierta: lo que hace visible un +/-1 día."""
+    horarios.sembrar()
+    almuerzo = comida_id("almuerzo")
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = '2026-03-01 00:00:00' WHERE comida_id = :c",
+        c=almuerzo,
+    )
+    _sql(
+        "INSERT INTO horarios_comida (comida_id, hora_inicio, hora_fin, vigente_desde, "
+        "vigente_hasta, activo) VALUES (:c, '12:00:00', '13:00:00', '2026-03-01 00:00:00', NULL, 1)",
+        c=almuerzo,
+    )
+    return almuerzo
+
+
+def _interrumpir(parche, fragmento: str, metodo: str) -> None:
+    """Hace fallar `Connection.<metodo>` cuando la sentencia contiene
+    `fragmento`: una interrupción real, a mitad del downgrade, sin tocar la
+    migración. Todo lo demás pasa tal cual."""
+    original = getattr(Connection, metodo)
+
+    def con_fallo(self, sentencia, *args, **kwargs):
+        try:
+            texto = str(sentencia)
+        except Exception:  # noqa: BLE001  sentencias que no compilan con el dialecto por defecto
+            texto = ""
+        if fragmento in texto:
+            raise RuntimeError(f"fallo simulado en: {fragmento}")
+        return original(self, sentencia, *args, **kwargs)
+
+    parche.setattr(Connection, metodo, con_fallo)
+
+
+def _interrumpir_downgrade(monkeypatch, fragmento: str, metodo: str) -> None:
+    with monkeypatch.context() as parche:
+        _interrumpir(parche, fragmento, metodo)
+        with pytest.raises(RuntimeError, match="fallo simulado"):
+            command.downgrade(config_alembic(), REV_ANTERIOR)
+    # Fuera del `with`, `Connection` vuelve a ser la de siempre.
+
+
+def _reintento_se_detiene() -> str:
+    with pytest.raises(RuntimeError, match="detenida ANTES de modificar nada") as parada:
+        command.downgrade(config_alembic(), REV_ANTERIOR)
+    mensaje = str(parada.value)
+    assert "Recuperación" in mensaje
+    assert "alembic stamp f13dd53094ae" in mensaje
+    return mensaje
+
+
+def test_downgrade_interrumpido_al_soltar_cerrojos_no_se_reintenta(en_head, monkeypatch):
+    """Se interrumpe tras convertir lecturas_biometricas y antes de soltar
+    cerrojos. El reintento se detiene sin tocar nada; la recuperación del
+    mensaje (volver al estado de la revisión) deja revertir y rehacer."""
+    _preparar_con_cierre()
+    original = _snapshot_horarios()
+
+    _interrumpir_downgrade(monkeypatch, "DROP TABLE cerrojos", "execute")
+    assert not _es_datetime6("lecturas_biometricas", "fecha_hora")  # el paso 1 sí se aplicó
+    assert "cerrojos" in _tablas()
+    assert _es_datetime6("horarios_comida", "vigente_hasta")
+    antes = _snapshot_horarios()
+    assert antes == original
+
+    mensaje = _reintento_se_detiene()
+    assert "lecturas_biometricas.fecha_hora" in mensaje
+    assert not _es_datetime6("lecturas_biometricas", "fecha_hora")
+    assert "cerrojos" in _tablas()
+    assert _snapshot_horarios() == antes
+
+    # Recuperación: volver al estado exacto de la revisión.
+    _sql("ALTER TABLE lecturas_biometricas MODIFY fecha_hora DATETIME(6) NOT NULL")
+    command.downgrade(en_head, REV_ANTERIOR)
+    command.upgrade(en_head, "head")
+    assert _snapshot_horarios() == original
+
+
+def test_downgrade_interrumpido_antes_del_alter_de_horarios(en_head, monkeypatch):
+    _preparar_con_cierre()
+    original = _snapshot_horarios()
+
+    _interrumpir_downgrade(monkeypatch, "ALTER TABLE horarios_comida", "exec_driver_sql")
+    assert "cerrojos" not in _tablas()  # el paso 2 sí se aplicó
+    assert _es_datetime6("horarios_comida", "vigente_desde")
+    antes = _snapshot_horarios()
+    assert antes == original
+
+    mensaje = _reintento_se_detiene()
+    assert "falta la tabla cerrojos" in mensaje
+    assert _es_datetime6("horarios_comida", "vigente_desde")
+    assert _snapshot_horarios() == antes
+
+    # Recuperación: completar a mano los pasos que faltan (c y d), sellar, y rehacer.
+    _sql(
+        "ALTER TABLE horarios_comida MODIFY vigente_desde DATE NOT NULL, "
+        "MODIFY vigente_hasta DATE NULL"
+    )
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = DATE_SUB(vigente_hasta, INTERVAL 1 DAY) "
+        "WHERE vigente_hasta IS NOT NULL"
+    )
+    command.stamp(en_head, REV_ANTERIOR)
+    command.upgrade(en_head, "head")
+    assert _snapshot_horarios() == original
+
+
+def test_downgrade_interrumpido_antes_del_menos_un_dia_no_lo_aplica_dos_veces(
+    en_head, monkeypatch
+):
+    """El caso que importa: ALTER ya aplicado, -1 día todavía no. Un reintento
+    ciego lo aplicaría; este se detiene y vigente_hasta NO cambia."""
+    almuerzo = _preparar_con_cierre()
+    original = _snapshot_horarios()
+
+    _interrumpir_downgrade(monkeypatch, "DATE_SUB(vigente_hasta", "execute")
+    assert _es_date("horarios_comida", "vigente_hasta")  # el ALTER sí se aplicó
+    interrumpido = _snapshot_horarios()
+    # Sin el -1 día: el cierre sigue siendo el exclusivo, 2026-03-01.
+    assert _filas(
+        "SELECT vigente_hasta FROM horarios_comida WHERE comida_id = :c AND vigente_hasta IS NOT NULL",
+        c=almuerzo,
+    ) == [(date(2026, 3, 1),)]
+
+    for _ in range(2):  # y por mucho que se reintente
+        _reintento_se_detiene()
+        assert _snapshot_horarios() == interrumpido
+
+    # Recuperación del mensaje: aplicar el -1 día UNA vez, sellar y rehacer.
+    _sql(
+        "UPDATE horarios_comida SET vigente_hasta = DATE_SUB(vigente_hasta, INTERVAL 1 DAY) "
+        "WHERE vigente_hasta IS NOT NULL"
+    )
+    command.stamp(en_head, REV_ANTERIOR)
+    command.upgrade(en_head, "head")
+    assert _snapshot_horarios() == original
+
+
+def test_downgrade_completo_con_sello_perdido_no_resta_otro_dia(en_head):
+    almuerzo = _preparar_con_cierre()
+    original = _snapshot_horarios()
+
+    command.downgrade(en_head, REV_ANTERIOR)
+    revertido = _snapshot_horarios()
+    assert _filas(
+        "SELECT vigente_hasta FROM horarios_comida WHERE comida_id = :c AND vigente_hasta IS NOT NULL",
+        c=almuerzo,
+    ) == [(date(2026, 2, 28),)]
+    # Se pierde el sello (alembic_version vuelve a decir ca83b39b791c) con el
+    # esquema ya revertido.
+    command.stamp(en_head, REVISION)
+
+    _reintento_se_detiene()
+    assert _snapshot_horarios() == revertido  # NO quedó en 2026-02-27
+
+    # Solo falta el sello: es lo único que hay que hacer.
+    command.stamp(en_head, REV_ANTERIOR)
+    command.upgrade(en_head, "head")
+    assert _snapshot_horarios() == original
 
 
 # --- subida bloqueada: programaciones y datos ambiguos -------------------------------------

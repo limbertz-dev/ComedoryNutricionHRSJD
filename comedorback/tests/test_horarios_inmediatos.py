@@ -21,6 +21,7 @@ from soporte_horarios import (  # noqa: F401  fixtures y ayudas compartidas
     fijar,
     guardar,
     historial,
+    insertar_version_heredada,
     reloj_libre,
     root,
     vacio,
@@ -28,6 +29,7 @@ from soporte_horarios import (  # noqa: F401  fixtures y ayudas compartidas
 )
 
 CORTE = a_las(16, 0, 0, 250000)
+FUTURO_LEJANO = datetime(2099, 1, 1)
 ISO_CORTE = "2026-09-24T16:00:00.250000"
 
 
@@ -314,6 +316,46 @@ def test_mismo_instante_y_reloj_retrocedido_dan_409(cliente, root, con_horarios)
     assert r.json()["vigente_desde"] == "2026-09-24T10:00:00.000001"
 
 
+def test_una_version_inactiva_futura_no_bloquea_los_guardados(cliente, root, con_horarios):
+    """Regresión: una fila INACTIVA con fecha futura nunca se aplica, así que
+    no cuenta como retroceso del reloj. Tampoco se borra ni se reactiva."""
+    almuerzo = comida_id("almuerzo")
+    insertar_version_heredada(almuerzo, "16:00:00", "17:00:00", FUTURO_LEJANO, activo=False)
+    antes = {v["horario_id"]: v for v in historial(cliente, root, almuerzo)}
+    inactiva = next(v for v in antes.values() if v["estado"] == "inactiva")
+    base = abierta(cliente, root, almuerzo)["horario_id"]
+
+    fijar(a_las(9))
+    r = guardar(cliente, root, almuerzo, "12:00:00", "13:00:00", base)
+    assert r.status_code == 201, r.text
+    assert r.json()["vigente_desde"] == a_las(9).isoformat()
+
+    despues = {v["horario_id"]: v for v in historial(cliente, root, almuerzo)}
+    # La inactiva sigue exactamente igual: ni borrada ni reactivada ni cerrada.
+    assert despues[inactiva["horario_id"]] == inactiva
+    assert inactiva["vigente_desde"] == FUTURO_LEJANO.isoformat()
+    assert inactiva["vigente_hasta"] is None
+    # Y no es la versión abierta: la abierta es la que se acaba de guardar.
+    assert abierta(cliente, root, almuerzo)["horario_id"] == r.json()["horario_id"]
+    # Tampoco rige: a las 17:00 de hoy el almuerzo es el recién guardado.
+    assert vigente_en(cliente, root, a_las(17))[almuerzo]["horario_id"] == r.json()["horario_id"]
+
+
+def test_una_version_efectiva_futura_sigue_protegiendo_contra_retrocesos(
+    cliente, root, con_horarios
+):
+    """La protección se mantiene para lo efectivo: una versión ACTIVA con fecha
+    posterior al reloj (aunque sea de otra comida) sigue dando 409."""
+    almuerzo, te = comida_id("almuerzo"), comida_id("te")
+    base = abierta(cliente, root, almuerzo)["horario_id"]
+    insertar_version_heredada(te, "15:00:00", "16:00:00", FUTURO_LEJANO, activo=True)
+    fijar(a_las(9))
+    r = guardar(cliente, root, almuerzo, "12:00:00", "13:00:00", base)
+    assert (r.status_code, r.json()["motivo"]) == (409, "instante_no_posterior")
+    assert "2099-01-01T00:00:00" in r.json()["detail"]
+    assert len(historial(cliente, root, almuerzo)) == 1
+
+
 def test_el_reloj_se_compara_con_toda_la_tabla(cliente, root, con_horarios):
     """Un cambio de OTRA comida a las 12:00 también cuenta: guardar a las
     11:00 en el almuerzo sería escribir en el pasado de la tabla."""
@@ -340,6 +382,38 @@ def test_no_hay_borrado_de_horarios_ni_parametro_fecha(cliente, root, con_horari
 
     r = cliente.get("/reglas/horarios", params={"fecha": "2026-09-24"}, headers=root)
     assert (r.status_code, r.json()["motivo"]) == (422, "parametro_retirado")
+
+
+@pytest.mark.parametrize(
+    "momento",
+    [
+        "2026-09-24T16:00:00Z",
+        "2026-09-24T16:00:00+00:00",
+        "2026-09-24T16:00:00-04:00",
+        "2026-09-24T16:00:00.250000+01:00",
+    ],
+    ids=["Z", "mas_cero", "menos_cuatro", "micro_con_desfase"],
+)
+def test_momento_con_zona_da_422(cliente, root, con_horarios, momento):
+    """El contrato exige un datetime sin zona (hora local del servidor): con
+    'Z' o desfase se rechaza en vez de compararse contra horas locales."""
+    r = cliente.get("/reglas/horarios", params={"momento": momento}, headers=root)
+    assert (r.status_code, r.json()["motivo"]) == (422, "momento_con_zona"), r.text
+    assert "sin zona" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("momento", ["ayer", "2026-13-40T00:00:00"])
+def test_momento_ilegible_da_422(cliente, root, con_horarios, momento):
+    r = cliente.get("/reglas/horarios", params={"momento": momento}, headers=root)
+    assert r.status_code == 422, r.text
+
+
+def test_momento_sin_zona_sigue_aceptado_con_microsegundos(cliente, root, con_horarios):
+    r = cliente.get(
+        "/reglas/horarios", params={"momento": "2026-09-24T16:00:00.250000"}, headers=root
+    )
+    assert r.status_code == 200, r.text
+    assert {h["comida_id"] for h in r.json()} >= {comida_id("almuerzo")}
 
 
 def test_historial_de_comida_inexistente_404(cliente, root):

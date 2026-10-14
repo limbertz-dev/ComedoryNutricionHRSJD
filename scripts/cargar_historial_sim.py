@@ -29,78 +29,89 @@ Pasos:
   2. Selección determinista, por fecha_comida: se ordena por
      sha256('fecha|comida_id|usuario_id') y se toman round(n * porcentaje/100)
      (redondeo hacia arriba en .5). Misma base, mismos parámetros: mismas filas.
-  3. Momento determinista: franja vigente de `horarios_comida` para esa comida
-     y fecha; minuto = sha256('momento|fecha|comida_id|usuario_id') módulo los
-     minutos enteros de la franja, contado desde hora_inicio. hora_fin queda
-     fuera, igual que en la API.
+  3. Momento determinista, DENTRO DE UNA VENTANA EFECTIVA de esa comida y
+     fecha_comida (app/consultas/horarios.py, las mismas que usan el historial,
+     la supervisión y la próxima franja): la intersección entre la ocurrencia
+     de la franja y la vigencia de su versión. Un horario puede haber cambiado
+     a mitad del día, dejando varias ventanas con huecos; una franja puede
+     cruzar la medianoche. El minuto = sha256('momento|fecha|comida_id|
+     usuario_id') módulo los minutos enteros de TODAS las ventanas juntas,
+     repartido sobre ellas en orden: nunca cae en un hueco ni fuera de una
+     ventana, y el fin de cada ventana queda fuera, igual que en la API.
   4. Ingreso por /auth/login, un POST por ración, conteo de aceptadas y de
      rechazadas por motivo.
   5. Verificación en solo lectura: raciones por fecha en `--sim`, ninguna en la
      demo en vivo; CHECKSUM otra vez sobre el original.
+
+Importar este módulo no tiene efectos: no lee argumentos, no toca el entorno ni
+el directorio de trabajo y no importa la app ni se conecta a ninguna base. Todo
+eso ocurre en `main()`.
 """
+
+from __future__ import annotations
 
 import argparse
 import getpass
 import hashlib
 import os
+import sys
 from collections import Counter
-from datetime import date, datetime, time, timedelta
-
-parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-parser.add_argument("--api", default="http://127.0.0.1:8100", help="API contra la simulación")
-parser.add_argument("--usuario", default="jefa", help="cuenta de jefatura (clave: CARGA_HISTORIAL_CLAVE)")
-parser.add_argument("--porcentaje", type=int, default=80, help="del total de candidatos de cada día")
-parser.add_argument("--desde", type=date.fromisoformat, default=date(2026, 9, 21), help="fecha_comida inicial")
-parser.add_argument("--hasta", type=date.fromisoformat, default=date(2026, 9, 23), help="fecha_comida final")
-estados = parser.add_mutually_exclusive_group()
-estados.add_argument(
-    "--incluir-bloqueados",
-    dest="solo_programados",
-    action="store_false",
-    help="candidatos según las reglas actuales, sin mirar el estado (por defecto)",
-)
-estados.add_argument(
-    "--solo-programados",
-    dest="solo_programados",
-    action="store_true",
-    help="solo asignaciones en estado 'programado'",
-)
-# Explícito: con dos acciones sobre el mismo dest, argparse toma el default
-# del store_false (True) y el modo por defecto quedaría invertido.
-parser.set_defaults(solo_programados=False)
-parser.add_argument("--sim", default="bd_nutricion_sim")
-parser.add_argument("--demo", default="bd_turnos_demo")
-parser.add_argument("--original", default="bd_proyecto_backend")
-args = parser.parse_args()
-
-# Antes de importar la app: la configuración se lee una sola vez al importar.
-# Este proceso no sirve la API, solo lee las bases de simulación.
-os.environ.update(ENTORNO="desarrollo", DB_NAME=args.sim, DB_NAME_TURNOS=args.demo)
-
-from preparar_simulacion import _abortar, _checksums, _huella, _salida_utf8  # noqa: E402
-
-import httpx  # noqa: E402
-from sqlalchemy import create_engine, or_, select, text  # noqa: E402
-
-from app.consultas.derecho import aplicar_reglas  # noqa: E402
-from app.core.config import config  # noqa: E402
-from app.core.db import SesionLocal  # noqa: E402
-from app.modelos.comedor import HorarioComida  # noqa: E402
-from app.modelos.heredados import ComidaPorTurno, TurnoAsignado  # noqa: E402
+from datetime import date, datetime, timedelta
 
 # Días que se marcan en vivo durante la demo: este script no los toca nunca.
 DEMO_EN_VIVO = (date(2026, 9, 24), date(2026, 9, 27))
 
+# Los argumentos de la corrida: los fija `main()`. Las funciones que los usan
+# los leen de acá; las que deciden el momento no los necesitan.
+args: argparse.Namespace | None = None
+
+
+def _salida_utf8() -> None:
+    for flujo in (sys.stdout, sys.stderr):
+        try:
+            # line_buffering: si no, la salida de otros procesos aparece antes
+            # que los pasos previos de este script.
+            flujo.reconfigure(encoding="utf-8", line_buffering=True)
+        except (AttributeError, ValueError):
+            pass
+
+
+def _abortar(mensaje: str) -> None:
+    print(f"ABORTADO: {mensaje}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _argumentos(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--api", default="http://127.0.0.1:8100", help="API contra la simulación")
+    parser.add_argument("--usuario", default="jefa", help="cuenta de jefatura (clave: CARGA_HISTORIAL_CLAVE)")
+    parser.add_argument("--porcentaje", type=int, default=80, help="del total de candidatos de cada día")
+    parser.add_argument("--desde", type=date.fromisoformat, default=date(2026, 9, 21), help="fecha_comida inicial")
+    parser.add_argument("--hasta", type=date.fromisoformat, default=date(2026, 9, 23), help="fecha_comida final")
+    estados = parser.add_mutually_exclusive_group()
+    estados.add_argument(
+        "--incluir-bloqueados",
+        dest="solo_programados",
+        action="store_false",
+        help="candidatos según las reglas actuales, sin mirar el estado (por defecto)",
+    )
+    estados.add_argument(
+        "--solo-programados",
+        dest="solo_programados",
+        action="store_true",
+        help="solo asignaciones en estado 'programado'",
+    )
+    # Explícito: con dos acciones sobre el mismo dest, argparse toma el default
+    # del store_false (True) y el modo por defecto quedaría invertido.
+    parser.set_defaults(solo_programados=False)
+    parser.add_argument("--sim", default="bd_nutricion_sim")
+    parser.add_argument("--demo", default="bd_turnos_demo")
+    parser.add_argument("--original", default="bd_proyecto_backend")
+    return parser.parse_args(argv)
+
 
 def _sha(texto: str) -> int:
     return int(hashlib.sha256(texto.encode()).hexdigest()[:16], 16)
-
-
-def _desde_medianoche(valor) -> timedelta:
-    # MySQL TIME puede llegar como time o como timedelta según el driver.
-    if isinstance(valor, time):
-        return timedelta(hours=valor.hour, minutes=valor.minute, seconds=valor.second)
-    return valor
 
 
 def _guardas() -> None:
@@ -115,6 +126,13 @@ def _guardas() -> None:
 
 
 def _candidatos(sesion) -> list[dict]:
+    # La app se importa acá y no arriba: su configuración se lee una sola vez
+    # al importar y `main()` fija antes DB_NAME / DB_NAME_TURNOS.
+    from sqlalchemy import select
+
+    from app.consultas.derecho import aplicar_reglas
+    from app.modelos.heredados import ComidaPorTurno, TurnoAsignado
+
     consulta = (
         aplicar_reglas(
             select(
@@ -156,33 +174,64 @@ def _seleccionar(candidatos: list[dict]) -> list[dict]:
     return sorted(elegidos, key=lambda c: (c["fecha_comida"], c["comida_id"], c["usuario_id"]))
 
 
-def _franja(sesion, comida_id: int, fecha: date) -> tuple[timedelta, timedelta]:
-    """La misma franja que usaría resolver_comida_en_curso ese día."""
-    fila = sesion.execute(
-        select(HorarioComida.hora_inicio, HorarioComida.hora_fin)
-        .where(HorarioComida.comida_id == comida_id)
-        .where(HorarioComida.activo == 1)
-        .where(HorarioComida.vigente_desde <= fecha)
-        .where(or_(HorarioComida.vigente_hasta.is_(None), HorarioComida.vigente_hasta >= fecha))
-        .order_by(HorarioComida.vigente_desde.desc())
-        .limit(1)
-    ).first()
-    if fila is None:
-        _abortar(f"sin horario vigente para la comida {comida_id} el {fecha}.")
-    return _desde_medianoche(fila[0]), _desde_medianoche(fila[1])
+def _ventanas_efectivas(
+    sesion, comida_id: int, fecha: date, memoria: dict | None = None
+) -> list[tuple[datetime, datetime]]:
+    """Las ventanas efectivas de la comida para esa `fecha_comida`, en orden:
+    las mismas que usan el historial, la supervisión y la próxima franja.
+    `memoria` evita repetir la consulta por cada candidato del mismo día."""
+    from app.consultas.horarios import ventanas_del_dia
+
+    if memoria is None:
+        memoria = {}
+    if fecha not in memoria:
+        memoria[fecha] = {
+            c.comida_id: [(v.inicio, v.fin) for v in c.ventanas]
+            for c in ventanas_del_dia(sesion, fecha)
+        }
+    ventanas = memoria[fecha].get(comida_id)
+    if not ventanas:
+        _abortar(f"sin ventana efectiva de horario para la comida {comida_id} el {fecha}.")
+    return ventanas
 
 
-def _momento(sesion, c: dict) -> datetime:
-    inicio, fin = _franja(sesion, c["comida_id"], c["fecha_comida"])
-    duracion = (fin - inicio) % timedelta(days=1)  # franjas que cruzan la medianoche
-    minutos = int(duracion.total_seconds() // 60)
-    if minutos <= 0:
-        _abortar(f"franja vacía para la comida {c['comida_id']}.")
-    desfase = _sha(f"momento|{c['fecha_comida']}|{c['comida_id']}|{c['usuario_id']}") % minutos
-    return datetime.combine(c["fecha_comida"], time()) + inicio + timedelta(minutes=desfase)
+def _instante_en_ventanas(
+    ventanas: list[tuple[datetime, datetime]], clave: str
+) -> datetime | None:
+    """Un instante determinista DENTRO de las ventanas, o None si no hay minutos.
+
+    Se cuentan los minutos enteros de cada ventana (el sobrante menor a un
+    minuto no se usa, así el instante queda estrictamente antes del fin) y
+    `sha256(clave)` se reparte sobre el total, recorriendo las ventanas en
+    orden: con una sola ventana es `inicio + sha % minutos`, como siempre.
+    Los huecos entre ventanas no suman minutos, por lo que nunca se elige uno.
+    """
+    tramos = [
+        (inicio, int((fin - inicio).total_seconds() // 60)) for inicio, fin in sorted(ventanas)
+    ]
+    tramos = [(inicio, minutos) for inicio, minutos in tramos if minutos > 0]
+    total = sum(minutos for _, minutos in tramos)
+    if total <= 0:
+        return None
+    desfase = _sha(clave) % total
+    for inicio, minutos in tramos:
+        if desfase < minutos:
+            return inicio + timedelta(minutes=desfase)
+        desfase -= minutos
+    return None  # inalcanzable: desfase < total
 
 
-def _ingresar(cliente: httpx.Client) -> dict:
+def _momento(sesion, c: dict, memoria: dict | None = None) -> datetime:
+    ventanas = _ventanas_efectivas(sesion, c["comida_id"], c["fecha_comida"], memoria)
+    instante = _instante_en_ventanas(
+        ventanas, f"momento|{c['fecha_comida']}|{c['comida_id']}|{c['usuario_id']}"
+    )
+    if instante is None:
+        _abortar(f"ventana vacía para la comida {c['comida_id']} el {c['fecha_comida']}.")
+    return instante
+
+
+def _ingresar(cliente) -> dict:
     salud = cliente.get("/salud")
     datos = salud.json() if salud.status_code == 200 else {}
     if (datos.get("base_datos"), datos.get("base_turnos")) != (args.sim, args.demo):
@@ -204,15 +253,32 @@ def _ingresar(cliente: httpx.Client) -> dict:
 
 
 def _raciones_por_fecha(conexion) -> dict[date, int]:
+    from sqlalchemy import text
+
     filas = conexion.execute(
         text(f"SELECT fecha_comida, COUNT(*) FROM `{args.sim}`.`asistencias` GROUP BY fecha_comida")
     ).all()
     return dict(filas)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    global args
+    args = _argumentos(argv)
     _salida_utf8()
     _guardas()
+
+    # Antes de importar la app: la configuración se lee una sola vez al importar.
+    # Este proceso no sirve la API, solo lee las bases de simulación.
+    os.environ.update(ENTORNO="desarrollo", DB_NAME=args.sim, DB_NAME_TURNOS=args.demo)
+
+    from preparar_simulacion import _checksums, _huella
+
+    import httpx
+    from sqlalchemy import create_engine
+
+    from app.core.config import config
+    from app.core.db import SesionLocal
+
     servidor = create_engine(config.url_servidor, future=True, isolation_level="AUTOCOMMIT")
     try:
         with servidor.connect() as conexion:
@@ -227,8 +293,9 @@ def main() -> None:
             candidatos = _candidatos(sesion)
             usados = [c for c in candidatos if c["estado"] == "programado"] if args.solo_programados else candidatos
             elegidos = _seleccionar(usados)
+            memoria: dict = {}
             for c in elegidos:
-                c["momento"] = _momento(sesion, c)
+                c["momento"] = _momento(sesion, c, memoria)
 
         modo = "solo programados" if args.solo_programados else "incluye bloqueados (reglas actuales)"
         print(
@@ -240,7 +307,7 @@ def main() -> None:
             f"[2/5] {len(elegidos)} elegidos ({args.porcentaje}% por día, orden sha256); "
             f"estado: {dict(Counter(c['estado'] for c in elegidos))}."
         )
-        print("[3/5] Momento: hora_inicio + sha256 % minutos de la franja vigente.")
+        print("[3/5] Momento: dentro de las ventanas efectivas de la comida, por sha256 % minutos.")
 
         resultados: Counter = Counter()
         por_dia: Counter = Counter()

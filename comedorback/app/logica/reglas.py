@@ -9,9 +9,10 @@ Nunca se borra ni se reescribe una versión: solo se cierra la abierta.
 
   · base_horario_id  la versión abierta que el cliente editó. Si ya no es esa,
                      409 version_desactualizada: otro cambio se coló.
-  · instante         si el reloj no es posterior a toda `vigente_desde`
-                     guardada, 409 instante_no_posterior. No se avanza el
-                     reloj ni se pisa una versión: se informa.
+  · instante         si el reloj no es posterior a toda `vigente_desde` de las
+                     versiones EFECTIVAS (activo=1), 409 instante_no_posterior.
+                     No se avanza el reloj ni se pisa una versión: se informa.
+                     Una fila inactiva, aunque sea futura, no cuenta.
   · solape           contra la versión abierta de cada OTRA comida, serializado
                      por el cerrojo (también con `horarios_comida` vacía).
 
@@ -388,16 +389,19 @@ def _guardar_bajo_cerrojo(
     # 3. El instante. Se lee ya con el cerrojo en la mano, justo antes del
     #    INSERT, así el orden de los instantes es el de las confirmaciones.
     #    Sin avanzar el reloj ni tocar versiones históricas: si no es
-    #    estrictamente posterior a toda versión guardada, se informa.
+    #    estrictamente posterior a toda versión EFECTIVA, se informa. Una fila
+    #    inactiva (activo=0) nunca se aplica, aunque tenga una fecha futura:
+    #    no cuenta como retroceso ni bloquea los guardados. Tampoco se borra
+    #    ni se reactiva: simplemente no es parte de la historia efectiva.
     ahora = reloj.ahora()
-    ultimo = max((v.vigente_desde for v in versiones), default=None)
+    ultimo = max((v.vigente_desde for v in versiones if v.activo), default=None)
     if ultimo is not None and ahora <= ultimo:
         raise ErrorRegla(
             409,
             "instante_no_posterior",
             (
                 f"El reloj ({ahora.isoformat()}) no es posterior a la última versión "
-                f"guardada ({ultimo.isoformat()}); no se guardó nada."
+                f"efectiva ({ultimo.isoformat()}); no se guardó nada."
             ),
         )
 
