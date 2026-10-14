@@ -259,27 +259,6 @@
   color: var(--c-texto-2);
 }
 
-.escenario__pulso {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--r-full);
-  background: var(--c-exito);
-  box-shadow: 0 0 0 0 rgba(0, 143, 93, 0.5);
-  animation: escenario-pulso 2.2s ease-out infinite;
-}
-
-@keyframes escenario-pulso {
-  0% {
-    box-shadow: 0 0 0 0 rgba(0, 143, 93, 0.5);
-  }
-  70% {
-    box-shadow: 0 0 0 9px rgba(0, 143, 93, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(0, 143, 93, 0);
-  }
-}
-
 /*
  * Fila: el gauge de raciones a la izquierda, el resultado de la marcacion
  * centrado a la derecha. Las raciones quedan siempre visibles, sin importar
@@ -557,6 +536,17 @@
   font-size: var(--t-sm);
   color: var(--c-texto-3);
   text-align: center;
+}
+
+/* La lista quedó sin actualizar: se conserva lo último recibido, con aviso. */
+.marcaciones__desactualizado {
+  margin: 0 0 var(--e-3);
+  padding: var(--e-2) var(--e-3);
+  background: var(--c-aviso-tenue);
+  border: 1px solid var(--c-aviso);
+  border-radius: var(--r-sm);
+  color: var(--c-texto);
+  font-size: var(--t-sm);
 }
 
 /* Tarjeta rectangular con fondo teñido por completo según el resultado (como

@@ -1,0 +1,111 @@
+/*
+ * RegistroManual.css — «Registrar ración manual» en Supervisión.
+ *
+ * Reutiliza el buscador y el selector del padrón de Supervision.css; acá solo
+ * va la caja del registro, con la paleta de tokens.css.
+ */
+
+.registro-manual__barra {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.registro-manual {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-3);
+  padding: var(--e-4) var(--e-5);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde-tarjeta);
+  border-radius: var(--r-lg);
+  box-shadow: var(--s-1);
+}
+
+.registro-manual__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+}
+
+.registro-manual__titulo {
+  margin: 0;
+  color: var(--c-texto);
+  font-size: var(--t-md);
+  font-weight: 800;
+}
+
+.registro-manual__nota {
+  margin: 0;
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+}
+
+.registro-manual__estado {
+  margin: 0;
+  padding: var(--e-3) var(--e-4);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+}
+
+.registro-manual__estado--error {
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  color: var(--c-error);
+  font-weight: 600;
+}
+
+.registro-manual__campos {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.registro-manual__buscador {
+  flex: 0 1 280px;
+}
+
+.registro-manual__etiqueta {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 700;
+}
+
+.registro-manual__select {
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+
+.registro-manual__confirmacion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  flex-wrap: wrap;
+  padding: var(--e-3) var(--e-4);
+  background: var(--c-acento-tenue);
+  border: 1px solid var(--c-acento-linea);
+  border-radius: var(--r-md);
+}
+
+.registro-manual__identidad {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  color: var(--c-texto);
+  font-size: var(--t-base);
+}
+
+.registro-manual__identidad span {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+}
+
+.registro-manual__acciones {
+  display: flex;
+  gap: var(--e-3);
+}

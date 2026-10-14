@@ -48,6 +48,8 @@ const diaFixture = (cambios = {}) => ({
 
 const marcacionFixture = (cambios = {}) => ({
   id: 701,
+  origen: 'lectura_biometrica',
+  clave: `${cambios.origen ?? 'lectura_biometrica'}:${cambios.id ?? 701}`,
   usuarioId: 1,
   valido: true,
   titulo: 'Marcación válida',
@@ -106,6 +108,8 @@ test('obtenerUltimasMarcaciones conserva campos existentes y agrega aditivamente
         motivo: 'no_identificado',
         valido: false,
         dispositivo: 'lector-pb',
+        origen: 'lectura_biometrica',
+        clave_evento: 'lectura_biometrica:101',
       },
       {
         id: 102,
@@ -119,6 +123,8 @@ test('obtenerUltimasMarcaciones conserva campos existentes y agrega aditivamente
         motivo: 'sin_derecho',
         valido: false,
         dispositivo: 'lector-pb',
+        origen: 'lectura_biometrica',
+        clave_evento: 'lectura_biometrica:102',
       },
     ]);
   };
@@ -367,7 +373,7 @@ test('la tabla muestra Hora, Comensal, Categoría, Comida, Resultado, Motivo, M�
       persona: { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar' },
     }),
     marcacionFixture({
-      id: 703, dispositivo: 'registro-manual', hora: '12:15:00', valido: false,
+      id: 703, origen: 'asistencia_manual', dispositivo: 'registro-manual', hora: '12:15:00', valido: false,
       motivo: 'sin_derecho', titulo: 'Sin derecho en este turno',
       persona: { id: 10, nombre: 'Comensal Sin Derecho', categoria: 'Adm' },
     }),
@@ -400,11 +406,11 @@ test('la tabla muestra Hora, Comensal, Categoría, Comida, Resultado, Motivo, M�
   assert.match(html, /Ya recibió su comida \(duplicado\)/);
   assert.match(html, /<td>—<\/td>/);
 
-  // Método: Manual solo para registro-manual, Lector el resto
-  assert.equal(html.match(/<td>Manual<\/td>/g).length, 1);
-  assert.equal(html.match(/<td>Lector<\/td>/g).length, 3);
-  assert.equal(metodoDeMarcacion({ dispositivo: 'registro-manual' }), 'Manual');
-  assert.equal(metodoDeMarcacion({ dispositivo: 'lector-1' }), 'Lector');
+  // Método: según el origen declarado, nunca según el texto del dispositivo
+  assert.equal(html.match(/<td>Registro manual<\/td>/g).length, 1);
+  assert.equal(html.match(/<td>Lectura biométrica<\/td>/g).length, 3);
+  assert.equal(metodoDeMarcacion({ origen: 'asistencia_manual', dispositivo: 'lector-1' }), 'Registro manual');
+  assert.equal(metodoDeMarcacion({ origen: 'lectura_biometrica', dispositivo: 'registro-manual' }), 'Lectura biométrica');
 
   // Las tres rechazadas llevan fondo de rechazo
   assert.equal(html.match(/supervision__fila--rechazada/g).length, 3);
@@ -486,7 +492,7 @@ test('la fila expandida muestra el selector del padrón con Confirmar ración ma
       comidasIniciales: diaFixture(),
       marcacionesIniciales: [fila],
       personal: [{ id: 99, nombre: 'Ana Gomez', categoria: 'Bioquimica', legajo: 'B-99' }],
-      filaExpandidaInicial: 702,
+      filaExpandidaInicial: 'lectura_biometrica:702',
     })
   );
   assert.match(html, /supervision__fila-autorizar/);
@@ -572,7 +578,7 @@ test('el header de vivo de la cocinera se dibuja igual que antes, y en supervisi
 test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el rechazo y no el éxito, y conserva selección', async () => {
   let recargado = false;
   let exitoNotificado = false;
-  let comensalEstado = { 101: '42' };
+  let comensalEstado = { 'lectura_biometrica:101': '42' };
   let avisoRecibido = null;
 
   const respuestaRechazo = {
@@ -583,7 +589,7 @@ test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el 
   };
 
   const resultado = await ejecutarAutorizacionManual({
-    marcacion: { id: 101, motivo: 'no_identificado' },
+    marcacion: { id: 101, clave: 'lectura_biometrica:101', motivo: 'no_identificado' },
     usuarioId: 42,
     autorizarFn: async () => respuestaRechazo,
     cargarDatosFn: async () => { recargado = true; },
@@ -602,7 +608,7 @@ test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el 
     detalle: 'Comensal ya almorzó a las 12:15',
   });
   // NO limpia la selección del comensal
-  assert.equal(comensalEstado[101], '42');
+  assert.equal(comensalEstado['lectura_biometrica:101'], '42');
   // NO notifica marcación exitosa
   assert.equal(exitoNotificado, false);
   // Recarga siempre después
@@ -613,7 +619,10 @@ test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el 
     h(Supervision, {
       cargandoInicial: false,
       comidasIniciales: diaFixture(),
-      marcacionesIniciales: [{ id: 101, motivo: 'no_identificado', valido: false, hora: '12:00' }],
+      marcacionesIniciales: [{
+        id: 101, clave: 'lectura_biometrica:101', origen: 'lectura_biometrica',
+        motivo: 'no_identificado', valido: false, hora: '12:00',
+      }],
       avisoAccionInicial: avisoRecibido,
     })
   );
@@ -626,7 +635,7 @@ test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el 
 test('autorizar con respuesta { valido: true } muestra el éxito y limpia la selección', async () => {
   let recargado = false;
   let exitoNotificado = false;
-  let comensalEstado = { 101: '42' };
+  let comensalEstado = { 'lectura_biometrica:101': '42' };
   let avisoRecibido = null;
 
   const respuestaExito = {
@@ -637,7 +646,7 @@ test('autorizar con respuesta { valido: true } muestra el éxito y limpia la sel
   };
 
   const resultado = await ejecutarAutorizacionManual({
-    marcacion: { id: 101, motivo: 'no_identificado' },
+    marcacion: { id: 101, clave: 'lectura_biometrica:101', motivo: 'no_identificado' },
     usuarioId: 42,
     autorizarFn: async () => respuestaExito,
     cargarDatosFn: async () => { recargado = true; },
@@ -656,7 +665,7 @@ test('autorizar con respuesta { valido: true } muestra el éxito y limpia la sel
     detalle: 'Comensal habilitado para Almuerzo',
   });
   // Limpia la selección del comensal
-  assert.equal(comensalEstado[101], undefined);
+  assert.equal(comensalEstado['lectura_biometrica:101'], undefined);
   // Notifica éxito
   assert.equal(exitoNotificado, true);
   // Recarga siempre después

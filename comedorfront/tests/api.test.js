@@ -77,9 +77,11 @@ test('las últimas marcaciones traen la fecha pedida y los rechazos con motivo l
     rutas.push(new URL(ruta).search);
     return json([
       { id: 8, fecha_hora: '2026-09-10T12:30:05', usuario_id: 3, nombre: 'Persona 3',
-        categoria: 'Médico', resultado: 'aceptada', motivo: null, valido: true, dispositivo: 'lector-01' },
+        categoria: 'Médico', resultado: 'aceptada', motivo: null, valido: true, dispositivo: 'lector-01',
+        origen: 'lectura_biometrica', clave_evento: 'lectura_biometrica:8' },
       { id: 7, fecha_hora: '2026-09-10T12:29:00', usuario_id: 4, nombre: null, categoria: null,
-        resultado: 'rechazada', motivo: 'duplicado', valido: false, dispositivo: 'lector-01' },
+        resultado: 'rechazada', motivo: 'duplicado', valido: false, dispositivo: 'lector-01',
+        origen: 'lectura_biometrica', clave_evento: 'lectura_biometrica:7' },
     ]);
   };
   const dehoy = await obtenerUltimasMarcaciones();
@@ -108,10 +110,10 @@ test('las últimas marcaciones exponen la comida para el filtro de la tarjeta', 
   globalThis.fetch = async () => json([
     { id: 1, fecha_hora: '2026-09-10T19:20:59', usuario_id: 3, nombre: 'Persona 3',
       categoria: 'Técnicos', comida_id: 5, comida: 'Cena', resultado: 'aceptada',
-      motivo: null, valido: true, dispositivo: 'lector-01' },
+      motivo: null, valido: true, dispositivo: 'lector-01', origen: 'lectura_biometrica', clave_evento: 'lectura_biometrica:1' },
     { id: 2, fecha_hora: '2026-09-10T23:59:00', usuario_id: 4, nombre: 'Persona 4',
       categoria: 'Médico', comida_id: null, comida: null, resultado: 'rechazada',
-      motivo: 'fuera_horario', valido: false, dispositivo: 'lector-01' },
+      motivo: 'fuera_horario', valido: false, dispositivo: 'lector-01', origen: 'lectura_biometrica', clave_evento: 'lectura_biometrica:2' },
   ]);
   const [conCena, sinComida] = await obtenerUltimasMarcaciones();
   assert.equal(conCena.comida, 'Cena');
