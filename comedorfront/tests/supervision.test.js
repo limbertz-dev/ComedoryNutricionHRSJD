@@ -569,53 +569,24 @@ test('el header de vivo de la cocinera se dibuja igual que antes, y en supervisi
 });
 
 // -------------------------------------------------------------
-// 12. Aviso de una acción (registro manual): éxito y rechazo de negocio
+// 12. Avisos: solo el de un refresco fallido (no hay acciones de escritura)
 // -------------------------------------------------------------
-test('un aviso de rechazo se muestra como rechazo y no como éxito', () => {
-  const avisoRecibido = {
-    tipo: 'rechazo',
-    titulo: 'Ya recibió su comida',
-    detalle: 'Comensal ya almorzó a las 12:15',
-  };
-
-  // Render en UI: muestra aviso de rechazo y no el de éxito
+test('Supervisión no muestra avisos de acciones: solo el de un refresco que falló', () => {
   const html = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
       comidasIniciales: diaFixture(),
-      marcacionesIniciales: [{
-        id: 101, clave: 'lectura_biometrica:101', origen: 'lectura_biometrica',
-        motivo: 'no_identificado', valido: false, hora: '12:00',
-      }],
-      avisoAccionInicial: avisoRecibido,
+      marcacionesIniciales: [marcacionFixture({})],
+      /* Props de la versión anterior: ya no existen y no pintan nada. */
+      avisoAccionInicial: { tipo: 'exito', titulo: 'Ración autorizada', detalle: 'x' },
+      puedeRegistrarManual: true,
+      errorRefrescoInicial: 'HTTP 500',
     })
   );
-  assert.match(html, /Ya recibió su comida/);
-  assert.match(html, /Comensal ya almorzó a las 12:15/);
-  assert.match(html, /supervision__aviso-accion--rechazo/);
-  assert.doesNotMatch(html, /supervision__aviso-accion--exito/);
-});
-
-test('un aviso de éxito se muestra como éxito y no como rechazo', () => {
-  const avisoRecibido = {
-    tipo: 'exito',
-    titulo: 'Ración autorizada',
-    detalle: 'Comensal habilitado para Almuerzo',
-  };
-
-  // Render en UI: muestra aviso de éxito y no el de rechazo
-  const html = renderToStaticMarkup(
-    h(Supervision, {
-      cargandoInicial: false,
-      comidasIniciales: diaFixture(),
-      marcacionesIniciales: [],
-      avisoAccionInicial: avisoRecibido,
-    })
-  );
-  assert.match(html, /Ración autorizada/);
-  assert.match(html, /Comensal habilitado para Almuerzo/);
-  assert.match(html, /supervision__aviso-accion--exito/);
-  assert.doesNotMatch(html, /supervision__aviso-accion--rechazo/);
+  assert.doesNotMatch(html, /Ración autorizada|supervision__aviso-accion--exito|supervision__aviso-accion--rechazo/);
+  assert.match(html, /supervision__aviso-accion--error/);
+  assert.match(html, /No se pudo actualizar/);
+  assert.match(html, /Se muestran los datos anteriores\. HTTP 500/);
 });
 
 // -------------------------------------------------------------
