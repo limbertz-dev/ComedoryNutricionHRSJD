@@ -85,3 +85,45 @@ La demo corre sobre copias: `bd_turnos_demo` (clon de `bd_proyecto_backend`) y `
    - Otros parámetros: `--porcentaje`, `--desde`, `--hasta`, `--solo-programados` (ver su docstring). Termina comparando el CHECKSUM de `bd_proyecto_backend` antes y después.
 
 Para salir: "volver a la hora real" en el front (o `DELETE /simulacion/reloj`), o cerrar la API; al reiniciar vuelve sola a la hora real.
+
+## Escenario sintético de cocina
+
+`scripts/preparar_escenario_sintetico.py` arma un escenario para probar el flujo de cocina **sin un solo dato del hospital**: no clona ni consulta registros de ninguna base existente (ni filas ni DDL) y no borra ninguna base. Es independiente de `preparar_simulacion.py` y se niega a usar sus bases (`bd_turnos_demo` y `bd_nutricion_sim` traen copias de datos reales). Que esas bases estén aisladas por dependencias no prueba que su contenido sea sintético: por eso el escenario va en bases propias.
+
+**Destino.** `bd_turnos_escenario_demo` + `bd_nutricion_escenario_sim` (o los que se pasen con `--demo` / `--sim`). Los autoriza Limbert; antes, el inventario (`--solo-inventario`, solo lectura) tiene que mostrarlos ausentes o del escenario.
+
+Qué deja (ids 9001-9003 / 900001-900007; asignaciones `90000000 + (usuario - 900000)·10⁶ + ordinal(fecha)`):
+
+- `--demo`: esquema mínimo, exactamente las columnas que leen las vistas `v_*` (una prueba lo compara con las migraciones). Marcador `escenario_sintetico`.
+- Comensal principal `usuariosimulado` (900001): categoría Administrativo, turno de 12 h que otorga el almuerzo del mismo día, asignación en `--fecha` (por defecto hoy), sin novedades y **sin cuenta de acceso**. Asociación simulada `SIM-ID-900001 -> 900001` en `escenario_identificaciones`: solo texto, sin imagen, huella ni plantilla.
+- Casos negativos independientes, cada uno con un solo factor distinto del principal: turno de 8 h (900002), categoría Enfermería (900003), turno de 12 h sin `turno_comida` (900004), novedad `permiso` guardada (900005), asignación al día siguiente (900006).
+- Contraste de novedad (900007): la misma asignación se mide con las vistas y reglas reales sin novedad (derecho) y con `permiso` (sin derecho), dentro de una transacción que se revierte; el estado guardado no tiene la novedad.
+- `--sim`: `alembic upgrade head`, verificación de la cabeza, de las 9 vistas (`SELECT 1` y `VIEW_TABLE_USAGE`: leen solo `--demo`) y recién entonces la semilla general. Las reglas de derecho son las de la migración; el script no las escribe.
+- Cuentas `cocinera2` y `cocinera3`, independientes, rol cocinera, sin vínculo, con clave temporal. Jefa y sistemas no se crean en esta etapa.
+
+No registra ninguna ración ni lectura: el almuerzo principal queda disponible para el flujo de cocina.
+
+**Conexión.** En un worktree sin `comedorback\.env` (no se copia), la conexión sale solo de variables de entorno: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`. Si falta alguna, el script aborta nombrándolas, sin abrir conexión ni usar los valores por omisión. Las bases del escenario las pone el script en los subprocesos; no hace falta `DB_NAME`.
+
+```powershell
+# desde la raíz del worktree, en la consola del operador (la clave no se muestra ni queda en el historial)
+$env:DB_HOST = '127.0.0.1'; $env:DB_PORT = '3306'; $env:DB_USER = '<usuario>'
+$s = Read-Host 'Clave de MySQL' -AsSecureString
+$env:DB_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+$py = '<un venv con comedorback\requirements.txt, p. ej. ..\wt-develop\comedorback\.venv\Scripts\python.exe>'
+& $py scripts\preparar_escenario_sintetico.py --solo-inventario
+& $py scripts\preparar_escenario_sintetico.py --fecha 2026-10-16 --claves-sin-revelar --manifiesto docs\escenario-sintetico\manifiesto-2026-10-16.json
+```
+
+- **Claves y habilitación**: por consola sin eco, por `ESCENARIO_CLAVE_COCINERA2` / `_COCINERA3`, o `--claves-sin-revelar` (al azar, nadie las conoce: las cuentas existen pero no se puede entrar). Con `--claves-sin-revelar`, cada cocinera se habilita en la consola del operador, que es el único lugar donde se muestra la clave temporal, y solo sobre la base del escenario: desde `comedorback\`, con las variables de conexión puestas, `$env:DB_NAME='bd_nutricion_escenario_sim'; $env:DB_NAME_TURNOS='bd_turnos_escenario_demo'; & $py -m app.semillas.admin --username cocinera2 --resetear` (ídem `cocinera3`). El primer ingreso exige cambiarla. El script nunca imprime claves, hashes ni tokens, y el manifiesto deja escrito este procedimiento.
+- **Auditor de escrituras**: los cuatro procesos del preparador (principal, alembic, semilla, evidencia) clasifican cada sentencia antes de ejecutarla y cortan cualquier escritura fuera de `--demo`/`--sim`, sobre una vista `v_*`/`vw_*`, en una tabla de nombre heredado fuera de `--demo`, o cualquier DELETE/UPDATE/DROP/TRUNCATE propio. El SQL de escritura (sin parámetros) queda en un JSONL cuya ruta se imprime; el resumen va al manifiesto.
+- **Manifiesto** (`--manifiesto`): revisión del código, ids del comensal y de las cuentas (diferenciados), rol y estado de las cuentas, turno, duración, categoría, asignación, novedades, comida, fecha, ventana, regla vigente, derecho esperado y obtenido, controles de que 12 h no bastan (categoría, novedad, mapeo, fecha) y el adicional de duración, contraste, ración principal (0), aislamiento (bases creadas, `VIEW_TABLE_USAGE`, auditoría) y huellas CHECKSUM antes/después. Sin secretos.
+- **Repetición**: con los mismos parámetros no escribe nada ("0 filas creadas"). Aborta sin escribir ante cualquier colisión ajena (base sin marcador, tabla o fila distinta, cuenta con otro rol, vínculo o nombre, cuenta dada de baja, comensal con cuenta).
+- **Salida**: `0` listo; `1` abortado; `3` el almuerzo principal de esa fecha ya se registró (no se borra: usar otra `--fecha`).
+
+Para usarlo, la API y el front como en "Modo simulación" (pasos 2, 5 y 6) con `$env:DB_NAME = 'bd_nutricion_escenario_sim'` y `$env:DB_NAME_TURNOS = 'bd_turnos_escenario_demo'`, y el reloj dentro de la ventana del almuerzo del día preparado (la del manifiesto).
+
+**Pruebas** (`comedorback/tests/test_escenario_sintetico.py`), en tres niveles que no se sustituyen:
+
+1. Unitarias, sin MySQL: guardas, esquema contra las migraciones, auditor (también contra la expresión de `test_zz_sin_escrituras_heredadas`, que no se toca), colisiones, claves y las reglas de `app/consultas/derecho.py` sobre una proyección SQLite calculada en Python. Esa proyección **no** prueba las vistas ni MySQL.
+2. y 3. Preparación real y derecho por las vistas reales: solo con `$env:ESCENARIO_SINTETICO_INTEGRACION = '1'`. Crean bases `bd_esc<azar>_demo` / `_sim` que no existían, corren el script como proceso aparte (prepara, repite sin cambios, colisión ajena, ración ya servida) y borran solo esas al terminar.
