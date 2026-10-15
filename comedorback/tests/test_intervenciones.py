@@ -944,7 +944,7 @@ def test_dos_personas_a_la_vez_sobre_la_misma_lectura_dan_una_sola_racion(
     perdedor = next(r for r in resultados.values() if r.status_code == 409)
     assert perdedor.json()["motivo"] == "lectura_ya_resuelta"
     assert _contar("asistencias") == 1
-    assert sorted(f[0] for f in _filas("SELECT resultado FROM intervenciones_lectura")) == ["registrada", "rechazada"]
+    assert sorted(f[0] for f in _filas("SELECT resultado FROM intervenciones_lectura")) == ["rechazada", "registrada"]
 
 
 def test_el_choque_de_la_racion_deja_la_auditoria_y_no_pierde_el_bloqueo(
