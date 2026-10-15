@@ -115,6 +115,32 @@ def test_los_nombres_por_defecto_son_validos(script):
     ) == []
 
 
+def test_config_apuntando_al_escenario_no_lo_veda(script):
+    """ENTORNO=simulacion con DB_NAME / DB_NAME_TURNOS en las bases del
+    escenario (como lo corre A1): no se vedan a sí mismas, y las cuatro fijas
+    siguen protegidas."""
+    demo, sim = script.DEMO_POR_DEFECTO, script.SIM_POR_DEFECTO
+    protegidas = script.bases_protegidas(sim, demo, demo, sim)
+    assert protegidas == set(script.BASES_PROTEGIDAS)
+    assert script.BASES_PROTEGIDAS == frozenset(
+        {"bd_nutricion", "bd_proyecto_backend", "bd_turnos_demo", "bd_nutricion_sim"}
+    )
+    assert script.errores_de_nombres(demo, sim, protegidas) == []
+    # Mayúsculas distintas tampoco las vedan.
+    assert script.bases_protegidas(sim.upper(), demo.upper(), demo, sim) == set(script.BASES_PROTEGIDAS)
+
+
+def test_config_apuntando_a_otras_bases_las_protege(script):
+    demo, sim = script.DEMO_POR_DEFECTO, script.SIM_POR_DEFECTO
+    protegidas = script.bases_protegidas("otra_propia_sim", "otros_turnos_demo", demo, sim)
+    assert protegidas == set(script.BASES_PROTEGIDAS) | {"otra_propia_sim", "otros_turnos_demo"}
+    assert script.errores_de_nombres("otros_turnos_demo", sim, protegidas)
+    # La configuración real por omisión sigue protegida.
+    assert {"bd_nutricion", "bd_proyecto_backend"} <= script.bases_protegidas(
+        "bd_nutricion", "bd_proyecto_backend", demo, sim
+    )
+
+
 @pytest.mark.parametrize(
     "demo, sim, esperado",
     [
