@@ -1,0 +1,33 @@
+| Paso | Esperado | Obtenido | Estado |
+|---|---|---|---|
+| M1 manifiesto: bases | bd_nutricion_escenario_sim / bd_turnos_escenario_demo | bd_nutricion_escenario_sim / bd_turnos_escenario_demo | VERDE |
+| M2 manifiesto: fecha y ventana del almuerzo | una ventana, el día de la fecha | fecha 2026-10-15, ventana [['2026-10-15T11:00:00', '2026-10-15T15:00:00']] | VERDE |
+| M3 manifiesto: revisión del código | commit conocido, sin cambios sin commit | 5cd80fa13f60406b2469a1e3da79f675987ee4c7 (feat/escenario-sintetico), sin commit: False | VERDE |
+| A1 API /salud: destino | simulacion, bd_nutricion_escenario_sim, bd_turnos_escenario_demo, e1a7c3b9d5f2 | sin API en http://127.0.0.1:8000 | PENDIENTE |
+| P1 raciones / lecturas / intervenciones (antes) | 0 / 0 / 0 | 0 / 0 / 0 | VERDE |
+| P2 regla vigente: base = manifiesto | {'id': 1, 'vigente_desde': '2000-01-01', 'duracion_minima_horas': 12, 'excluir_enfermeria': True, 'novedades_que_anulan': ['baja_medica', 'licencia', 'permiso', 'vacacion']} | {'id': 1, 'vigente_desde': '2000-01-01', 'duracion_minima_horas': 12, 'excluir_enfermeria': True, 'novedades_que_anulan': ['baja_medica', 'licencia', 'permiso', 'vacacion']} | VERDE |
+| P3 cuenta cocinera2 (manifiesto) | rol cocinera, activa, sin vínculo | {'id': 1, 'rol': 'cocinera', 'activo': True, 'debe_cambiar': True, 'vinculo_padron': None} | VERDE |
+| P3 cuenta cocinera3 (manifiesto) | rol cocinera, activa, sin vínculo | {'id': 2, 'rol': 'cocinera', 'activo': True, 'debe_cambiar': True, 'vinculo_padron': None} | VERDE |
+| D 900001 principal (usuariosimulado): código del servidor | con almuerzo | con almuerzo | VERDE |
+| D 900001: manifiesto (derecho obtenido) | con almuerzo | True | VERDE |
+| D 900002 turno de 8 h (control adicional de duración): código del servidor | sin almuerzo | sin almuerzo | VERDE |
+| D 900002: manifiesto (derecho obtenido) | sin almuerzo | False | VERDE |
+| D 900003 categoría Enfermería, turno de 12 h: código del servidor | sin almuerzo | sin almuerzo | VERDE |
+| D 900003: manifiesto (derecho obtenido) | sin almuerzo | False | VERDE |
+| D 900004 turno de 12 h sin turno_comida: código del servidor | sin almuerzo | sin almuerzo | VERDE |
+| D 900004: manifiesto (derecho obtenido) | sin almuerzo | False | VERDE |
+| D 900005 novedad 'permiso' guardada, turno de 12 h: código del servidor | sin almuerzo | sin almuerzo | VERDE |
+| D 900005: manifiesto (derecho obtenido) | sin almuerzo | False | VERDE |
+| D 900006 asignación al día siguiente, turno de 12 h: código del servidor | sin almuerzo | sin almuerzo | VERDE |
+| D 900006: manifiesto (derecho obtenido) | sin almuerzo | False | VERDE |
+| D 900007 contraste, sin novedad persistida: código del servidor | con almuerzo | con almuerzo | VERDE |
+| D 900007: manifiesto (derecho obtenido) | con almuerzo | True | VERDE |
+| D 900007 con novedad 'permiso' (transacción revertida del preparador) | sin almuerzo; la novedad no queda guardada | con novedad: False; persistida: 0 | VERDE |
+| H login cocinera2 | 200, rol cocinera | sin clave en esta sesión: cuenta no habilitada | PENDIENTE |
+| H login cocinera3 | 200, rol cocinera | sin clave en esta sesión: cuenta no habilitada | PENDIENTE |
+| P4 raciones / lecturas / intervenciones (después) | 0 / 0 / 0 | 0 / 0 / 0 | VERDE |
+| P5 reglas sin cambios (antes = después) | iguales | iguales | VERDE |
+
+No comprobado acá: la huella CHECKSUM de las bases protegidas (antes y después).
+
+codigo de salida: 0
