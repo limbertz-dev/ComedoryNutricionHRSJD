@@ -393,6 +393,17 @@ def tipo_base(definicion: str) -> str:
     return re.match(r"[A-Za-z]+", definicion).group(0).lower()
 
 
+def bases_protegidas(db_name: str, db_name_turnos: str, demo: str, sim: str) -> set[str]:
+    """Las cuatro fijas, siempre, más las que diga la configuración del
+    proceso salvo que sean las del escenario: quien corre el preparador
+    puede fijar DB_NAME / DB_NAME_TURNOS en --sim / --demo antes de importar
+    la configuración, y entonces vedarlas lo haría abortar contra sí mismo
+    (y en una repetición las trataría como ajenas al comparar CHECKSUM)."""
+    escenario = {demo.lower(), sim.lower()}
+    configuradas = {b for b in (db_name, db_name_turnos) if b.lower() not in escenario}
+    return set(BASES_PROTEGIDAS) | configuradas
+
+
 def errores_de_nombres(demo: str, sim: str, protegidas: set[str]) -> list[str]:
     errores = []
     for nombre in (demo, sim):
@@ -1527,7 +1538,7 @@ def _preparar(args: argparse.Namespace) -> int:
             "falta la configuración de conexión. Defina como variables de entorno: "
             + ", ".join(faltan)
         )
-    protegidas = {config.db_name, config.db_name_turnos} | BASES_PROTEGIDAS
+    protegidas = bases_protegidas(config.db_name, config.db_name_turnos, args.demo, args.sim)
     errores = errores_de_nombres(args.demo, args.sim, protegidas)
     if errores:
         raise Abortado("\n  - ".join(["nombres no válidos:", *errores]))
