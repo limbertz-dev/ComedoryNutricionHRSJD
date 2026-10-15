@@ -192,7 +192,8 @@ test('permisos: solo la jefa registra a mano; ni la cocinera ni sistemas ven Sup
   assert.doesNotMatch(sinPermiso, /Registrar ración manual/);
 });
 
-test('registrar ración manual está disponible sin lecturas previas, con datos y aun con error de carga', () => {
+test('Supervisión es solo lectura: sin registro manual vacía, con datos ni con error de carga', () => {
+  /* `puedeRegistrarManual` y `personal` son props de la versión anterior: se ignoran. */
   const vacio = renderToStaticMarkup(h(Supervision, {
     cargandoInicial: false,
     comidasIniciales: { comidas: [], rechazosSinComida: 0 },
@@ -201,21 +202,23 @@ test('registrar ración manual está disponible sin lecturas previas, con datos 
     personal: [ANA],
   }));
   assert.match(vacio, /No hay registros de supervisión para este día/);
-  assert.match(vacio, /<span class="boton__texto">Registrar ración manual<\/span>/);
+  assert.match(vacio, /<span class="boton__texto">Actualizar<\/span>/);
+  assert.doesNotMatch(vacio, /Registrar ración manual|registro-manual/);
 
   const conDatos = renderToStaticMarkup(h(Supervision, {
     cargandoInicial: false,
     comidasIniciales: { comidas: [], rechazosSinComida: 0 },
     marcacionesIniciales: [fila('lectura_biometrica', 1)],
     puedeRegistrarManual: true,
+    personal: [ANA],
   }));
-  assert.match(conDatos, /Registrar ración manual/);
+  assert.doesNotMatch(conDatos, /Registrar ración manual|registro-manual/);
 
   const conError = renderToStaticMarkup(h(Supervision, {
     cargandoInicial: false, errorInicial: 'Sin conexión', puedeRegistrarManual: true,
   }));
   assert.match(conError, /Reintentar supervisión/);
-  assert.match(conError, /Registrar ración manual/);
+  assert.doesNotMatch(conError, /Registrar ración manual|registro-manual/);
 });
 
 test('el panel distingue carga, padrón vacío, error y lista; confirma mostrando la identidad', () => {
@@ -315,21 +318,9 @@ test('un fallo del refresco posterior no oculta que el POST tuvo éxito', async 
   const aviso = await registrar(ANA);
   assert.equal(aviso.tipo, 'exito');
   assert.deepEqual(recibidos.map(({ tipo }) => tipo), ['exito']);
-
-  // En pantalla conviven el éxito y el aviso de datos sin actualizar.
-  const html = renderToStaticMarkup(h(Supervision, {
-    cargandoInicial: false,
-    comidasIniciales: { comidas: [], rechazosSinComida: 0 },
-    marcacionesIniciales: [fila('lectura_biometrica', 1)],
-    avisoAccionInicial: aviso,
-    errorRefrescoInicial: 'HTTP 500',
-  }));
-  assert.match(html, /supervision__aviso-accion--exito/);
-  assert.match(html, /No se pudo actualizar/);
-  assert.match(html, /Se muestran los datos anteriores\. HTTP 500/);
 });
 
-test('las filas se distinguen por clave y ya no se autorizan desde Supervisión; el registro manual sigue', () => {
+test('las filas se distinguen por clave y nada se autoriza ni se registra desde Supervisión', () => {
   const html = renderToStaticMarkup(h(Supervision, {
     cargandoInicial: false,
     comidasIniciales: { comidas: [], rechazosSinComida: 0 },
@@ -346,8 +337,8 @@ test('las filas se distinguen por clave y ya no se autorizan desde Supervisión;
   assert.equal(html.match(/<td>Lectura biométrica<\/td>/g).length, 2);
   // El Autorizar de filas se retiró: la huella la identifica la cocinera.
   assert.doesNotMatch(html, /Autorizar|supervision__fila-autorizar|Requiere excepción de jefatura/);
-  // El registro manual independiente de jefatura permanece.
-  assert.match(html, /<span class="boton__texto">Registrar ración manual<\/span>/);
+  // Supervisión es solo lectura: tampoco ofrece el registro manual.
+  assert.doesNotMatch(html, /Registrar ración manual/);
 });
 
 test('un 403 al registrar sigue el manejo central de sesión', async () => {

@@ -3,13 +3,11 @@ import Boton from '../ui/Boton.jsx';
 import Etiqueta from '../ui/Etiqueta.jsx';
 import { IconoBuscar, IconoCheck, IconoEquis, IconoAlerta, IconoUsuario } from '../ui/Iconos.jsx';
 import {
-  autorizarMarcacionManual,
   obtenerComidasDelDia,
   obtenerUltimasMarcaciones,
 } from '../../api.js';
 import { diaLegible } from '../../dias.js';
 import IntervencionesCocina from './IntervencionesCocina.jsx';
-import RegistroManual from './RegistroManual.jsx';
 import './Supervision.css';
 
 const ETIQUETAS_MOTIVOS = {
@@ -170,32 +168,25 @@ export function programarRefrescoSupervision({ cargarDatos, intervaloMs = 30000 
 }
 
 /**
- * Sección de Supervisión del Comedor (jefa de nutrición).
+ * Sección de Supervisión del Comedor (jefa de nutrición). SOLO LECTURA.
  *
  * Una sola tabla en vivo: arriba, las pestañas de las comidas del día
  * ("Todas" + una por comida); debajo, la barra de filtros y la tabla de
- * marcaciones de la pestaña activa. La tabla es de consulta: las huellas no
- * reconocidas las identifica la cocinera, y aquí solo se ve su resultado
- * final. Con `puedeRegistrarManual`, «Registrar ración manual» sigue aparte y
- * no depende de ninguna fila. Con `puedeConsultarIntervenciones`, al pie se
- * consultan las intervenciones de cocina, sin aprobar nada.
+ * marcaciones de la pestaña activa. Nada aquí registra, autoriza ni modifica
+ * raciones: las huellas no reconocidas las identifica la cocinera y aquí solo
+ * se ve su resultado final. Las únicas peticiones son lecturas (GET). Con
+ * `puedeConsultarIntervenciones`, al pie se consultan las intervenciones de
+ * cocina, sin aprobar nada.
  */
 export default function Supervision({
   fecha,
   simulacion = null,
-  personal = [],
-  cargandoPadron = false,
-  errorPadron = '',
-  puedeRegistrarManual = false,
   puedeConsultarIntervenciones = false,
-  registrarManual = autorizarMarcacionManual,
   versionReloj = 0,
-  onMarcacionExitosa,
   cargandoInicial = true,
   errorInicial = null,
   comidasIniciales = null,
   marcacionesIniciales = [],
-  avisoAccionInicial = null,
   actualizadoInicial = null,
   errorRefrescoInicial = '',
   intervencionesIniciales = undefined,
@@ -220,7 +211,6 @@ export default function Supervision({
   const [filtroResultado, setFiltroResultado] = useState('todas');
   const [busqueda, setBusqueda] = useState('');
 
-  const [avisoAccion, setAvisoAccion] = useState(avisoAccionInicial);
 
   const cargarDatos = useCallback(async ({ signal, esRefresco = false, comidaId } = {}) => {
     if (!esRefresco) {
@@ -277,34 +267,17 @@ export default function Supervision({
     cargarDatos({ esRefresco: true, comidaId });
   }
 
-  /* Registro manual independiente de las filas: el aviso es el de cualquier
-     acción y el refresco posterior informa su fallo por separado. */
-  const registroManual = puedeRegistrarManual ? (
-    <RegistroManual
-      personal={personal}
-      cargandoPadron={cargandoPadron}
-      errorPadron={errorPadron}
-      registrar={registrarManual}
-      onAviso={setAvisoAccion}
-      onExito={() => onMarcacionExitosa?.()}
-      onRefrescar={() => cargarDatos({ esRefresco: true })}
+  /* El único aviso de la sección: un refresco que falló. */
+  const avisos = errorRefresco ? (
+    <AvisoAccion
+      aviso={{
+        tipo: 'error',
+        titulo: 'No se pudo actualizar',
+        detalle: `Se muestran los datos anteriores. ${errorRefresco}`,
+      }}
+      onCerrar={() => setErrorRefresco('')}
     />
   ) : null;
-  const avisos = (
-    <>
-      {avisoAccion ? <AvisoAccion aviso={avisoAccion} onCerrar={() => setAvisoAccion(null)} /> : null}
-      {errorRefresco ? (
-        <AvisoAccion
-          aviso={{
-            tipo: 'error',
-            titulo: 'No se pudo actualizar',
-            detalle: `Se muestran los datos anteriores. ${errorRefresco}`,
-          }}
-          onCerrar={() => setErrorRefresco('')}
-        />
-      ) : null}
-    </>
-  );
 
   /* Filtrado local sobre las filas de la pestaña activa */
   const marcacionesFiltradas = useMemo(
@@ -328,8 +301,6 @@ export default function Supervision({
           <p>{error}</p>
           <Boton onClick={() => cargarDatos()}>Reintentar supervisión</Boton>
         </div>
-        {avisoAccion ? <AvisoAccion aviso={avisoAccion} onCerrar={() => setAvisoAccion(null)} /> : null}
-        {registroManual}
       </div>
     );
   }
@@ -353,7 +324,6 @@ export default function Supervision({
           </Boton>
         </div>
         {avisos}
-        {registroManual}
       </div>
     );
   }
@@ -378,8 +348,6 @@ export default function Supervision({
       ) : null}
 
       {avisos}
-
-      {registroManual}
 
       {/* Pestañas: "Todas" + una por comida del día, en el orden recibido. */}
       <div className="supervision__pestanas" role="tablist" aria-label="Filtrar por comida">
@@ -671,7 +639,7 @@ function ResumenPestana({ resumen, dia }) {
   );
 }
 
-/** Aviso de éxito, rechazo o error tras una acción, con cierre manual. */
+/** Aviso con cierre manual (hoy, solo el de un refresco fallido). */
 function AvisoAccion({ aviso, onCerrar }) {
   return (
     <div

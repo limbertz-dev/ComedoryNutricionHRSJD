@@ -44,8 +44,8 @@ Secciones del sidebar (`src/navegacion.js`):
    Sin «Autorizar» sobre las filas: la huella no reconocida la identifica la
    cocinera; aquí se ve su resultado final y, al pie, la consulta de
    intervenciones de cocina (`GET /intervenciones-cocina`), sin aprobaciones.
-   «Registrar ración manual» (`POST /asistencias`, `metodo: 'manual'`) sigue
-   aparte. En simulación, su header lleva los controles del reloj.
+   Solo lectura: ningún control registra, autoriza ni modifica raciones. En
+   simulación, su header lleva los controles del reloj.
 3. **Resumen** — cupo del turno, raciones del día por categoría y lecturas del
    lector, cada conteo con su período (`GET /pantalla/estado`, `src/resumen.js`).
 4. **Historial de comidas** — historial diario y mensual por comensal, paginado.

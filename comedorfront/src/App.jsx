@@ -388,13 +388,8 @@ export function Panel({ rol, usuario = null }) {
               key={diaServidor}
               fecha={reloj ? diaServidor : undefined}
               simulacion={reloj}
-              personal={estado.personal}
-              cargandoPadron={cargandoPersonal}
-              errorPadron={errorApi}
-              puedeRegistrarManual={puedeMarcarManual(rol)}
               puedeConsultarIntervenciones={puedeConsultarIntervenciones(rol)}
               versionReloj={versionReloj}
-              onMarcacionExitosa={() => recargarEstado({ conservar: true })}
             />
           ) : null}
 
