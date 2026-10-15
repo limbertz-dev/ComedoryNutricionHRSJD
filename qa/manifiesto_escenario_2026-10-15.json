@@ -1,0 +1,914 @@
+{
+  "escenario": "comedor-escenario-sintetico",
+  "version_escenario": 2,
+  "generado": "2026-10-15T12:26:32",
+  "revision": {
+    "commit": "5cd80fa13f60406b2469a1e3da79f675987ee4c7",
+    "rama": "feat/escenario-sintetico",
+    "cambios_sin_commit_en_el_codigo": false,
+    "script_sha256": "d5a503fc32ad23a520391f5ee53832b831cf2c10245fb7871d0584bd39990d1d"
+  },
+  "bases": {
+    "turnos_sintetica": "bd_turnos_escenario_demo",
+    "propia": "bd_nutricion_escenario_sim",
+    "mysql": "8.4.3"
+  },
+  "comensal": {
+    "usuario_id": 900001,
+    "login": "usuariosimulado",
+    "tipo": "comensal (users.id de la base sintética); NO es una cuenta de acceso",
+    "categoria": {
+      "id": 9001,
+      "nombre": "Administrativo"
+    },
+    "columna_del_informe": "administrativo",
+    "cuentas_de_acceso_vinculadas": 0,
+    "identificacion_simulada": {
+      "identificador": "SIM-ID-900001",
+      "tabla": "bd_turnos_escenario_demo.escenario_identificaciones",
+      "contenido": "solo texto: sin imagen, huella ni plantilla"
+    }
+  },
+  "cuentas": [
+    {
+      "id": 1,
+      "username": "cocinera2",
+      "rol": "cocinera",
+      "activo": true,
+      "debe_cambiar": true,
+      "vinculo_padron": null,
+      "tipo": "cuenta de acceso (usuarios_sistema.id de la base propia)"
+    },
+    {
+      "id": 2,
+      "username": "cocinera3",
+      "rol": "cocinera",
+      "activo": true,
+      "debe_cambiar": true,
+      "vinculo_padron": null,
+      "tipo": "cuenta de acceso (usuarios_sistema.id de la base propia)"
+    }
+  ],
+  "habilitacion_de_cuentas": {
+    "claves": "al azar, nadie las conoce (--claves-sin-revelar)",
+    "estado": "pendiente de habilitar por el operador",
+    "como_habilitar": "En la consola del operador, desde comedorback/: $env:DB_NAME='bd_nutricion_escenario_sim'; $env:DB_NAME_TURNOS='bd_turnos_escenario_demo'; .venv/Scripts/python -m app.semillas.admin --username <cocinera2|cocinera3> --resetear. Muestra una clave temporal una sola vez; el primer ingreso exige cambiarla. Solo toca la base bd_nutricion_escenario_sim."
+  },
+  "turno": {
+    "id": 9001,
+    "nombre_turno": "Turno simulado 12 h",
+    "duracion_horas": 12,
+    "hora_inicio": "07:00:00",
+    "hora_fin": "19:00:00"
+  },
+  "categoria": {
+    "id": 9001,
+    "nombre": "Administrativo"
+  },
+  "asignacion": {
+    "turno_asignado_id": 91739904,
+    "fecha": "2026-10-15",
+    "turno": "Turno simulado 12 h",
+    "duracion_horas": 12
+  },
+  "novedades_de_la_asignacion": [],
+  "comida": {
+    "id": 2,
+    "codigo": "almuerzo"
+  },
+  "fecha": "2026-10-15",
+  "ventana": [
+    [
+      "2026-10-15T11:00:00",
+      "2026-10-15T15:00:00"
+    ]
+  ],
+  "comida_en_curso_a_mitad_de_ventana": {
+    "momento": "2026-10-15T13:00:00",
+    "comida_id": 2,
+    "fecha_comida": "2026-10-15"
+  },
+  "regla_vigente": {
+    "id": 1,
+    "vigente_desde": "2000-01-01",
+    "duracion_minima_horas": 12,
+    "excluir_enfermeria": true,
+    "novedades_que_anulan": [
+      "baja_medica",
+      "licencia",
+      "permiso",
+      "vacacion"
+    ]
+  },
+  "derecho_principal": {
+    "esperado": true,
+    "obtenido": true,
+    "derechos_del_dia": [
+      2
+    ],
+    "turno_asignado_que_lo_justifica": 91739904,
+    "fila_v_comidas_por_turno": [
+      {
+        "turno_asignado_id": 91739904,
+        "comida_id": 2,
+        "duracion_horas": 12,
+        "categoria": "Administrativo"
+      }
+    ],
+    "calculado_con": "vistas v_* de la base propia sobre la sintética + app/consultas/derecho.py, en MySQL"
+  },
+  "controles_12h_no_bastan": [
+    {
+      "caso": "negativo_categoria",
+      "usuario_id": 900003,
+      "login": "simneg_enfermeria",
+      "categoria": "Enfermería",
+      "factor": "categoría Enfermería (excluida por la regla vigente)",
+      "turno_horas": 12,
+      "asignaciones": [
+        {
+          "turno_asignado_id": 93739904,
+          "fecha": "2026-10-15",
+          "turno": "Turno simulado 12 h",
+          "duracion_horas": 12
+        }
+      ],
+      "filas_v_comidas_por_turno": [
+        {
+          "turno_asignado_id": 93739904,
+          "comida_id": 2,
+          "duracion_horas": 12,
+          "categoria": "Enfermería"
+        }
+      ],
+      "novedades_v_novedades_laborales": [],
+      "derecho_esperado": false,
+      "derecho_obtenido": false
+    },
+    {
+      "caso": "negativo_sin_mapeo",
+      "usuario_id": 900004,
+      "login": "simneg_sin_mapeo",
+      "categoria": "Administrativo",
+      "factor": "turno de 12 h sin fila en turno_comida",
+      "turno_horas": 12,
+      "asignaciones": [
+        {
+          "turno_asignado_id": 94739904,
+          "fecha": "2026-10-15",
+          "turno": "Turno simulado 12 h sin comida",
+          "duracion_horas": 12
+        }
+      ],
+      "filas_v_comidas_por_turno": [],
+      "novedades_v_novedades_laborales": [],
+      "derecho_esperado": false,
+      "derecho_obtenido": false
+    },
+    {
+      "caso": "negativo_novedad",
+      "usuario_id": 900005,
+      "login": "simneg_novedad",
+      "categoria": "Administrativo",
+      "factor": "novedad 'permiso' guardada sobre su asignación",
+      "turno_horas": 12,
+      "asignaciones": [
+        {
+          "turno_asignado_id": 95739904,
+          "fecha": "2026-10-15",
+          "turno": "Turno simulado 12 h",
+          "duracion_horas": 12
+        }
+      ],
+      "filas_v_comidas_por_turno": [
+        {
+          "turno_asignado_id": 95739904,
+          "comida_id": 2,
+          "duracion_horas": 12,
+          "categoria": "Administrativo"
+        }
+      ],
+      "novedades_v_novedades_laborales": [
+        "permiso"
+      ],
+      "derecho_esperado": false,
+      "derecho_obtenido": false
+    },
+    {
+      "caso": "negativo_otra_fecha",
+      "usuario_id": 900006,
+      "login": "simneg_otra_fecha",
+      "categoria": "Administrativo",
+      "factor": "asignación al día siguiente",
+      "turno_horas": 12,
+      "asignaciones": [
+        {
+          "turno_asignado_id": 96739905,
+          "fecha": "2026-10-16",
+          "turno": "Turno simulado 12 h",
+          "duracion_horas": 12
+        }
+      ],
+      "filas_v_comidas_por_turno": [],
+      "novedades_v_novedades_laborales": [],
+      "derecho_esperado": false,
+      "derecho_obtenido": false
+    }
+  ],
+  "control_adicional_duracion": [
+    {
+      "caso": "negativo_duracion",
+      "usuario_id": 900002,
+      "login": "simneg_duracion",
+      "categoria": "Administrativo",
+      "factor": "turno de 8 h (mínimo vigente: 12 h)",
+      "turno_horas": 8,
+      "asignaciones": [
+        {
+          "turno_asignado_id": 92739904,
+          "fecha": "2026-10-15",
+          "turno": "Turno simulado 8 h",
+          "duracion_horas": 8
+        }
+      ],
+      "filas_v_comidas_por_turno": [
+        {
+          "turno_asignado_id": 92739904,
+          "comida_id": 2,
+          "duracion_horas": 8,
+          "categoria": "Administrativo"
+        }
+      ],
+      "novedades_v_novedades_laborales": [],
+      "derecho_esperado": false,
+      "derecho_obtenido": false
+    }
+  ],
+  "contraste_novedad": {
+    "usuario_id": 900007,
+    "turno_asignado_id": 97739904,
+    "tipo_novedad": "permiso",
+    "sin_novedad": {
+      "asignaciones": [
+        {
+          "turno_asignado_id": 97739904,
+          "fecha": "2026-10-15",
+          "turno": "Turno simulado 12 h",
+          "duracion_horas": 12
+        }
+      ],
+      "filas_v_comidas_por_turno": [
+        {
+          "turno_asignado_id": 97739904,
+          "comida_id": 2,
+          "duracion_horas": 12,
+          "categoria": "Administrativo"
+        }
+      ],
+      "novedades_v_novedades_laborales": [],
+      "derechos_del_dia": [
+        2
+      ],
+      "derecho_al_almuerzo": true,
+      "turno_asignado_que_lo_justifica": 97739904
+    },
+    "con_novedad": {
+      "asignaciones": [
+        {
+          "turno_asignado_id": 97739904,
+          "fecha": "2026-10-15",
+          "turno": "Turno simulado 12 h",
+          "duracion_horas": 12
+        }
+      ],
+      "filas_v_comidas_por_turno": [
+        {
+          "turno_asignado_id": 97739904,
+          "comida_id": 2,
+          "duracion_horas": 12,
+          "categoria": "Administrativo"
+        }
+      ],
+      "novedades_v_novedades_laborales": [
+        "permiso"
+      ],
+      "derechos_del_dia": [],
+      "derecho_al_almuerzo": false,
+      "turno_asignado_que_lo_justifica": null
+    },
+    "novedad_persistida_tras_revertir": 0
+  },
+  "personas_con_derecho_al_almuerzo": 2,
+  "racion_principal": {
+    "raciones": 0,
+    "lecturas": 0,
+    "disponible_para_cocina": true
+  },
+  "aislamiento": {
+    "estado_inicial": {
+      "demo": "ausente",
+      "sim": "ausente"
+    },
+    "esquemas_creados": [
+      "bd_nutricion_escenario_sim",
+      "bd_turnos_escenario_demo"
+    ],
+    "esquemas_desaparecidos": [],
+    "esquemas_existentes_antes": [
+      "bd_nutricion",
+      "bd_nutricion_jefa_test",
+      "bd_nutricion_root_test",
+      "bd_nutricion_sim",
+      "bd_nutricion_test",
+      "bd_proyecto_backend",
+      "bd_turnos_demo"
+    ],
+    "base_propia": {
+      "alembic": "e1a7c3b9d5f2",
+      "tablas_propias": 12,
+      "vistas": 9,
+      "select_1_por_vista": "ok",
+      "view_table_usage_esquemas": [
+        "bd_turnos_escenario_demo"
+      ],
+      "cabeza_del_codigo": "e1a7c3b9d5f2"
+    },
+    "auditoria_escrituras": [
+      {
+        "paso": "alembic",
+        "verbo": "ALTER TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "asistencias",
+        "autorizada": true,
+        "sentencias": 4
+      },
+      {
+        "paso": "alembic",
+        "verbo": "ALTER TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "horarios_comida",
+        "autorizada": true,
+        "sentencias": 4
+      },
+      {
+        "paso": "alembic",
+        "verbo": "ALTER TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "lecturas_biometricas",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "ALTER TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "usuarios_sistema",
+        "autorizada": true,
+        "sentencias": 5
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE INDEX",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "asistencias",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE INDEX",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "horarios_comida",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE INDEX",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "intentos_login",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE INDEX",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "intervenciones_lectura",
+        "autorizada": true,
+        "sentencias": 3
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE INDEX",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "lecturas_biometricas",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "alembic_version",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "asistencias",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "categoria_reporte_map",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "categorias_reporte",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "cerrojos",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "coeficientes_racion",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "horarios_comida",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "intentos_login",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "intervenciones_lectura",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "lecturas_biometricas",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "reglas_derecho",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "reglas_derecho_novedad",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE TABLE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "usuarios_sistema",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_categorias",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_comensales",
+        "autorizada": true,
+        "sentencias": 2
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_comidas",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_comidas_por_turno",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_novedades_laborales",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_servicios",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_turno_comida",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_turnos_asignados",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "CREATE VIEW",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "v_usuario_servicios",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "alembic_version",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "categorias_reporte",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "cerrojos",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "reglas_derecho",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "alembic",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "reglas_derecho_novedad",
+        "autorizada": true,
+        "sentencias": 4
+      },
+      {
+        "paso": "alembic",
+        "verbo": "UPDATE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "alembic_version",
+        "autorizada": true,
+        "sentencias": 8
+      },
+      {
+        "paso": "alembic",
+        "verbo": "UPDATE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "horarios_comida",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "evidencia",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "novedades_laborales",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE DATABASE",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "bd_nutricion_escenario_sim",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE DATABASE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "bd_turnos_escenario_demo",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "categorias",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "comidas",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "escenario_identificaciones",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "escenario_sintetico",
+        "autorizada": true,
+        "sentencias": 2
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "novedades_laborales",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "personas",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "servicios",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "turno_comida",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "turnos",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "turnos_asignados",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "users",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "CREATE TABLE",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "usuario_servicios",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "usuarios_sistema",
+        "autorizada": true,
+        "sentencias": 2
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "categorias",
+        "autorizada": true,
+        "sentencias": 2
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "comidas",
+        "autorizada": true,
+        "sentencias": 4
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "escenario_identificaciones",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "escenario_sintetico",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "novedades_laborales",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "personas",
+        "autorizada": true,
+        "sentencias": 7
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "servicios",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "turno_comida",
+        "autorizada": true,
+        "sentencias": 2
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "turnos",
+        "autorizada": true,
+        "sentencias": 3
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "turnos_asignados",
+        "autorizada": true,
+        "sentencias": 7
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "users",
+        "autorizada": true,
+        "sentencias": 7
+      },
+      {
+        "paso": "principal",
+        "verbo": "INSERT",
+        "base": "bd_turnos_escenario_demo",
+        "objeto": "usuario_servicios",
+        "autorizada": true,
+        "sentencias": 7
+      },
+      {
+        "paso": "semilla",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "categoria_reporte_map",
+        "autorizada": true,
+        "sentencias": 1
+      },
+      {
+        "paso": "semilla",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "coeficientes_racion",
+        "autorizada": true,
+        "sentencias": 4
+      },
+      {
+        "paso": "semilla",
+        "verbo": "INSERT",
+        "base": "bd_nutricion_escenario_sim",
+        "objeto": "horarios_comida",
+        "autorizada": true,
+        "sentencias": 4
+      }
+    ],
+    "escrituras_fuera_del_escenario": []
+  },
+  "bases_protegidas_checksum": {
+    "bd_nutricion": {
+      "antes": "0b148f96edaf929c",
+      "despues": "0b148f96edaf929c",
+      "tablas": 13
+    },
+    "bd_nutricion_sim": {
+      "antes": "f0ffa17c110944b6",
+      "despues": "f0ffa17c110944b6",
+      "tablas": 13
+    },
+    "bd_proyecto_backend": {
+      "antes": "f5eb97fceccdab88",
+      "despues": "f5eb97fceccdab88",
+      "tablas": 36
+    },
+    "bd_turnos_demo": {
+      "antes": "6bb572af7f0447f2",
+      "despues": "6bb572af7f0447f2",
+      "tablas": 36
+    }
+  }
+}
