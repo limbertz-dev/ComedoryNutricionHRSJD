@@ -10,13 +10,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 registro = logging.getLogger(__name__)
 
-# Las bases reales: la propia de producción y la del módulo de turnos.
-BASES_REALES = frozenset({"bd_nutricion", "bd_proyecto_backend"})
-
 # Los entornos posibles. ENTORNO solo da el valor por omisión con que se arma
 # la app del proceso: el entorno que rige cada petición es el de la app que
 # la atiende (app/core/entorno.py).
-Entorno = Literal["produccion", "desarrollo", "simulacion"]
+Entorno = Literal["produccion", "desarrollo"]
 
 
 class Configuracion(BaseSettings):
@@ -31,8 +28,6 @@ class Configuracion(BaseSettings):
     )
 
     nombre_app: str = "Sistema de Comedor y Nutrición Hospitalaria"
-    # simulacion: monta /simulacion/* para mover el reloj (app/core/reloj.py)
-    # y SOLO arranca contra las bases de scripts/preparar_simulacion.py.
     entorno: Entorno = "desarrollo"
 
     db_host: str = "127.0.0.1"
@@ -89,30 +84,6 @@ class Configuracion(BaseSettings):
             raise ValueError(
                 "DB_NAME y DB_NAME_TURNOS no pueden ser la misma base: "
                 f"'{turnos}' es de solo lectura para este sistema."
-            )
-        return turnos
-
-    @field_validator("db_name_turnos")
-    @classmethod
-    def _simulacion_aislada(cls, turnos: str, info: ValidationInfo) -> str:
-        """En simulación el reloj se mueve a mano: una marcación con la hora
-        fijada escrita en la base real sería una ración falsa en el informe.
-        Por eso ENTORNO=simulacion solo arranca contra las copias que arma
-        scripts/preparar_simulacion.py (propia *_sim, turnos *_demo) y nunca
-        contra las bases reales, se llamen como se llamen las copias."""
-        if info.data.get("entorno") != "simulacion":
-            return turnos
-        propia = info.data.get("db_name", "").strip().lower()
-        turnos_normal = turnos.strip().lower()
-        if (
-            not propia.endswith("_sim")
-            or not turnos_normal.endswith("_demo")
-            or {propia, turnos_normal} & BASES_REALES
-        ):
-            raise ValueError(
-                "ENTORNO=simulacion exige DB_NAME terminado en '_sim' y "
-                "DB_NAME_TURNOS terminado en '_demo' (ver "
-                "scripts/preparar_simulacion.py); nunca las bases reales."
             )
         return turnos
 

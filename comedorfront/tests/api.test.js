@@ -1,6 +1,6 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { obtenerPersonal, marcarAsistencia, simularMarcacion, obtenerEstadoPantalla,
+import { obtenerPersonal, marcarAsistencia, obtenerEstadoPantalla,
   obtenerUltimasMarcaciones, obtenerComidasDelDia,
   obtenerHistorialDiarioPersonal, obtenerHistorialMensualPersonal, obtenerDiaPersonal,
   obtenerPeriodos, obtenerGestiones, obtenerMesesDeGestion,
@@ -61,7 +61,7 @@ test('registra la identidad elegida sin aplicar las reglas locales del mock', as
     return json({ valido: true, motivo: null, usuario_id: 3, nombre: 'Nombre del servidor',
       comida: 'Almuerzo', titulo: 'Marcación válida', detalle: 'Habilitada', raciones_restantes: null });
   };
-  const evento = await simularMarcacion({ personal: [persona], personaId: 3, racionesRestantes: 0 });
+  const evento = await marcarAsistencia(3, { persona });
   assert.equal(peticiones, 1);
   assert.equal(evento.valido, true);
   assert.equal(evento.persona.id, 3);
@@ -122,18 +122,6 @@ test('las últimas marcaciones exponen la comida para el filtro de la tarjeta', 
   assert.equal(sinComida.comidaId, null);
 });
 
-test('el simulador del lector viaja como biometrico y el registro a mano sigue siendo manual', async () => {
-  const metodos = [];
-  globalThis.fetch = async (ruta, opciones) => {
-    metodos.push(JSON.parse(opciones.body).metodo);
-    return json({ valido: true, motivo: null, usuario_id: 3, nombre: 'Nombre del servidor',
-      comida: 'Almuerzo', titulo: 'Marcación válida', detalle: 'Habilitada' });
-  };
-  await marcarAsistencia(3, { persona, metodo: 'biometrico' });
-  await marcarAsistencia(3, { persona });
-  assert.deepEqual(metodos, ['biometrico', 'manual']);
-});
-
 test('conserva rechazos de negocio 200 y traduce los motivos ya usados por el front', async () => {
   for (const [motivo, esperado] of [['duplicado', 'ya_marco'],
     ['fuera_horario', 'fuera_horario'], ['sin_derecho', 'sin_derecho']]) {
@@ -149,7 +137,6 @@ test('conserva rechazos de negocio 200 y traduce los motivos ya usados por el fr
 test('no envía una persona al azar ni reintenta automáticamente un POST fallido', async () => {
   let peticiones = 0;
   globalThis.fetch = async () => { peticiones += 1; throw new TypeError('Offline'); };
-  await assert.rejects(simularMarcacion({ personal: [persona] }), /Seleccione/);
   await assert.rejects(marcarAsistencia(-1), /Seleccione/);
   assert.equal(peticiones, 0);
   await assert.rejects(marcarAsistencia(3, { persona }), /Verifique el registro/);

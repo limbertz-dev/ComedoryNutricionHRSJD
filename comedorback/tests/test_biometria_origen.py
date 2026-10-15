@@ -1,43 +1,41 @@
-"""B0: una sesión humana no declara marcaciones biométricas fuera de simulación.
+"""B0: una sesión humana no declara marcaciones biométricas.
 
 Contrato compartido con el front:
 
   · El entorno efectivo es el de la app que armó `crear_app`. /salud y
     /monitoreo/estado informan ese mismo entorno y ninguna petición lo cambia.
-  · POST /asistencias con metodo='biometrico' (o sin metodo) solo se acepta
-    en simulación. En producción y desarrollo: 403
-    {"detail": DETALLE, "motivo": "biometrico_solo_lector"}, antes de la
-    lógica de marcación y sin escribir lecturas ni asistencias.
+  · POST /asistencias con metodo='biometrico' (o sin metodo) da 403
+    {"detail": DETALLE, "motivo": "biometrico_solo_lector"} en todos los
+    entornos, antes de la lógica de marcación y sin escribir lecturas ni
+    asistencias. Las lecturas solo las registra un lector autorizado.
   · La autenticación va primero y conserva sus errores. La manual conserva
     sus reglas y un biométrico rechazado nunca se convierte en manual.
-  · En simulación el dispositivo lo fija el servidor: simulador-navegador.
 
 Cada entorno es una app de `crear_app` sobre la misma base de tests.
 """
 
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, text
 
-from app.core import reloj, seguridad
+from app.core import seguridad
 from app.core.config import config
 from app.core.db import SesionLocal
 from app.logica import marcacion
 from app.main import app, crear_app
 from app.modelos.comedor import Asistencia, LecturaBiometrica
 from app.semillas import horarios
+import reloj_prueba
 from conftest import SENTENCIAS, encabezado, ingresar
-from test_simulacion import _candidato_almuerzo
+from soporte_derecho import candidato_almuerzo
 
 ROLES = ("jefa", "cocinera", "sistemas")
-FUERA_DE_SIMULACION = ("produccion", "desarrollo")
-ENTORNOS = (*FUERA_DE_SIMULACION, "simulacion")
+ENTORNOS = ("produccion", "desarrollo")
 DIA = datetime(2026, 9, 24, 12, 30)  # dentro del almuerzo de la semilla
 USUARIO_INEXISTENTE = 999_999_999  # da sin_derecho sin depender del padrón
-DISPOSITIVO = "simulador-navegador"
-DETALLE = "La marcación biométrica requiere un lector autorizado fuera de simulación."
+DETALLE = "La marcación biométrica requiere un lector autorizado."
 RECHAZO = {"detail": DETALLE, "motivo": "biometrico_solo_lector"}
 
 # Lo que un cliente podría mandar como biométrico: explícito, con el método
@@ -55,13 +53,6 @@ BIOMETRICOS = {
 
 
 # --- fixtures -----------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def reloj_real():
-    reloj.volver_a_real()
-    yield
-    reloj.volver_a_real()
 
 
 @pytest.fixture
@@ -129,24 +120,17 @@ def _escrituras_desde(indice: int) -> list[str]:
     ]
 
 
-def _lectura(lectura_id: int) -> LecturaBiometrica:
-    with SesionLocal() as sesion:
-        fila = sesion.get(LecturaBiometrica, lectura_id)
-        sesion.expunge(fila)
-        return fila
-
-
-# --- fuera de simulación: 403 antes de la lógica ------------------------------
+# --- biométrico desde una sesión: 403 antes de la lógica ------------------------
 
 
 @pytest.mark.usefixtures("con_horarios")
 @pytest.mark.parametrize("cuerpo", BIOMETRICOS.values(), ids=BIOMETRICOS.keys())
 @pytest.mark.parametrize("rol", ROLES)
-@pytest.mark.parametrize("entorno", FUERA_DE_SIMULACION)
-def test_biometrico_fuera_de_simulacion_403_sin_escrituras(
+@pytest.mark.parametrize("entorno", ENTORNOS)
+def test_biometrico_desde_sesion_403_sin_escrituras(
     tokens, espia_logica, entorno, rol, cuerpo
 ):
-    reloj.fijar(DIA, congelar=True)
+    reloj_prueba.fijar(DIA)
     cliente = TestClient(crear_app(entorno))
     antes = _conteos()
     desde = len(SENTENCIAS)
@@ -161,8 +145,8 @@ def test_biometrico_fuera_de_simulacion_403_sin_escrituras(
 
 
 @pytest.mark.usefixtures("con_horarios")
-@pytest.mark.parametrize("entorno", FUERA_DE_SIMULACION)
-def test_fuera_de_simulacion_el_origen_va_antes_que_el_momento(tokens, espia_logica, entorno):
+@pytest.mark.parametrize("entorno", ENTORNOS)
+def test_el_origen_va_antes_que_el_momento(tokens, espia_logica, entorno):
     """Con momento del cliente sigue siendo 403: el origen se decide primero."""
     r = TestClient(crear_app(entorno)).post(
         "/asistencias",
@@ -175,87 +159,6 @@ def test_fuera_de_simulacion_el_origen_va_antes_que_el_momento(tokens, espia_log
     assert _conteos() == (0, 0)
 
 
-# --- simulación: se acepta, con el dispositivo del servidor --------------------
-
-
-@pytest.mark.usefixtures("con_horarios")
-@pytest.mark.parametrize("cuerpo", BIOMETRICOS.values(), ids=BIOMETRICOS.keys())
-@pytest.mark.parametrize("rol", ROLES)
-def test_simulacion_acepta_biometrico_de_los_tres_roles(tokens, espia_logica, rol, cuerpo):
-    reloj.fijar(DIA, congelar=True)
-    r = TestClient(crear_app("simulacion")).post(
-        "/asistencias", json=cuerpo, headers=tokens[rol]
-    )
-    assert r.status_code == 200, r.text
-    respuesta = r.json()
-    esperado = "sin_derecho" if "usuario_id" in cuerpo else "no_identificado"
-    assert (respuesta["valido"], respuesta["motivo"]) == (False, esperado)
-    assert [llamada["metodo"] for llamada in espia_logica] == ["biometrico"]
-
-    lectura = _lectura(respuesta["lectura_id"])
-    assert lectura.dispositivo == DISPOSITIVO
-    assert (lectura.resultado, lectura.motivo) == ("rechazada", esperado)
-    assert _conteos() == (0, 1)
-
-
-@pytest.mark.usefixtures("con_horarios")
-@pytest.mark.parametrize(
-    "dispositivo",
-    ["lector-comedor-01", "", "x" * 200, None],
-    ids=["lector_real", "vacio", "largo", "null"],
-)
-def test_simulacion_ignora_el_dispositivo_del_cliente(tokens, dispositivo):
-    reloj.fijar(DIA, congelar=True)
-    r = TestClient(crear_app("simulacion")).post(
-        "/asistencias",
-        json={"metodo": "biometrico", "dispositivo": dispositivo},
-        headers=tokens["cocinera"],
-    )
-    assert r.status_code == 200, r.text
-    assert _lectura(r.json()["lectura_id"]).dispositivo == DISPOSITIVO
-
-
-@pytest.mark.usefixtures("con_horarios")
-def test_simulacion_conserva_las_reglas(tokens):
-    sim = TestClient(crear_app("simulacion"))
-    coci = tokens["cocinera"]
-    usuario_id, fecha = _candidato_almuerzo()
-    reloj.fijar(datetime.combine(fecha, DIA.time()), congelar=True)
-
-    primera = sim.post(
-        "/asistencias", json={"usuario_id": usuario_id, "metodo": "biometrico"}, headers=coci
-    )
-    assert primera.status_code == 200, primera.text
-    assert primera.json()["valido"] is True, primera.json()
-    with SesionLocal() as sesion:
-        fila = sesion.get(Asistencia, primera.json()["asistencia_id"])
-        assert fila.metodo == "biometrico"
-        assert fila.registrado_por_cuenta is None
-    assert _lectura(primera.json()["lectura_id"]).dispositivo == DISPOSITIVO
-
-    segunda = sim.post("/asistencias", json={"usuario_id": usuario_id}, headers=coci)
-    assert (segunda.json()["valido"], segunda.json()["motivo"]) == (False, "duplicado")
-
-    # La semilla deja 10:00-11:00 sin cubrir a propósito.
-    reloj.fijar(datetime.combine(fecha, time(10, 30)), congelar=True)
-    fuera = sim.post("/asistencias", json={"usuario_id": usuario_id}, headers=coci)
-    assert (fuera.json()["valido"], fuera.json()["motivo"]) == (False, "fuera_horario")
-    assert _conteos() == (1, 3)
-
-
-@pytest.mark.usefixtures("con_horarios")
-@pytest.mark.parametrize("cuerpo", [{"metodo": "biometrico"}, {}], ids=["explicito", "omitido"])
-def test_simulacion_sigue_rechazando_el_momento_del_cliente(tokens, espia_logica, cuerpo):
-    r = TestClient(crear_app("simulacion")).post(
-        "/asistencias",
-        json={**cuerpo, "usuario_id": 1, "momento": DIA.isoformat()},
-        headers=tokens["jefa"],
-    )
-    assert r.status_code == 422, r.text
-    assert espia_logica == []
-    assert _conteos() == (0, 0)
-
-
 # --- manual: sin cambios en ningún entorno -------------------------------------
 
 
@@ -263,7 +166,7 @@ def test_simulacion_sigue_rechazando_el_momento_del_cliente(tokens, espia_logica
 @pytest.mark.parametrize("entorno", ENTORNOS)
 def test_manual_conserva_sus_reglas(tokens, entorno):
     cliente = TestClient(crear_app(entorno))
-    usuario_id, fecha = _candidato_almuerzo()
+    usuario_id, fecha = candidato_almuerzo()
     momento = datetime.combine(fecha, DIA.time()).isoformat()
     cuerpo = {"usuario_id": usuario_id, "metodo": "manual", "momento": momento}
 
@@ -288,12 +191,12 @@ def test_manual_conserva_sus_reglas(tokens, entorno):
 
 
 @pytest.mark.usefixtures("con_horarios")
-@pytest.mark.parametrize("entorno", FUERA_DE_SIMULACION)
+@pytest.mark.parametrize("entorno", ENTORNOS)
 def test_biometrico_rechazado_no_se_convierte_en_manual(tokens, entorno):
     """Una persona con derecho, marcada por jefatura como biométrico: 403, no
     una ración manual."""
-    usuario_id, fecha = _candidato_almuerzo()
-    reloj.fijar(datetime.combine(fecha, DIA.time()), congelar=True)
+    usuario_id, fecha = candidato_almuerzo()
+    reloj_prueba.fijar(datetime.combine(fecha, DIA.time()))
     r = TestClient(crear_app(entorno)).post(
         "/asistencias", json={"usuario_id": usuario_id}, headers=tokens["jefa"]
     )
@@ -357,10 +260,10 @@ def test_errores_de_autenticacion_sin_cambios(credenciales, espia_logica, entorn
 @pytest.mark.usefixtures("sin_marcaciones")
 @pytest.mark.parametrize("entorno", ENTORNOS)
 def test_entorno_coherente_y_fuera_del_alcance_del_cliente(tokens, monkeypatch, entorno):
-    """/salud, /monitoreo/estado y la autorización dicen el mismo entorno: el
-    de la app. Ni config.entorno ni la petición lo cambian."""
+    """/salud y /monitoreo/estado dicen el mismo entorno: el de la app. Ni
+    config.entorno ni la petición lo cambian."""
     aplicacion = crear_app(entorno)
-    otro = "produccion" if entorno == "simulacion" else "simulacion"
+    otro = "produccion" if entorno == "desarrollo" else "desarrollo"
     monkeypatch.setattr(config, "entorno", otro)
     cliente = TestClient(aplicacion)
     trampa = {"params": {"entorno": otro}}
@@ -380,18 +283,15 @@ def test_entorno_coherente_y_fuera_del_alcance_del_cliente(tokens, monkeypatch, 
         headers=con("cocinera"),
         **trampa,
     )
-    if entorno == "simulacion":
-        assert r.status_code == 200, r.text
-    else:
-        assert r.status_code == 403, r.text
-        assert r.json() == RECHAZO
+    assert r.status_code == 403, r.text
+    assert r.json() == RECHAZO
 
 
 def test_la_app_del_proceso_toma_el_entorno_de_la_configuracion():
     assert app.state.entorno == config.entorno
 
 
-@pytest.mark.parametrize("entorno", ["SIMULACION", "produccíon", ""])
+@pytest.mark.parametrize("entorno", ["PRODUCCION", "produccíon", "", "pruebas"])
 def test_crear_app_rechaza_un_entorno_desconocido(entorno):
     with pytest.raises(ValueError):
         crear_app(entorno)

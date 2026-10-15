@@ -1,9 +1,10 @@
 """GET /monitoreo/estado: el diagnóstico técnico de sistemas (R3-1-20261009).
 
-Las marcaciones se generan por la API (POST /asistencias) con el reloj de
-simulación, nunca con INSERT directo. Las tablas ausentes y los fallos de
-consulta se simulan reescribiendo el SQL que llega a MySQL desde el motor de
-la app: sin DROP, sin DDL y sin tocar bases reales.
+Las lecturas las registra el lector de prueba (tests/lector_prueba.py), con
+la misma lógica de marcación y el reloj fijado, nunca con INSERT directo. Las
+tablas ausentes y los fallos de consulta se provocan reescribiendo el SQL que
+llega a MySQL desde el motor de la app: sin DROP, sin DDL y sin tocar bases
+reales.
 """
 
 import re
@@ -21,11 +22,11 @@ from app.core.config import config
 from app.core.db import Base, SesionLocal, motor, obtener_sesion
 from app.main import app, crear_app
 from app.semillas import horarios
+import reloj_prueba
 from conftest import encabezado, ingresar
-from test_simulacion import _candidato_almuerzo
+from soporte_derecho import candidato_almuerzo
 
 RUTA = "/monitoreo/estado"
-RELOJ = "/simulacion/reloj"
 DIA = datetime(2026, 9, 24, 12, 30)  # dentro del almuerzo de la semilla
 USUARIO_INEXISTENTE = 999_999_999  # da sin_derecho sin depender del padrón
 DISPOSITIVO = "disp-marcador-r3"
@@ -39,7 +40,7 @@ TOCA_LECTURAS = re.compile(
 )
 
 CLAVES = {"momento_real", "entorno", "reloj_negocio", "base", "lector", "actividad"}
-CLAVES_RELOJ = {"ahora", "fecha", "simulado", "congelado"}
+CLAVES_RELOJ = {"ahora", "fecha"}
 CLAVES_BASE = {"estado", "revision_alembic", "tablas_propias", "vistas_contrato", "faltan"}
 CLAVES_ACTIVIDAD = {
     "fuente", "disponible", "razon", "aceptadas_dia", "rechazadas_dia", "registro_mayor_id",
@@ -51,7 +52,7 @@ PROHIBIDAS = {
     "username", "dispositivo", "base_datos", "base_turnos", "motor", "detail",
 }
 CLAVES_SALUD = {
-    "estado", "base_de_datos", "entorno", "reloj", "base_datos", "base_turnos",
+    "estado", "base_de_datos", "entorno", "base_datos", "base_turnos",
     "motor", "revision_alembic", "tablas_propias", "vistas_contrato", "faltan",
 }
 
@@ -68,18 +69,6 @@ def _sin_actividad(razon: str) -> dict:
 
 
 # --- fixtures -----------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def reloj_real():
-    reloj.volver_a_real()
-    yield
-    reloj.volver_a_real()
-
-
-@pytest.fixture
-def sim() -> TestClient:
-    return TestClient(crear_app("simulacion"))
 
 
 @pytest.fixture
@@ -142,17 +131,10 @@ def sql():
     event.remove(motor, "before_cursor_execute", control.antes)
 
 
-def _marcar(sim, tokens, momento: datetime, **cuerpo) -> dict:
-    """Una marcación biométrica por la API, con el reloj congelado en `momento`."""
-    r = sim.put(
-        RELOJ, json={"momento": momento.isoformat(), "congelar": True}, headers=tokens["jefa"]
-    )
-    assert r.status_code == 200, r.text
-    r = sim.post(
-        "/asistencias", json={"metodo": "biometrico", **cuerpo}, headers=tokens["cocinera"]
-    )
-    assert r.status_code == 200, r.text
-    return r.json()
+def _marcar(lector, momento: datetime, **cuerpo) -> dict:
+    """Una lectura del lector de prueba, con el reloj fijado en `momento`."""
+    reloj_prueba.fijar(momento)
+    return lector.leer(**cuerpo)
 
 
 def _claves(valor) -> set[str]:
@@ -167,7 +149,7 @@ def _sin_cuerpo_de_diagnostico(respuesta) -> None:
     assert respuesta.status_code == 500
     for clave in ("momento_real", "reloj_negocio", "actividad", "lector"):
         assert clave not in respuesta.text
-    assert "simulad" not in respuesta.text  # ni el texto de la excepción
+    assert "forzad" not in respuesta.text  # ni el texto de la excepción
 
 
 # --- permisos -----------------------------------------------------------------
@@ -225,17 +207,17 @@ def test_tabla_vacia_da_ceros_y_registro_null(cliente, tokens, sin_marcaciones):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_diagnostico_normal_sin_cache(sim, tokens):
-    antes = _marcar(sim, tokens, DIA)
+def test_diagnostico_normal_sin_cache(cliente, lector, tokens):
+    antes = _marcar(lector, DIA)
     assert antes["motivo"] == "no_identificado", antes
-    primera = sim.get(RUTA, headers=tokens["sistemas"]).json()["actividad"]
+    primera = cliente.get(RUTA, headers=tokens["sistemas"]).json()["actividad"]
     assert (primera["aceptadas_dia"], primera["rechazadas_dia"]) == (0, 1)
 
-    ultima = _marcar(sim, tokens, DIA + timedelta(minutes=1), usuario_id=USUARIO_INEXISTENTE)
+    ultima = _marcar(lector, DIA + timedelta(minutes=1), usuario_id=USUARIO_INEXISTENTE)
     assert ultima["motivo"] == "sin_derecho", ultima
 
     # Cada petición consulta de nuevo: la segunda ve la marcación nueva.
-    cuerpo = sim.get(RUTA, headers=tokens["sistemas"]).json()
+    cuerpo = cliente.get(RUTA, headers=tokens["sistemas"]).json()
     actividad = cuerpo["actividad"]
     assert set(actividad) == CLAVES_ACTIVIDAD
     assert actividad["disponible"] is True and actividad["razon"] is None
@@ -251,12 +233,12 @@ def test_diagnostico_normal_sin_cache(sim, tokens):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_aceptada_cuenta_en_aceptadas(sim, tokens):
-    usuario_id, fecha = _candidato_almuerzo()
-    marcada = _marcar(sim, tokens, datetime.combine(fecha, DIA.time()), usuario_id=usuario_id)
+def test_aceptada_cuenta_en_aceptadas(cliente, lector, tokens):
+    usuario_id, fecha = candidato_almuerzo()
+    marcada = _marcar(lector, datetime.combine(fecha, DIA.time()), usuario_id=usuario_id)
     assert marcada["valido"] is True, marcada
 
-    cuerpo = sim.get(RUTA, headers=tokens["sistemas"]).json()
+    cuerpo = cliente.get(RUTA, headers=tokens["sistemas"]).json()
     actividad = cuerpo["actividad"]
     assert (actividad["aceptadas_dia"], actividad["rechazadas_dia"]) == (1, 0)
     registro = actividad["registro_mayor_id"]
@@ -266,18 +248,15 @@ def test_aceptada_cuenta_en_aceptadas(sim, tokens):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_mayor_id_fuera_del_dia_consultado(sim, tokens):
-    del_dia = _marcar(sim, tokens, DIA)
+def test_mayor_id_fuera_del_dia_consultado(cliente, lector, tokens):
+    del_dia = _marcar(lector, DIA)
     assert del_dia["motivo"] == "no_identificado", del_dia
     # La última en escribirse es de la madrugada del día ANTERIOR.
-    anterior = _marcar(sim, tokens, datetime(2026, 9, 23, 3, 0))
+    anterior = _marcar(lector, datetime(2026, 9, 23, 3, 0))
     assert anterior["motivo"] == "fuera_horario", anterior
 
-    r = sim.put(
-        RELOJ, json={"momento": "2026-09-24T13:00:00", "congelar": True}, headers=tokens["jefa"]
-    )
-    assert r.status_code == 200, r.text
-    actividad = sim.get(RUTA, headers=tokens["sistemas"]).json()["actividad"]
+    reloj_prueba.fijar(datetime(2026, 9, 24, 13, 0))
+    actividad = cliente.get(RUTA, headers=tokens["sistemas"]).json()["actividad"]
     # Los contadores son del día de negocio; el registro, de toda la tabla.
     assert (actividad["aceptadas_dia"], actividad["rechazadas_dia"]) == (0, 1)
     registro = actividad["registro_mayor_id"]
@@ -287,11 +266,11 @@ def test_mayor_id_fuera_del_dia_consultado(sim, tokens):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_sin_datos_personales_ni_dispositivo(sim, tokens):
-    _marcar(sim, tokens, DIA, dispositivo=DISPOSITIVO)
-    _marcar(sim, tokens, DIA, usuario_id=USUARIO_INEXISTENTE, dispositivo=DISPOSITIVO)
+def test_sin_datos_personales_ni_dispositivo(cliente, lector, tokens):
+    _marcar(lector, DIA, dispositivo=DISPOSITIVO)
+    _marcar(lector, DIA, usuario_id=USUARIO_INEXISTENTE, dispositivo=DISPOSITIVO)
 
-    r = sim.get(RUTA, headers=tokens["sistemas"])
+    r = cliente.get(RUTA, headers=tokens["sistemas"])
     assert r.status_code == 200, r.text
     assert _claves(r.json()) & PROHIBIDAS == set()
     assert DISPOSITIVO not in r.text
@@ -300,7 +279,7 @@ def test_sin_datos_personales_ni_dispositivo(sim, tokens):
     assert "u_sistemas" not in r.text
 
 
-@pytest.mark.parametrize("entorno", ["produccion", "desarrollo", "simulacion"])
+@pytest.mark.parametrize("entorno", ["produccion", "desarrollo"])
 def test_lector_desconocido_en_todos_los_entornos(tokens, entorno):
     r = TestClient(crear_app(entorno)).get(RUTA, headers=tokens["sistemas"])
     assert r.status_code == 200, r.text
@@ -312,31 +291,25 @@ def test_lector_desconocido_en_todos_los_entornos(tokens, entorno):
 # --- relojes ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("congelar", [True, False])
-def test_reloj_fijado_frente_a_momento_real(sim, tokens, monkeypatch, congelar):
-    r = sim.put(
-        RELOJ, json={"momento": DIA.isoformat(), "congelar": congelar}, headers=tokens["jefa"]
-    )
-    assert r.status_code == 200, r.text
-
+def test_reloj_de_negocio_frente_a_momento_real(cliente, tokens, monkeypatch):
+    reloj_prueba.fijar(DIA)
     llamadas = []
-    original = reloj.estado
+    original = reloj.ahora
 
     def espia():
         llamadas.append(1)
         return original()
 
-    monkeypatch.setattr(reloj, "estado", espia)
-    cuerpo = sim.get(RUTA, headers=tokens["sistemas"]).json()
+    monkeypatch.setattr(reloj, "ahora", espia)
+    cuerpo = cliente.get(RUTA, headers=tokens["sistemas"]).json()
 
-    assert llamadas == [1]  # una sola foto del reloj por petición
+    assert llamadas == [1]  # una sola lectura del reloj de negocio por petición
     negocio = cuerpo["reloj_negocio"]
-    assert negocio["simulado"] is True
-    assert negocio["congelado"] is congelar
+    assert set(negocio) == CLAVES_RELOJ
     assert negocio["fecha"] == "2026-09-24"
     ahora = datetime.fromisoformat(negocio["ahora"])
     assert ahora.tzinfo is None
-    assert timedelta(0) <= ahora - DIA < timedelta(seconds=5)
+    assert ahora == DIA
     momento_real = datetime.fromisoformat(cuerpo["momento_real"])
     assert momento_real.tzinfo is None
     assert abs(momento_real - datetime.now()) < timedelta(seconds=5)
@@ -346,8 +319,8 @@ def test_reloj_fijado_frente_a_momento_real(sim, tokens, monkeypatch, congelar):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_tabla_ausente_no_se_consulta(sim, tokens, sql):
-    _marcar(sim, tokens, DIA)  # la tabla tiene datos: lo que sale no puede ser cero
+def test_tabla_ausente_no_se_consulta(cliente, lector, tokens, sql):
+    _marcar(lector, DIA)  # la tabla tiene datos: lo que sale no puede ser cero
     sql.reemplazar(
         "information_schema.TABLES",
         por=lambda s: s.replace(
@@ -356,7 +329,7 @@ def test_tabla_ausente_no_se_consulta(sim, tokens, sql):
         ),
     )
     desde = len(sql.vistas)
-    r = sim.get(RUTA, headers=tokens["sistemas"])
+    r = cliente.get(RUTA, headers=tokens["sistemas"])
 
     assert r.status_code == 200, r.text
     cuerpo = r.json()
@@ -373,9 +346,9 @@ def test_tabla_ausente_no_se_consulta(sim, tokens, sql):
     "consulta", [CONSULTA_CONTADOR, CONSULTA_MAYOR_ID], ids=["contador", "mayor_id"]
 )
 def test_fallo_de_actividad_no_da_ceros_y_recupera_la_sesion(
-    sim, tokens, sql, monkeypatch, consulta
+    cliente, lector, tokens, sql, monkeypatch, consulta
 ):
-    _marcar(sim, tokens, DIA)
+    _marcar(lector, DIA)
     rollbacks = []
     original = Session.rollback
 
@@ -386,7 +359,7 @@ def test_fallo_de_actividad_no_da_ceros_y_recupera_la_sesion(
     monkeypatch.setattr(Session, "rollback", espia)
     sql.reemplazar(*consulta, por=SQL_QUE_FALLA)
     desde = len(sql.vistas)
-    r = sim.get(RUTA, headers=tokens["sistemas"])
+    r = cliente.get(RUTA, headers=tokens["sistemas"])
 
     assert r.status_code == 200, r.text
     cuerpo = r.json()
@@ -402,14 +375,14 @@ def test_fallo_de_actividad_no_da_ceros_y_recupera_la_sesion(
 
     # La sesión siguiente funciona: el fallo no dejó nada roto.
     sql.reglas.clear()
-    actividad = sim.get(RUTA, headers=tokens["sistemas"]).json()["actividad"]
+    actividad = cliente.get(RUTA, headers=tokens["sistemas"]).json()["actividad"]
     assert actividad["disponible"] is True
     assert actividad["rechazadas_dia"] == 1
 
 
 def test_si_falla_el_rollback_no_hay_diagnostico(tokens, sql, monkeypatch, sin_marcaciones):
     def rollback_roto(self):
-        raise OperationalError("ROLLBACK", {}, Exception("rollback simulado"))
+        raise OperationalError("ROLLBACK", {}, Exception("rollback forzado"))
 
     monkeypatch.setattr(Session, "rollback", rollback_roto)
     sql.reemplazar(*CONSULTA_CONTADOR, por=SQL_QUE_FALLA)
@@ -431,7 +404,7 @@ class _SesionCaida:
     """Una sesión cuyo MySQL no responde: falla la primera lectura."""
 
     def get(self, *args, **kwargs):
-        raise OperationalError("SELECT", {}, Exception("mysql caido simulado"))
+        raise OperationalError("SELECT", {}, Exception("mysql caido forzado"))
 
     def close(self) -> None:
         pass
@@ -472,7 +445,6 @@ def test_salud_sin_cambios_y_coherente_con_monitoreo(cliente, tokens):
     assert salud.status_code == 200, salud.text
     datos = salud.json()
     assert set(datos) == CLAVES_SALUD
-    assert set(datos["reloj"]) == {"ahora", "real", "simulado"}
 
     base = cliente.get(RUTA, headers=tokens["sistemas"]).json()["base"]
     assert base == {

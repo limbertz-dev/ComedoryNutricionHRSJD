@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
 
-from app.core import reloj
+import reloj_prueba
 from app.core.config import config
 from app.core.db import SesionLocal, motor
 from app.main import app
@@ -139,7 +139,7 @@ def test_dos_comidas_distintas_con_horarios_vacios_no_se_solapan(
     vez. Sin el cerrojo, las dos validaciones ven la tabla vacía y las dos
     insertan. Con él, una gana y la otra ve su fila y se rechaza."""
     almuerzo, te = comida_id("almuerzo"), comida_id("te")
-    reloj.fijar(a_las(9))  # sigue corriendo: el segundo guardado es posterior al primero
+    reloj_prueba.fijar(a_las(9), corriendo=True)  # sigue corriendo: el segundo guardado es posterior al primero
     resultados: dict = {}
     with retener_cerrojo():
         hilos = [
@@ -157,7 +157,7 @@ def test_dos_comidas_distintas_con_horarios_vacios_no_se_solapan(
 
 def test_dos_comidas_sin_solape_se_guardan_en_serie(cliente, root, vacio, aislamiento):
     almuerzo, te = comida_id("almuerzo"), comida_id("te")
-    reloj.fijar(a_las(9))
+    reloj_prueba.fijar(a_las(9), corriendo=True)
     resultados: dict = {}
     with retener_cerrojo():
         hilos = [
@@ -178,7 +178,7 @@ def test_misma_comida_con_la_misma_base_un_solo_ganador(
 ):
     almuerzo = comida_id("almuerzo")
     base = abierta(cliente, root, almuerzo)["horario_id"]
-    reloj.fijar(a_las(9))
+    reloj_prueba.fijar(a_las(9), corriendo=True)
     resultados: dict = {}
     with retener_cerrojo():
         hilos = [
@@ -198,7 +198,7 @@ def test_misma_comida_con_la_misma_base_un_solo_ganador(
 
 def test_espera_agotada_da_409_sin_reintento_automatico(cliente, root, vacio, espera_corta):
     almuerzo = comida_id("almuerzo")
-    reloj.fijar(a_las(9))
+    reloj_prueba.fijar(a_las(9), corriendo=True)
     with retener_cerrojo():
         r = guardar(cliente, root, almuerzo, "12:00:00", "13:00:00", None)
     assert (r.status_code, r.json()["motivo"]) == (409, "cambio_en_curso")
@@ -210,7 +210,7 @@ def test_el_cerrojo_se_libera_en_exito_y_en_error(cliente, root, con_horarios):
     un NOWAIT inmediato lo consigue."""
     almuerzo = comida_id("almuerzo")
     base = abierta(cliente, root, almuerzo)["horario_id"]
-    reloj.fijar(a_las(9), congelar=True)
+    reloj_prueba.fijar(a_las(9))
 
     def cerrojo_libre() -> bool:
         with motor.connect() as conexion, conexion.begin():

@@ -35,8 +35,10 @@ from sqlalchemy.engine import Engine  # noqa: E402
 from app.core import seguridad  # noqa: E402
 from app.core.config import config  # noqa: E402
 from app.core.db import SesionLocal  # noqa: E402
-from app.main import app, crear_app  # noqa: E402
+from app.main import app  # noqa: E402
 from app.modelos.usuarios import UsuarioSistema  # noqa: E402
+import reloj_prueba  # noqa: E402
+from lector_prueba import LectorDePrueba  # noqa: E402
 
 RAIZ = Path(__file__).resolve().parents[1]
 
@@ -110,12 +112,19 @@ def cliente() -> TestClient:
 
 
 @pytest.fixture
-def cliente_simulacion() -> TestClient:
-    """Una app de simulación sobre la MISMA base de tests: cambia solo el
-    entorno de la app, no la configuración ni la base. La usan las pruebas
-    que generan lecturas con POST /asistencias biométrico, que fuera de
-    simulación da 403 (test_biometria_origen.py cubre ese lado)."""
-    return TestClient(crear_app("simulacion"))
+def lector() -> LectorDePrueba:
+    """Registra lecturas biométricas como el lector autorizado (ver
+    tests/lector_prueba.py). POST /asistencias biométrico da 403 desde una
+    sesión: test_biometria_origen.py cubre ese lado."""
+    return LectorDePrueba()
+
+
+@pytest.fixture(autouse=True)
+def reloj_real():
+    """Cada prueba empieza y termina con la hora real (ver tests/reloj_prueba.py)."""
+    reloj_prueba.liberar()
+    yield
+    reloj_prueba.liberar()
 
 
 @pytest.fixture

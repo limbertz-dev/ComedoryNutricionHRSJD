@@ -26,17 +26,8 @@ export async function alternarPantallaCompleta() {
   }
 }
 
-/**
- * Botón flotante + panel de sesión para la cocinera, que no tiene sidebar ni
- * header: usuario y rol, el simulador del lector, pantalla completa y cierre
- * de sesión. Se cierra con Escape o con un clic afuera.
- *
- * `simulador` es el <SimuladorLector> armado por App con los mismos props que
- * recibe en el header; acá solo se aloja, sin cambiarle nada. Fuera de una
- * simulación confirmada llega null y el panel queda con la sesión y la
- * pantalla completa.
- */
-export default function PanelSesionCocinera({ simulador = null, abiertoInicial = false }) {
+/** Panel de usuario, pantalla completa y cierre de sesion. */
+export default function PanelSesionCocinera({ abiertoInicial = false }) {
   const { rol, usuario, logout } = useSesion();
   const [abierto, setAbierto] = useState(abiertoInicial);
   const cajaRef = useRef(null);
@@ -70,7 +61,6 @@ export default function PanelSesionCocinera({ simulador = null, abiertoInicial =
       onAlternar={() => setAbierto((valor) => !valor)}
       usuario={usuario}
       rol={rol}
-      simulador={simulador}
       onCerrarSesion={manejarCerrarSesion}
     />
   );
@@ -78,7 +68,7 @@ export default function PanelSesionCocinera({ simulador = null, abiertoInicial =
 
 /**
  * Presentación del botón flotante y el panel, sin enganchar la sesión: así se
- * prueba el contenido (usuario, rol, simulador, acciones) sin montar el
+ * prueba el contenido (usuario, rol, acciones) sin montar el
  * proveedor ni la sesión.
  */
 export function CajaSesionCocinera({
@@ -87,7 +77,6 @@ export function CajaSesionCocinera({
   onAlternar,
   usuario,
   rol,
-  simulador,
   onCerrarSesion,
 }) {
   return (
@@ -107,7 +96,6 @@ export function CajaSesionCocinera({
             <strong className="panel-sesion__usuario-nombre">{usuario || 'Usuario'}</strong>
             <small className="panel-sesion__usuario-rol">{etiquetaDeRol(rol)}</small>
           </div>
-          {simulador ? <div className="panel-sesion__simulador">{simulador}</div> : null}
           {admitePantallaCompleta() ? (
             <Boton variante="secundario" anchoCompleto onClick={alternarPantallaCompleta}>
               Pantalla completa

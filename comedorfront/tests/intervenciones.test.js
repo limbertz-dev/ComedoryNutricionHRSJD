@@ -655,12 +655,12 @@ test('una huella identificada por cocina se muestra como entrega, sin decir que 
   assert.match(evento.detalle, /no reconoció la huella/);
 });
 
-test('el panel de la cocinera monta las huellas por identificar; el de la jefa no', () => {
+test('los paneles de cocina y jefa no montan huellas por identificar', () => {
   const localOriginal = globalThis.localStorage;
   globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   try {
     const cocina = renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol: 'cocinera', usuario: 'cocina.test' })));
-    assert.match(cocina, /Huellas por identificar/);
+    assert.doesNotMatch(cocina, /Huellas por identificar|Confirmar entrega/);
     const jefa = renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol: 'jefa', usuario: 'jefa.test' })));
     assert.doesNotMatch(jefa, /Huellas por identificar|Confirmar entrega/);
   } finally {

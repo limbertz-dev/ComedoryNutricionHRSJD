@@ -32,15 +32,15 @@ const SECCIONES_DEL_COMEDOR = ['vivo', ...SECCIONES_JEFATURA];
  */
 const PERMISOS = {
   cocinera: {
-    etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false, reloj: false,
+    etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false,
     identificaLecturas: true, consultaIntervenciones: false,
   },
   jefa: {
-    etiqueta: 'Jefa de nutrición', secciones: [...SECCIONES_JEFATURA, 'cuentas'], marcacionManual: true, reloj: true,
+    etiqueta: 'Jefa de nutrición', secciones: [...SECCIONES_JEFATURA, 'cuentas'], marcacionManual: true,
     identificaLecturas: false, consultaIntervenciones: true,
   },
   sistemas: {
-    etiqueta: 'Sistemas', secciones: ['reglas', 'admin', 'monitoreo'], marcacionManual: false, reloj: true,
+    etiqueta: 'Sistemas', secciones: ['reglas', 'admin', 'monitoreo'], marcacionManual: false,
     identificaLecturas: false, consultaIntervenciones: false,
   },
 };
@@ -75,13 +75,6 @@ export function puedeConsultarIntervenciones(rol) {
   return permisosDe(rol)?.consultaIntervenciones === true;
 }
 
-/*
- * Mover el reloj de simulación (/simulacion/*) es de jefatura, igual que en
- * el backend. A la cocinera no se le ofrece: su 403 vedaría la sección.
- */
-export function puedeOperarReloj(rol) {
-  return permisosDe(rol)?.reloj === true;
-}
 
 /**
  * El rol tiene alguna sección que usa el padrón o el cupo del turno. Sistemas

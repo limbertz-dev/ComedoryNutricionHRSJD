@@ -4,8 +4,6 @@ import Header from './components/layout/Header.jsx';
 import PanelSesionCocinera from './components/layout/PanelSesionCocinera.jsx';
 import Sidebar from './components/layout/Sidebar.jsx';
 import PantallaEnVivo from './components/secciones/PantallaEnVivo.jsx';
-import SimuladorLector from './components/secciones/SimuladorLector.jsx';
-import ControlesReloj from './components/secciones/ControlesReloj.jsx';
 import Supervision from './components/secciones/Supervision.jsx';
 import Administracion from './components/secciones/Administracion.jsx';
 import CuentasLectura from './components/secciones/CuentasLectura.jsx';
@@ -25,34 +23,15 @@ import {
 } from './navegacion.js';
 import {
   puedeConsultarIntervenciones,
-  puedeIdentificarLecturas,
-  puedeMarcarManual,
-  puedeOperarReloj,
   puedeVerSeccion,
   seccionInicialDeRol,
   usaDatosDelComedor,
 } from './permisos.js';
 import { escucharSesion } from './sesion.js';
-import { claveDelDia, protegerAccionSimulador } from './simulacion.js';
-import {
-  esRechazoBiometricoSoloLector,
-  marcarAsistencia,
-  obtenerEstadoPantalla,
-  obtenerPersonal,
-} from './api.js';
+import { obtenerEstadoPantalla, obtenerPersonal } from './api.js';
 
 import useConsultaApi from './hooks/useConsultaApi.js';
 import useSesion, { ProveedorSesion } from './hooks/useSesion.js';
-import useSimulacion from './hooks/useSimulacion.js';
-
-/*
- * Duración mínima del estado "leyendo". El lector físico tarda en resolver una
- * huella; la API responde en decenas de milisegundos, así que sin este piso la
- * animación de lectura aparecería y desaparecería sin que nadie la vea.
- */
-const MS_LECTURA = 700;
-
-const esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
 
 /**
  * Estado compartido del módulo.
@@ -130,31 +109,6 @@ export function Panel({ rol, usuario = null }) {
   const usaComedor = usaDatosDelComedor(rol);
   const [cargandoPersonal, setCargandoPersonal] = useState(usaComedor);
   const [errorApi, setErrorApi] = useState('');
-  const [leyendo, setLeyendo] = useState(false);
-  const [errorMarcacion, setErrorMarcacion] = useState('');
-  /* A quién le toca apoyar la huella en el simulador. Vive aquí, no en
-     PantallaEnVivo: el simulador ahora se monta desde el header. */
-  const [seleccionado, setSeleccionado] = useState('');
-  /* Reloj del servidor en simulación; null en cualquier otro entorno, y
-     entonces nada de simulación se monta ni cambia de dónde sale la hora.
-     El reloj solo se muestra: el simulador del lector lo habilita únicamente
-     una confirmación vigente de /salud (`simulacionConfirmada`). */
-  const operaReloj = puedeOperarReloj(rol);
-  const {
-    reloj,
-    aplicar: aplicarReloj,
-    simulacionConfirmada,
-    simulacionVigente,
-  } = useSimulacion({ operaReloj });
-  /* Detalle del 403 `biometrico_solo_lector`: el servidor no corre en
-     simulación, así que el simulador queda deshabilitado mientras dure el
-     panel, aunque /salud dijera otra cosa. */
-  const [bloqueoBiometrico, setBloqueoBiometrico] = useState('');
-  const simuladorActivo = simulacionConfirmada && !bloqueoBiometrico;
-  const ahoraServidor = reloj?.ahora ?? null;
-  const diaServidor = claveDelDia(reloj);
-  /* Sube cada vez que se mueve el reloj: las listas de hoy se vuelven a pedir. */
-  const [versionReloj, setVersionReloj] = useState(0);
   const consultaEstado = useCallback((signal) => {
     if (!usaComedor) return Promise.resolve(null);
     // Cada entrada a una sección vuelve a consultar el reloj y los cupos del servidor.
@@ -162,14 +116,6 @@ export function Panel({ rol, usuario = null }) {
   }, [seccionActiva, usaComedor]);
   const { datos: pantalla, cargando: cargandoEstado, error: errorEstado, recargar: recargarEstado } = useConsultaApi(consultaEstado);
 
-  /* Un reloj movido cambia turno, cupo y marcaciones de hoy: todo se relee
-     del servidor, que es quien decide qué comida rige. */
-  function manejarCambioReloj(estado, { movido }) {
-    aplicarReloj(estado);
-    if (!movido) return;
-    setVersionReloj((version) => version + 1);
-    recargarEstado({ conservar: true });
-  }
   const turno = pantalla?.fuera_de_horario ? 'Fuera de horario' : pantalla?.comida ?? 'Consultando…';
 
   useEffect(() => {
@@ -190,97 +136,6 @@ export function Panel({ rol, usuario = null }) {
     return () => controlador.abort();
   }, [usaComedor]);
 
-  /*
-   * Marcación disparada desde el simulador del lector. Vive aquí, junto al
-   * resto del estado compartido: el evento y el historial sobreviven al cambio
-   * de sección, y el refresco del cupo usa la misma consulta que alimenta al
-   * gauge.
-   */
-  const marcando = useRef(false);
-  /* En simulación la hora provisoria de la tarjeta es la del servidor. */
-  const conHora = () => (ahoraServidor ? { ahora: ahoraServidor } : {});
-
-  /* El rechazo de origen no es un error de la marcación: deshabilita el
-     simulador con el detalle del servidor y no se reintenta como manual. */
-  function registrarFalloBiometrico(error) {
-    if (esRechazoBiometricoSoloLector(error)) {
-      setBloqueoBiometrico(error.message);
-      setSeleccionado('');
-    } else {
-      setErrorMarcacion(error.message);
-    }
-  }
-
-  async function manejarMarcacion(personaId) {
-    if (marcando.current) return;
-    marcando.current = true;
-    setErrorMarcacion('');
-    setLeyendo(true);
-    try {
-      const persona = estado.personal.find(({ id }) => id === personaId);
-      const [evento] = await Promise.all([
-        marcarAsistencia(personaId, { persona, metodo: 'biometrico', ...conHora() }),
-        esperar(MS_LECTURA),
-      ]);
-      /* El cupo lo lleva el servidor. No se relee acá: el evento nuevo hace
-         que PantallaEnVivo pida un ciclo (lista + estado, con `conservar`),
-         así la lista y el gauge se actualizan en una sola vuelta, sin
-         consultas solapadas. */
-      despachar({ tipo: 'MARCACION', evento });
-    } catch (error) {
-      registrarFalloBiometrico(error);
-    } finally {
-      setLeyendo(false);
-      marcando.current = false;
-    }
-  }
-
-  /*
-   * Huella que el lector no llega a resolver contra nadie del padrón: no hay
-   * comensal que enviar, así que viaja con `personaId: null`. No recarga el
-   * cupo porque una lectura no identificada nunca consume una ración.
-   */
-  async function manejarFallaBiometrica() {
-    if (marcando.current) return;
-    marcando.current = true;
-    setErrorMarcacion('');
-    setLeyendo(true);
-    try {
-      const [evento] = await Promise.all([
-        marcarAsistencia(null, { metodo: 'biometrico', ...conHora() }),
-        esperar(MS_LECTURA),
-      ]);
-      despachar({ tipo: 'MARCACION', evento });
-    } catch (error) {
-      registrarFalloBiometrico(error);
-    } finally {
-      setLeyendo(false);
-      marcando.current = false;
-    }
-  }
-
-  /*
-   * Ración autorizada a mano desde el "Modo manual" de Control Biométrico,
-   * sin pasar por el lector: el servidor aplica las mismas reglas de turno
-   * y derecho que a una marcación biométrica, así que un comensal sin
-   * derecho recibe el mismo rechazo.
-   */
-  async function manejarMarcacionManual(personaId) {
-    if (marcando.current) return;
-    marcando.current = true;
-    setErrorMarcacion('');
-    try {
-      const persona = estado.personal.find(({ id }) => id === personaId);
-      const evento = await marcarAsistencia(personaId, { persona, metodo: 'manual', ...conHora() });
-      despachar({ tipo: 'MARCACION', evento });
-      recargarEstado({ conservar: true });
-    } catch (error) {
-      setErrorMarcacion(error.message);
-    } finally {
-      marcando.current = false;
-    }
-  }
-
   /* Guardia única: ninguna sección se monta si el rol no la tiene o si el
      backend ya la negó con 403. */
   const permitida = puedeVerSeccion(rol, seccionActiva) && seccionVedada !== seccionActiva;
@@ -293,30 +148,12 @@ export function Panel({ rol, usuario = null }) {
     guardarSeccionActiva(id);
   }
 
-  /* La cocinera opera sin sidebar ni header: Control Biométrico ocupa toda la
-     ventana y el simulador vive en su panel flotante, con los mismos props
-     que recibe en el header. Fuera de una simulación confirmada no se monta,
-     y sus acciones vuelven a comprobar la confirmación al usarse. */
   const esCocinera = rol === 'cocinera';
-  const simuladorPermitido = () => !bloqueoBiometrico && simulacionVigente();
-  const propiedadesSimulador = {
-    personal: estado.personal,
-    seleccionado,
-    onSeleccionar: setSeleccionado,
-    onMarcar: protegerAccionSimulador(simuladorPermitido, manejarMarcacion),
-    onSimularFalla: protegerAccionSimulador(simuladorPermitido, manejarFallaBiometrica),
-    leyendo,
-    error: errorMarcacion,
-    reloj: operaReloj ? reloj : null,
-    onCambioReloj: manejarCambioReloj,
-  };
 
   return (
     <div className={`app${esCocinera ? ' app--pantalla-completa' : ''}`}>
       {esCocinera ? (
-        <PanelSesionCocinera
-          simulador={simuladorActivo ? <SimuladorLector {...propiedadesSimulador} /> : null}
-        />
+        <PanelSesionCocinera />
       ) : (
         <Sidebar
           seccionActiva={seccionActiva}
@@ -325,24 +162,11 @@ export function Panel({ rol, usuario = null }) {
       )}
 
       {esCocinera ? null : (
-        <Header seccion={seccion} turno={usaComedor ? turno : null} simulacion={reloj}>
-          {esPantallaEnVivo && simuladorActivo ? (
-            <SimuladorLector {...propiedadesSimulador} />
-          ) : null}
-          {permitida && seccionActiva === 'supervision' && operaReloj ? (
-            <ControlesReloj reloj={reloj} onCambio={manejarCambioReloj} />
-          ) : null}
-        </Header>
+        <Header seccion={seccion} turno={usaComedor ? turno : null} />
       )}
 
       <main className={`app__main${esPantallaEnVivo ? ' app__main--sin-scroll' : ''}`}>
-        {/*
-          En Control Biométrico el estado informativo (padrón cargado, fuera de
-          horario) ya se lee en el escenario y en el simulador del header; acá
-          repetirlo solo le resta a un layout sin scroll. Los errores sí se
-          quedan: son los únicos que necesitan atención y acción (reintentar).
-        */}
-        {permitida && usaComedor && (!esPantallaEnVivo || errorApi || errorEstado || bloqueoBiometrico) ? (
+        {permitida && usaComedor && (!esPantallaEnVivo || errorApi || errorEstado) ? (
           <div className="app__estado-api">
             {!esPantallaEnVivo ? (
               <p id="estado-api" role="status">
@@ -350,7 +174,6 @@ export function Panel({ rol, usuario = null }) {
               </p>
             ) : null}
             {errorApi ? <p role="alert">{errorApi}</p> : null}
-            {bloqueoBiometrico ? <p role="alert">{bloqueoBiometrico}</p> : null}
             {!esPantallaEnVivo && cargandoEstado ? <p role="status">Consultando estado del comedor…</p> : null}
             {errorEstado ? <p role="alert">{errorEstado} <Boton variante="fantasma" onClick={recargarEstado}>Reintentar estado</Boton></p> : null}
             {!esPantallaEnVivo && pantalla?.fuera_de_horario ? <p role="status">Fuera de horario: no hay comida vigente y no se pueden registrar asistencias.</p> : null}
@@ -368,15 +191,9 @@ export function Panel({ rol, usuario = null }) {
           {esPantallaEnVivo ? (
             <PantallaEnVivo
               evento={estado.ultimoEvento}
-              leyendo={leyendo}
               pantalla={pantalla}
               turno={turno}
-              personaSeleccionada={estado.personal.find(({ id }) => id === Number(seleccionado)) ?? null}
-              onMarcarManual={puedeMarcarManual(rol) ? manejarMarcacionManual : null}
-              fechaServidor={reloj ? diaServidor : undefined}
-              versionReloj={versionReloj}
               recargarEstado={recargarEstado}
-              puedeIdentificar={puedeIdentificarLecturas(rol)}
               personal={estado.personal}
               cargandoPadron={cargandoPersonal}
               errorPadron={errorApi}
@@ -385,11 +202,7 @@ export function Panel({ rol, usuario = null }) {
 
           {permitida && seccionActiva === 'supervision' ? (
             <Supervision
-              key={diaServidor}
-              fecha={reloj ? diaServidor : undefined}
-              simulacion={reloj}
               puedeConsultarIntervenciones={puedeConsultarIntervenciones(rol)}
-              versionReloj={versionReloj}
             />
           ) : null}
 
@@ -399,17 +212,15 @@ export function Panel({ rol, usuario = null }) {
             />
           ) : null}
 
-          {/* `key` con el día del servidor: si el reloj de simulación cambia de
-              día, se vuelven a montar con su nuevo "hoy". */}
           {permitida && seccionActiva === 'historial'
-            ? <Historial key={diaServidor} personal={estado.personal} ahora={ahoraServidor} /> : null}
+            ? <Historial personal={estado.personal} /> : null}
 
           {permitida && seccionActiva === 'reportes'
-            ? <Reportes key={diaServidor} ahora={ahoraServidor} /> : null}
+            ? <Reportes /> : null}
           {permitida && seccionActiva === 'admin'
             ? <Administracion usuarioActual={usuario} /> : null}
           {permitida && seccionActiva === 'reglas'
-            ? <ReglasSistema key={diaServidor} /> : null}
+            ? <ReglasSistema /> : null}
           {permitida && seccionActiva === 'monitoreo'
             ? <LectorBiometrico /> : null}
           {permitida && seccionActiva === 'cuentas'

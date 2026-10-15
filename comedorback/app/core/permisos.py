@@ -8,9 +8,8 @@ dice qué roles lo abren):
                Las intervenciones de cocina solo las consulta (GET
                /intervenciones-cocina): no las aprueba ni las ejecuta.
   · cocinera   el personal frente al lector. Mira la pantalla en vivo
-               (GET /pantalla/*), consulta el padrón en solo lectura (GET
-               /personal/*) para operar el lector y marca con el biométrico.
-               Es la única que identifica a mano una lectura no reconocida y
+               (GET /pantalla/*) y consulta el padrón en solo lectura (GET
+               /personal/*) para operar el lector. Es la única que identifica a mano una lectura no reconocida y
                confirma la entrega (POST /asistencias/lecturas/{id}/identificar).
                Ni escrituras en el padrón, ni historial, ni informes, ni
                registro manual.
@@ -20,7 +19,7 @@ dice qué roles lo abren):
 
 La matriz se aplica en app/main.py, router por router, con `requiere_rol`
 (app/core/autorizacion.py). Las reglas finas de la marcación (manual solo
-jefatura; biométrico desde una sesión solo en simulación) no se pueden
+jefatura; biométrico nunca desde una sesión) no se pueden
 decidir por la ruta porque dependen del cuerpo de la petición, así que las
 aplica el endpoint con `exigir_origen_biometrico` y `exigir_metodo_marcacion`.
 Si una política cambia, se cambia AQUÍ y no en cada endpoint.
@@ -46,13 +45,9 @@ IDENTIFICACION_LECTURA: frozenset[str] = frozenset({"cocinera"})
 # fuera y no recibe ni los responsables ni las vistas nuevas.
 CONSULTA_INTERVENCIONES: frozenset[str] = frozenset({"jefa"})
 
-# Entornos en que una sesión humana puede declarar una marcación biométrica
-# (el simulador del navegador). Fuera de ellos, quién apoyó el dedo solo lo
-# puede decir un lector autorizado, que todavía no existe: hoy, en producción
-# y en desarrollo, POST /asistencias con metodo='biometrico' da 403
-# `biometrico_solo_lector` para los tres roles. Se compara contra el entorno
-# de la app (app/core/entorno.py), nunca contra config.entorno.
-BIOMETRICO_DESDE_SESION: frozenset[str] = frozenset({"simulacion"})
+# Una sesión humana nunca declara una marcación biométrica: quién apoyó el
+# dedo solo lo puede decir un lector autorizado. POST /asistencias con
+# metodo='biometrico' da 403 `biometrico_solo_lector` para los tres roles.
 
 
 class Regla:
@@ -93,6 +88,4 @@ ACCESO: dict[str, Regla] = {
     # Diagnóstico técnico (GET /monitoreo/estado): solo root. Jefa y cocinera
     # reciben 403.
     "monitoreo": Regla(completo=ADMINISTRACION),
-    # Solo existe con ENTORNO=simulacion (app/main.py).
-    "simulacion": Regla(completo=JEFATURA),
 }

@@ -102,8 +102,7 @@ def estado(sesion: SesionDep, entorno: EntornoDep) -> EstadoMonitoreo:
     """Todo sale de valores ya leídos: después de un rollback por la
     actividad no se toca ningún objeto de la sesión (la cuenta del token
     incluida), así no hay lecturas implícitas de más."""
-    # Una sola foto del reloj: momento_real y reloj_negocio son coherentes.
-    foto = reloj.estado()
+    ahora = reloj.ahora()
     catalogo = consultas.leer_catalogo(sesion)
     base = EstadoBase(
         estado="incompleta" if catalogo.faltan else "ok",
@@ -113,15 +112,10 @@ def estado(sesion: SesionDep, entorno: EntornoDep) -> EstadoMonitoreo:
         faltan=catalogo.faltan,
     )
     return EstadoMonitoreo(
-        momento_real=foto.real,
+        momento_real=reloj.real(),
         entorno=entorno,
-        reloj_negocio=RelojNegocio(
-            ahora=foto.ahora,
-            fecha=foto.ahora.date(),
-            simulado=foto.simulado,
-            congelado=foto.congelado,
-        ),
+        reloj_negocio=RelojNegocio(ahora=ahora, fecha=ahora.date()),
         base=base,
         lector=EstadoLector(estado="desconocido", razon="sin_telemetria"),
-        actividad=_actividad(sesion, catalogo, foto.ahora.date()),
+        actividad=_actividad(sesion, catalogo, ahora.date()),
     )

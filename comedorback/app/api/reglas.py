@@ -15,8 +15,7 @@ GET /reglas/derecho/novedades no existen (405/404). Ocultar un botón no
 alcanza; el servidor es quien lo impide. Sus versiones, valores y
 evaluación histórica no cambian.
 
-Los horarios rigen desde el instante del servidor (reloj.ahora(), día
-simulado en simulación). No hay vigencia, programación ni motivo escrito por
+Los horarios rigen desde el instante del servidor (reloj.ahora()). No hay vigencia, programación ni motivo escrito por
 el usuario. Los errores traen además `motivo`: horario_invalido,
 comida_inexistente, solapa_con_otra_comida, version_desactualizada,
 sin_cambios, instante_no_posterior, cambio_en_curso, parametro_retirado,

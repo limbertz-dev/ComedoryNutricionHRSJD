@@ -28,11 +28,11 @@ def estado(
     sesion: SesionDep,
     fecha: Annotated[
         date | None,
-        Query(description="Fecha a simular. Por defecto, hoy."),
+        Query(description="Fecha a consultar. Por defecto, hoy."),
     ] = None,
     hora: Annotated[
         str | None,
-        Query(description="Hora a simular en formato HH:MM. Por defecto, la actual."),
+        Query(description="Hora a consultar en formato HH:MM. Por defecto, la actual."),
     ] = None,
 ) -> EstadoPantalla:
     """Lo que la pantalla necesita para pintarse entera.
@@ -42,17 +42,17 @@ def estado(
     tarde o temprano, y entonces la pantalla y el informe del mismo día dicen
     cosas distintas.
     """
-    hora_simulada: time | None = None
+    hora_consulta: time | None = None
     if hora is not None:
         try:
-            hora_simulada = datetime.strptime(hora, "%H:%M").time()
+            hora_consulta = datetime.strptime(hora, "%H:%M").time()
         except ValueError as error:
             raise HTTPException(
                 status_code=422,
                 detail="hora debe tener el formato HH:MM",
             ) from error
     return EstadoPantalla(
-        **asdict(consultas.estado(sesion, fecha=fecha, hora=hora_simulada))
+        **asdict(consultas.estado(sesion, fecha=fecha, hora=hora_consulta))
     )
 
 

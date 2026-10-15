@@ -3,7 +3,7 @@
  *
  * Sin JSX, para probarlo con `node --test`. La vigencia se mide con los
  * relojes de este equipo desde que llegó la respuesta, nunca con la hora de
- * negocio (que puede estar simulada) ni con las horas que manda el servidor.
+ * negocio ni con las horas que manda el servidor.
  */
 
 /** Pausa entre el fin de una consulta y el inicio de la siguiente. */

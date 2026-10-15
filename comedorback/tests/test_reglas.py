@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import func, select, text
 
 from app.consultas.derecho import aplicar_reglas
-from app.core import reloj
+import reloj_prueba
 from app.core.db import SesionLocal
 from app.modelos.heredados import Comensal, ComidaPorTurno
 from conftest import encabezado, ingresar
@@ -47,9 +47,9 @@ CLAVES_VERSION = {
 
 @pytest.fixture(autouse=True)
 def reloj_real():
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
     yield
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
 
 
 @pytest.fixture(autouse=True)
@@ -87,7 +87,7 @@ def roles(cliente, crear_usuario):
 
 
 def _fijar(fecha: date) -> date:
-    reloj.fijar(datetime.combine(fecha, time(12, 0)), congelar=True)
+    reloj_prueba.fijar(datetime.combine(fecha, time(12, 0)))
     return fecha
 
 

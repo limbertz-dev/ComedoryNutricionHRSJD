@@ -10,9 +10,8 @@ implementación):
   · GET /intervenciones-cocina → solo jefa.
   · GET /pantalla/ultimas-marcaciones → campos nuevos por rol.
 
-Las lecturas se generan por la API de simulación (la única que acepta un toque
-biométrico desde una sesión) con el reloj congelado; lo demás va por la API
-normal. Las pruebas de concurrencia corren bajo los dos aislamientos y retienen
+Las lecturas las registra el lector de prueba (tests/lector_prueba.py) con el
+reloj fijado; lo demás va por la API. Las pruebas de concurrencia corren bajo los dos aislamientos y retienen
 el bloqueo de la lectura desde otra conexión, para que el orden sea
 determinista: son solo lecturas bloqueantes, no escrituras.
 """
@@ -33,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.consultas import pantalla as consultas_pantalla
 from app.consultas.derecho import Derecho, aplicar_reglas
-from app.core import reloj
+import reloj_prueba
 from app.core.config import config
 from app.core.db import SesionLocal, motor
 from app.logica import intervencion
@@ -55,7 +54,7 @@ from soporte_horarios import (  # noqa: F401  fixtures y ayudas compartidas
     reloj_libre,
     root,
 )
-from test_simulacion import _candidato_almuerzo
+from soporte_derecho import candidato_almuerzo
 
 POST = "/asistencias/lecturas/{}/identificar"
 LISTA = "/intervenciones-cocina"
@@ -71,9 +70,9 @@ ESPERA = 1.5  # segundos que se deja a los hilos bloqueados antes de comprobarlo
 
 @pytest.fixture(autouse=True)
 def reloj_real():
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
     yield
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
 
 
 @pytest.fixture
@@ -182,7 +181,7 @@ class Escenario:
 
 @pytest.fixture
 def escenario(con_horarios) -> Escenario:
-    usuario_id, fecha = _candidato_almuerzo()
+    usuario_id, fecha = candidato_almuerzo()
     if fecha <= horarios.VIGENTE_DESDE:
         pytest.skip("el almuerzo candidato es anterior a la semilla")
     return Escenario(usuario_id, fecha, datetime.combine(fecha, time(12, 30)))
@@ -195,17 +194,15 @@ def _clave() -> str:
     return str(uuid.uuid4())
 
 
-def _lectura(sim, headers, momento: datetime, **cuerpo) -> int:
-    """Una lectura por la API de simulación, con el reloj congelado en `momento`."""
-    reloj.fijar(momento, congelar=True)
-    r = sim.post("/asistencias", json={"metodo": "biometrico", **cuerpo}, headers=headers)
-    assert r.status_code == 200, r.text
-    return r.json()["lectura_id"]
+def _lectura(lector, momento: datetime, **cuerpo) -> int:
+    """Una lectura del lector de prueba, con el reloj fijado en `momento`."""
+    reloj_prueba.fijar(momento)
+    return lector.leer(**cuerpo)["lectura_id"]
 
 
 def _identificar(cliente, headers, lectura_id, usuario_id, *, clave=None, ahora=None):
     if ahora is not None:
-        reloj.fijar(ahora, congelar=True)
+        reloj_prueba.fijar(ahora)
     return cliente.post(
         POST.format(lectura_id),
         json={"usuario_id": usuario_id},
@@ -279,7 +276,7 @@ def sintetico(con_horarios, monkeypatch) -> Sintetico:
         lectura, el servicio efectivo (horarios de la base `_test`), el duplicado,
         las transacciones, el bloqueo FOR UPDATE, el SAVEPOINT, las restricciones
         únicas, la asistencia y la auditoría. Nada del resultado ni de los
-        conflictos se simula.
+        conflictos se falsea.
       · real también: cualquier persona que no sea sintética va a la consulta
         real de turnos (solo SELECT), y el reemplazo es global al proceso, así que
         lo ven todas las sesiones y los hilos de la prueba. `monkeypatch` lo
@@ -417,10 +414,10 @@ def test_la_lectura_inexistente_es_404(cliente, tokens, con_horarios):
 
 
 def test_el_comensal_inexistente_es_404_y_no_consume_la_clave(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     clave = _clave()
     r = _identificar(cliente, tokens["cocinera"], lectura, USUARIO_INEXISTENTE, clave=clave, ahora=e.momento)
     assert r.status_code == 404, r.text
@@ -433,7 +430,7 @@ def test_el_comensal_inexistente_es_404_y_no_consume_la_clave(
 
 def test_el_post_manual_de_asistencias_conserva_sus_permisos(cliente, tokens, escenario):
     e = escenario
-    reloj.fijar(e.momento, congelar=True)
+    reloj_prueba.fijar(e.momento)
     cuerpo = {"usuario_id": e.usuario_id, "metodo": "manual"}
     r = cliente.post("/asistencias", json=cuerpo, headers=tokens["cocinera"])
     assert r.status_code == 403 and r.json()["motivo"] == "metodo_no_autorizado"
@@ -444,11 +441,11 @@ def test_el_post_manual_de_asistencias_conserva_sus_permisos(cliente, tokens, es
 
 
 def test_identificar_registra_la_entrega_y_deja_la_lectura_intacta(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
     coci = tokens["cocinera"]
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     consulta = (
         "SELECT usuario_id, dispositivo, fecha_hora, resultado, motivo "
         "FROM lecturas_biometricas WHERE id = :i"
@@ -486,11 +483,11 @@ def test_identificar_registra_la_entrega_y_deja_la_lectura_intacta(
 
 
 def test_la_entrega_cuenta_una_sola_racion_y_el_rechazo_original_sigue_contando(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
     coci = tokens["cocinera"]
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     assert _identificar(cliente, coci, lectura, e.usuario_id, ahora=e.momento).status_code == 200
 
     r = cliente.get("/pantalla/estado", headers=tokens["jefa"])
@@ -508,12 +505,12 @@ def test_la_entrega_cuenta_una_sola_racion_y_el_rechazo_original_sigue_contando(
 
 
 def test_sin_derecho_es_un_intento_rechazado_y_no_una_entrega(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
     coci = tokens["cocinera"]
     persona = _sin_derecho(e.fecha)
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     r = _identificar(cliente, coci, lectura, persona, ahora=e.momento)
     assert r.status_code == 200, r.text
     c = r.json()
@@ -529,15 +526,15 @@ def test_sin_derecho_es_un_intento_rechazado_y_no_una_entrega(
     assert _identificar(cliente, coci, lectura, e.usuario_id).status_code == 200
 
 
-def test_duplicado_es_un_intento_rechazado(cliente, cliente_simulacion, tokens, escenario):
+def test_duplicado_es_un_intento_rechazado(cliente, lector, tokens, escenario):
     e = escenario
     coci = tokens["cocinera"]
-    reloj.fijar(e.momento, congelar=True)
+    reloj_prueba.fijar(e.momento)
     manual = cliente.post(
         "/asistencias", json={"usuario_id": e.usuario_id, "metodo": "manual"}, headers=tokens["jefa"]
     )
     assert manual.json()["valido"] is True, manual.text
-    lectura = _lectura(cliente_simulacion, coci, e.momento + timedelta(minutes=1))
+    lectura = _lectura(lector, e.momento + timedelta(minutes=1))
     r = _identificar(cliente, coci, lectura, e.usuario_id, ahora=e.momento + timedelta(minutes=2))
     assert r.status_code == 200, r.text
     c = r.json()
@@ -550,11 +547,11 @@ def test_duplicado_es_un_intento_rechazado(cliente, cliente_simulacion, tokens, 
 
 
 def test_lectura_ya_resuelta_por_otra_cuenta_no_se_atribuye_a_quien_repite(
-    cliente, cliente_simulacion, tokens, sintetico
+    cliente, lector, tokens, sintetico
 ):
     e = sintetico
     a, b = e.personas[:2]
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     assert _identificar(cliente, tokens["cocinera"], lectura, a, ahora=e.momento).status_code == 200
 
     # Otra cocinera, otra persona, clave nueva.
@@ -578,21 +575,21 @@ def test_lectura_ya_resuelta_por_otra_cuenta_no_se_atribuye_a_quien_repite(
 
 @pytest.mark.parametrize("caso", ["fuera_horario_sin_usuario", "aceptada", "rechazada_con_usuario"])
 def test_el_rechazo_original_no_elegible_no_se_resuelve(
-    cliente, cliente_simulacion, tokens, escenario, caso
+    cliente, lector, tokens, escenario, caso
 ):
     e = escenario
     coci = tokens["cocinera"]
     if caso == "fuera_horario_sin_usuario":
         # 10:00-11:00 no tiene horario en la semilla: se guarda fuera_horario.
         momento = datetime.combine(e.fecha, time(10, 30))
-        lectura = _lectura(cliente_simulacion, coci, momento)
+        lectura = _lectura(lector, momento)
         assert _filas("SELECT motivo FROM lecturas_biometricas WHERE id = :i", i=lectura) == [("fuera_horario",)]
     elif caso == "aceptada":
         momento = e.momento
-        lectura = _lectura(cliente_simulacion, coci, momento, usuario_id=e.usuario_id)
+        lectura = _lectura(lector, momento, usuario_id=e.usuario_id)
     else:
         momento = e.momento
-        lectura = _lectura(cliente_simulacion, coci, momento, usuario_id=USUARIO_INEXISTENTE)
+        lectura = _lectura(lector, momento, usuario_id=USUARIO_INEXISTENTE)
 
     r = _identificar(cliente, coci, lectura, e.usuario_id, ahora=momento)
     assert r.status_code == 409, r.text
@@ -616,10 +613,10 @@ def test_el_rechazo_original_no_elegible_no_se_resuelve(
     ],
 )
 def test_otro_servicio_no_se_resuelve_aunque_la_comida_sea_la_misma(
-    cliente, cliente_simulacion, tokens, escenario, desfase
+    cliente, lector, tokens, escenario, desfase
 ):
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     dia = e.fecha + timedelta(days=1 if desfase[0] == "dia_siguiente" else 0)
     r = _identificar(
         cliente, tokens["cocinera"], lectura, e.usuario_id, ahora=datetime.combine(dia, desfase[1])
@@ -629,9 +626,9 @@ def test_otro_servicio_no_se_resuelve_aunque_la_comida_sea_la_misma(
     assert _contar("asistencias") == 0
 
 
-def test_reloj_retrocedido_no_resuelve(cliente, cliente_simulacion, tokens, escenario):
+def test_reloj_retrocedido_no_resuelve(cliente, lector, tokens, escenario):
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     r = _identificar(cliente, tokens["cocinera"], lectura, e.usuario_id, ahora=e.momento - timedelta(minutes=1))
     assert r.status_code == 409, r.text
     assert r.json()["motivo"] == "reloj_inconsistente"
@@ -660,7 +657,7 @@ def _candidato_cena() -> tuple[int, date]:
 
 
 def test_la_medianoche_no_corta_un_servicio_nocturno(
-    cliente, cliente_simulacion, tokens, root, vacio
+    cliente, lector, tokens, root, vacio
 ):
     """Una franja que cruza la medianoche: la lectura de las 23:58 y la
     solicitud de las 00:02 son el mismo servicio, con la misma fecha_comida."""
@@ -668,7 +665,7 @@ def test_la_medianoche_no_corta_un_servicio_nocturno(
     cena = comida_id("cena")
     fijar(datetime.combine(fecha, time(9)))
     assert guardar(cliente, root, cena, "22:00:00", "02:00:00", None).status_code == 201
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], datetime.combine(fecha, time(23, 58)))
+    lectura = _lectura(lector, datetime.combine(fecha, time(23, 58)))
     r = _identificar(
         cliente, tokens["cocinera"], lectura, persona,
         ahora=datetime.combine(fecha + timedelta(days=1), time(0, 2)),
@@ -679,13 +676,13 @@ def test_la_medianoche_no_corta_un_servicio_nocturno(
 
 
 def test_un_cambio_de_horario_contiguo_mantiene_el_servicio(
-    cliente, cliente_simulacion, tokens, root, vacio
+    cliente, lector, tokens, root, vacio
 ):
-    usuario_id, fecha = _candidato_almuerzo()
+    usuario_id, fecha = candidato_almuerzo()
     almuerzo = comida_id("almuerzo")
     fijar(datetime.combine(fecha, time(9)))
     assert guardar(cliente, root, almuerzo, "11:00:00", "15:00:00", None).status_code == 201
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], datetime.combine(fecha, time(12, 30)))
+    lectura = _lectura(lector, datetime.combine(fecha, time(12, 30)))
 
     # A las 12:40 root acorta el almuerzo a 14:00: las dos versiones se unen en
     # una sola ventana, la lectura y la solicitud siguen en el mismo servicio.
@@ -699,13 +696,13 @@ def test_un_cambio_de_horario_contiguo_mantiene_el_servicio(
 
 
 def test_un_cambio_de_horario_con_hueco_separa_los_servicios(
-    cliente, cliente_simulacion, tokens, root, vacio
+    cliente, lector, tokens, root, vacio
 ):
-    usuario_id, fecha = _candidato_almuerzo()
+    usuario_id, fecha = candidato_almuerzo()
     almuerzo = comida_id("almuerzo")
     fijar(datetime.combine(fecha, time(9)))
     assert guardar(cliente, root, almuerzo, "11:00:00", "15:00:00", None).status_code == 201
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], datetime.combine(fecha, time(12, 30)))
+    lectura = _lectura(lector, datetime.combine(fecha, time(12, 30)))
 
     # A las 16:00 root lo extiende a 20:00: quedan [11:00, 15:00) y [16:00, 20:00).
     fijar(datetime.combine(fecha, time(16, 0)))
@@ -718,12 +715,12 @@ def test_un_cambio_de_horario_con_hueco_separa_los_servicios(
 
 
 def test_una_lectura_sin_ventana_que_la_contenga_no_es_determinable(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     """Si la versión de horario que cubría la lectura pasó a activo=0, la
     reconstrucción ya no existe y no se inventa una."""
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     with SesionLocal() as sesion:
         sesion.execute(text("UPDATE horarios_comida SET activo = 0"))
         sesion.commit()
@@ -736,10 +733,10 @@ def test_una_lectura_sin_ventana_que_la_contenga_no_es_determinable(
 
 
 def test_un_reintento_identico_no_duplica_ni_racion_ni_auditoria(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     clave = _clave()
     primera = _identificar(cliente, tokens["cocinera"], lectura, e.usuario_id, clave=clave, ahora=e.momento)
     segunda = _identificar(cliente, tokens["cocinera"], lectura, e.usuario_id, clave=clave)
@@ -751,11 +748,11 @@ def test_un_reintento_identico_no_duplica_ni_racion_ni_auditoria(
 
 
 def test_un_reintento_de_un_rechazo_devuelve_lo_mismo_sin_otra_fila(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
     persona = _sin_derecho(e.fecha)
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     clave = _clave()
     primera = _identificar(cliente, tokens["cocinera"], lectura, persona, clave=clave, ahora=e.momento)
     segunda = _identificar(cliente, tokens["cocinera"], lectura, persona, clave=clave)
@@ -766,11 +763,11 @@ def test_un_reintento_de_un_rechazo_devuelve_lo_mismo_sin_otra_fila(
 
 
 def test_la_misma_clave_con_otro_contenido_es_un_conflicto(
-    cliente, cliente_simulacion, tokens, sintetico
+    cliente, lector, tokens, sintetico
 ):
     e = sintetico
     a, b = e.personas[:2]
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     clave = _clave()
     assert _identificar(cliente, tokens["cocinera"], lectura, a, clave=clave, ahora=e.momento).status_code == 200
     r = _identificar(cliente, tokens["cocinera"], lectura, b, clave=clave)
@@ -779,13 +776,13 @@ def test_la_misma_clave_con_otro_contenido_es_un_conflicto(
     assert (_contar("asistencias"), _contar("intervenciones_lectura")) == (1, 1)
 
 
-def test_el_replay_no_reevalua_nada(cliente, cliente_simulacion, tokens, escenario):
+def test_el_replay_no_reevalua_nada(cliente, lector, tokens, escenario):
     """Con el reloj ya en otro servicio, el reintento de una entrega devuelve
     la entrega, y el de un conflicto devuelve el MISMO conflicto: nada se
     vuelve a decidir, ni para bien ni para mal."""
     e = escenario
     coci = tokens["cocinera"]
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     clave_mala, clave_buena = _clave(), _clave()
     tarde = datetime.combine(e.fecha, time(20, 0))
     malo = _identificar(cliente, coci, lectura, e.usuario_id, clave=clave_mala, ahora=tarde)
@@ -793,7 +790,7 @@ def test_el_replay_no_reevalua_nada(cliente, cliente_simulacion, tokens, escenar
     bueno = _identificar(cliente, coci, lectura, e.usuario_id, clave=clave_buena, ahora=e.momento)
     assert bueno.status_code == 200 and bueno.json()["reintento"] is False
 
-    reloj.fijar(datetime.combine(e.fecha + timedelta(days=2), time(3, 0)), congelar=True)
+    reloj_prueba.fijar(datetime.combine(e.fecha + timedelta(days=2), time(3, 0)))
     de_nuevo = cliente.post(
         POST.format(lectura), json={"usuario_id": e.usuario_id},
         headers={**coci, "Idempotency-Key": clave_buena},
@@ -801,7 +798,7 @@ def test_el_replay_no_reevalua_nada(cliente, cliente_simulacion, tokens, escenar
     assert de_nuevo.status_code == 200 and de_nuevo.json()["reintento"] is True
     assert de_nuevo.json()["asistencia_id"] == bueno.json()["asistencia_id"]
 
-    reloj.fijar(e.momento, congelar=True)  # ahora sí sería el servicio correcto
+    reloj_prueba.fijar(e.momento)  # ahora sí sería el servicio correcto
     repite_malo = cliente.post(
         POST.format(lectura), json={"usuario_id": e.usuario_id},
         headers={**coci, "Idempotency-Key": clave_mala},
@@ -811,9 +808,9 @@ def test_el_replay_no_reevalua_nada(cliente, cliente_simulacion, tokens, escenar
     assert _contar("intervenciones_lectura") == 2
 
 
-def test_la_clave_es_de_la_cuenta(cliente, cliente_simulacion, tokens, escenario):
+def test_la_clave_es_de_la_cuenta(cliente, lector, tokens, escenario):
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     clave = _clave()
     assert _identificar(cliente, tokens["cocinera"], lectura, e.usuario_id, clave=clave, ahora=e.momento).status_code == 200
     # La misma clave en otra cuenta no recupera la fila de la primera.
@@ -845,13 +842,13 @@ def _commit_que_pierde_la_respuesta(confirmar: bool):
 
 @pytest.mark.parametrize("confirmar", [True, False], ids=["quedo_confirmado", "no_quedo"])
 def test_un_commit_incierto_no_afirma_nada_y_se_recupera_con_la_misma_clave(
-    cliente, cliente_simulacion, tokens, escenario, monkeypatch, confirmar
+    cliente, lector, tokens, escenario, monkeypatch, confirmar
 ):
     e = escenario
     coci = tokens["cocinera"]
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     clave = _clave()
-    reloj.fijar(e.momento, congelar=True)
+    reloj_prueba.fijar(e.momento)
     with monkeypatch.context() as parche:
         parche.setattr(Session, "commit", _commit_que_pierde_la_respuesta(confirmar))
         r = _identificar(cliente, coci, lectura, e.usuario_id, clave=clave)
@@ -869,11 +866,11 @@ def test_un_commit_incierto_no_afirma_nada_y_se_recupera_con_la_misma_clave(
 
 
 def test_el_bloqueo_agotado_es_un_conflicto_reintentable(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
     coci = tokens["cocinera"]
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     corto = create_engine(config.url_base_datos, pool_pre_ping=True, future=True)
 
     @event.listens_for(corto, "connect")
@@ -901,12 +898,12 @@ def test_el_bloqueo_agotado_es_un_conflicto_reintentable(
 
 
 def test_la_misma_clave_a_la_vez_deja_una_sola_entrega(
-    cliente, cliente_simulacion, tokens, escenario, aislamiento
+    cliente, lector, tokens, escenario, aislamiento
 ):
     e = escenario
     coci = tokens["cocinera"]
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
-    reloj.fijar(e.momento, congelar=True)
+    lectura = _lectura(lector, e.momento)
+    reloj_prueba.fijar(e.momento)
     clave = _clave()
     resultados: dict = {}
     with retener_lectura(lectura):
@@ -923,12 +920,12 @@ def test_la_misma_clave_a_la_vez_deja_una_sola_entrega(
 
 
 def test_dos_personas_a_la_vez_sobre_la_misma_lectura_dan_una_sola_racion(
-    cliente, cliente_simulacion, tokens, sintetico, aislamiento
+    cliente, lector, tokens, sintetico, aislamiento
 ):
     e = sintetico
     a, b = e.personas[:2]
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
-    reloj.fijar(e.momento, congelar=True)
+    lectura = _lectura(lector, e.momento)
+    reloj_prueba.fijar(e.momento)
     resultados: dict = {}
     with retener_lectura(lectura):
         hilos = [
@@ -948,20 +945,20 @@ def test_dos_personas_a_la_vez_sobre_la_misma_lectura_dan_una_sola_racion(
 
 
 def test_el_choque_de_la_racion_deja_la_auditoria_y_no_pierde_el_bloqueo(
-    cliente, cliente_simulacion, tokens, escenario, aislamiento, monkeypatch
+    cliente, lector, tokens, escenario, aislamiento, monkeypatch
 ):
     """Otra vía le dio la ración a la persona entre la comprobación de
-    duplicado y el INSERT (se simula saltando la comprobación). El INSERT choca
+    duplicado y el INSERT (se provoca saltando la comprobación). El INSERT choca
     con `uq_asistencias_racion`; el rollback se limita al SAVEPOINT y la fila
     `rechazada` se confirma en la misma transacción."""
     e = escenario
     coci = tokens["cocinera"]
-    reloj.fijar(e.momento, congelar=True)
+    reloj_prueba.fijar(e.momento)
     manual = cliente.post(
         "/asistencias", json={"usuario_id": e.usuario_id, "metodo": "manual"}, headers=tokens["jefa"]
     )
     assert manual.json()["valido"] is True, manual.text
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     monkeypatch.setattr(intervencion, "ya_comio", lambda *a, **k: False)
 
     r = _identificar(cliente, coci, lectura, e.usuario_id, ahora=e.momento)
@@ -976,14 +973,14 @@ def test_el_choque_de_la_racion_deja_la_auditoria_y_no_pierde_el_bloqueo(
 
 
 def test_un_choque_de_la_clave_se_resuelve_repitiendo_la_decision(
-    cliente, cliente_simulacion, tokens, escenario, aislamiento, monkeypatch
+    cliente, lector, tokens, escenario, aislamiento, monkeypatch
 ):
-    """Se simula la carrera: el segundo intento no ve la fila de la clave (ni
+    """Se provoca la carrera: el segundo intento no ve la fila de la clave (ni
     en el paso 2 ni en el 4), llega al INSERT y choca con el UNIQUE (cuenta,
     clave). Rollback total y una segunda pasada que ya la encuentra."""
     e = escenario
     coci = tokens["cocinera"]
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     clave = _clave()
     primera = _identificar(cliente, coci, lectura, e.usuario_id, clave=clave, ahora=e.momento)
     assert primera.status_code == 200
@@ -1068,9 +1065,9 @@ def _clave_fija() -> str:
 # --- lo que ve cada rol en ultimas-marcaciones ---------------------------------------
 
 
-def test_los_valores_iniciales_sin_intervencion_por_rol(cliente, cliente_simulacion, tokens, escenario):
+def test_los_valores_iniciales_sin_intervencion_por_rol(cliente, lector, tokens, escenario):
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
 
     c = _de_la_lectura(_lista(cliente, tokens["cocinera"], e.fecha), lectura)
     assert (c["resultado"], c["motivo"], c["valido"]) == ("rechazada", "no_identificado", False)
@@ -1098,10 +1095,10 @@ def test_los_valores_iniciales_sin_intervencion_por_rol(cliente, cliente_simulac
 
 
 def test_una_lectura_fuera_de_horario_sin_usuario_se_muestra_como_tal_y_no_es_identificable(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], datetime.combine(e.fecha, time(10, 30)))
+    lectura = _lectura(lector, datetime.combine(e.fecha, time(10, 30)))
     for rol in ("cocinera", "jefa", "sistemas"):
         f = _de_la_lectura(_lista(cliente, tokens[rol], e.fecha), lectura)
         assert f["motivo"] == "fuera_horario", rol  # el guardado, no no_identificado
@@ -1112,11 +1109,11 @@ def test_una_lectura_fuera_de_horario_sin_usuario_se_muestra_como_tal_y_no_es_id
 
 
 def test_otro_servicio_se_ve_como_no_identificable_en_la_lista(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
-    reloj.fijar(datetime.combine(e.fecha, time(16, 0)), congelar=True)
+    lectura = _lectura(lector, e.momento)
+    reloj_prueba.fijar(datetime.combine(e.fecha, time(16, 0)))
     f = _de_la_lectura(_lista(cliente, tokens["cocinera"], e.fecha), lectura)
     assert (f["puede_identificar"], f["motivo_no_identificable"]) == (False, "servicio_distinto")
     assert f["identificable_hasta"] is None
@@ -1124,7 +1121,7 @@ def test_otro_servicio_se_ve_como_no_identificable_en_la_lista(
 
 def test_un_registro_manual_independiente_sigue_separado(cliente, tokens, escenario):
     e = escenario
-    reloj.fijar(e.momento, congelar=True)
+    reloj_prueba.fijar(e.momento)
     manual = cliente.post(
         "/asistencias", json={"usuario_id": e.usuario_id, "metodo": "manual"}, headers=tokens["jefa"]
     ).json()
@@ -1139,12 +1136,12 @@ def test_un_registro_manual_independiente_sigue_separado(cliente, tokens, escena
 
 
 def test_revision_sube_con_la_entrega_de_otra_cocinera_sin_revelar_sus_intentos_ni_su_cuenta(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
     a = e.usuario_id
     persona_mala = _sin_derecho(e.fecha)
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
 
     def vista(rol):
         return _de_la_lectura(_lista(cliente, tokens[rol], e.fecha), lectura)
@@ -1187,10 +1184,10 @@ def test_revision_sube_con_la_entrega_de_otra_cocinera_sin_revelar_sus_intentos_
 # --- el listado de la jefa -------------------------------------------------------------
 
 
-def test_el_listado_de_la_jefa(cliente, cliente_simulacion, tokens, escenario):
+def test_el_listado_de_la_jefa(cliente, lector, tokens, escenario):
     e = escenario
     persona_mala = _sin_derecho(e.fecha)
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     rechazo = _identificar(cliente, tokens["cocinera"], lectura, persona_mala, ahora=e.momento)
     entrega = _identificar(cliente, tokens["cocinera"], lectura, e.usuario_id, ahora=e.momento + timedelta(minutes=1))
     assert (rechazo.status_code, entrega.status_code) == (200, 200)
@@ -1232,7 +1229,7 @@ def test_el_listado_de_la_jefa(cliente, cliente_simulacion, tokens, escenario):
 
 def test_el_listado_vacio_y_sus_limites(cliente, tokens, vacio):
     jefa = tokens["jefa"]
-    reloj.fijar(datetime(2026, 9, 24, 12, 0), congelar=True)
+    reloj_prueba.fijar(datetime(2026, 9, 24, 12, 0))
     r = cliente.get(LISTA, headers=jefa)  # por defecto, hoy
     assert r.status_code == 200
     assert r.json()["desde"] == r.json()["hasta"] == "2026-09-24"
@@ -1268,7 +1265,7 @@ def _servidor_sin_propagar() -> TestClient:
 
 @pytest.mark.parametrize("camino", ["entrega", "rechazo"])
 def test_un_fallo_de_integridad_ajeno_en_la_auditoria_no_se_disfraza_de_concurrencia(
-    cliente, cliente_simulacion, tokens, escenario, monkeypatch, camino
+    cliente, lector, tokens, escenario, monkeypatch, camino
 ):
     """La FK de `cuenta_id` falla al insertar la auditoría. No es un duplicado ni
     la clave existe: es un fallo interno (500), no `intervencion_en_curso`, y no
@@ -1276,7 +1273,7 @@ def test_un_fallo_de_integridad_ajeno_en_la_auditoria_no_se_disfraza_de_concurre
     e = escenario
     coci = tokens["cocinera"]
     persona = e.usuario_id if camino == "entrega" else _sin_derecho(e.fecha)
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     original = intervencion._nueva_fila
 
     def con_cuenta_inexistente(*args, **kwargs):
@@ -1287,7 +1284,7 @@ def test_un_fallo_de_integridad_ajeno_en_la_auditoria_no_se_disfraza_de_concurre
     clave = _clave()
     with monkeypatch.context() as parche:
         parche.setattr(intervencion, "_nueva_fila", con_cuenta_inexistente)
-        reloj.fijar(e.momento, congelar=True)
+        reloj_prueba.fijar(e.momento)
         r = _servidor_sin_propagar().post(
             POST.format(lectura),
             json={"usuario_id": persona},
@@ -1305,17 +1302,17 @@ def test_un_fallo_de_integridad_ajeno_en_la_auditoria_no_se_disfraza_de_concurre
 
 
 def test_un_fallo_de_integridad_ajeno_en_la_racion_no_se_clasifica_como_duplicado(
-    cliente, cliente_simulacion, tokens, escenario, monkeypatch
+    cliente, lector, tokens, escenario, monkeypatch
 ):
     """La FK de `categoria_reporte_id` falla al insertar la ración (1452, no
     1062). No se consulta si "casualmente" hay otra ración: se propaga como
     fallo interno y no queda auditoría ni ración."""
     e = escenario
     coci = tokens["cocinera"]
-    lectura = _lectura(cliente_simulacion, coci, e.momento)
+    lectura = _lectura(lector, e.momento)
     with monkeypatch.context() as parche:
         parche.setattr(intervencion, "categoria_reporte_de", lambda *a, **k: 999_999_999)
-        reloj.fijar(e.momento, congelar=True)
+        reloj_prueba.fijar(e.momento)
         r = _servidor_sin_propagar().post(
             POST.format(lectura),
             json={"usuario_id": e.usuario_id},
@@ -1330,15 +1327,15 @@ def test_un_fallo_de_integridad_ajeno_en_la_racion_no_se_clasifica_como_duplicad
 
 
 def test_un_duplicado_que_no_es_de_la_clave_ni_de_la_racion_se_propaga(
-    cliente, cliente_simulacion, tokens, sintetico, monkeypatch
+    cliente, lector, tokens, sintetico, monkeypatch
 ):
     """Un 1062 sobre la auditoría cuando la clave NO existe (aquí, el UNIQUE de
     `asistencia_id`) no es la carrera reconocida: tampoco se disfraza."""
     e = sintetico
     coci = tokens["cocinera"]
     a, b = e.personas[:2]
-    primera = _lectura(cliente_simulacion, coci, e.momento)
-    segunda = _lectura(cliente_simulacion, coci, e.momento + timedelta(minutes=1))
+    primera = _lectura(lector, e.momento)
+    segunda = _lectura(lector, e.momento + timedelta(minutes=1))
     assert _identificar(cliente, coci, primera, a, ahora=e.momento + timedelta(minutes=2)).status_code == 200
     asistencia_ocupada = _filas("SELECT id FROM asistencias")[0][0]
 
@@ -1368,13 +1365,13 @@ def test_un_duplicado_que_no_es_de_la_clave_ni_de_la_racion_se_propaga(
 
 
 def test_la_base_no_impide_una_registrada_sin_asistencia_pero_la_comprobacion_la_detecta(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     """Documenta que NINGÚN CHECK protege `resultado` contra `asistencia_id`: la
     base acepta la fila incoherente. Por eso `_verificar_coherencia` revisa cada
     prueba al final, y aquí se comprueba que de verdad detecta el problema."""
     e = escenario
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     cuenta = _id_de_cuenta("u_cocinera")
     try:
         with SesionLocal() as sesion:
@@ -1394,12 +1391,12 @@ def test_la_base_no_impide_una_registrada_sin_asistencia_pero_la_comprobacion_la
 
 
 def test_varias_personas_a_la_vez_dejan_una_registrada_y_el_resto_rechazadas(
-    cliente, cliente_simulacion, tokens, sintetico, aislamiento
+    cliente, lector, tokens, sintetico, aislamiento
 ):
     e = sintetico
     personas = e.personas[:3]
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
-    reloj.fijar(e.momento, congelar=True)
+    lectura = _lectura(lector, e.momento)
+    reloj_prueba.fijar(e.momento)
     resultados: dict = {}
     cuentas = ["cocinera", "cocinera2"]
     with retener_lectura(lectura):
@@ -1433,22 +1430,22 @@ def test_lecturas_por_identificar_es_solo_de_la_cocinera(cliente, tokens, con_ho
 
 
 def test_lecturas_por_identificar_trae_solo_las_del_servicio_actual_y_pendientes(
-    cliente, cliente_simulacion, tokens, sintetico
+    cliente, lector, tokens, sintetico
 ):
     e = sintetico
     coci = tokens["cocinera"]
     a, b = e.personas[:2]
-    temprana = _lectura(cliente_simulacion, coci, datetime.combine(e.fecha, time(11, 5)))
-    resuelta = _lectura(cliente_simulacion, coci, datetime.combine(e.fecha, time(11, 10)))
+    temprana = _lectura(lector, datetime.combine(e.fecha, time(11, 5)))
+    resuelta = _lectura(lector, datetime.combine(e.fecha, time(11, 10)))
     con_usuario = _lectura(
-        cliente_simulacion, coci, datetime.combine(e.fecha, time(11, 20)), usuario_id=USUARIO_INEXISTENTE
+        lector, datetime.combine(e.fecha, time(11, 20)), usuario_id=USUARIO_INEXISTENTE
     )
-    fuera_de_servicio = _lectura(cliente_simulacion, coci, datetime.combine(e.fecha, time(10, 30)))
-    otro_servicio = _lectura(cliente_simulacion, coci, datetime.combine(e.fecha, time(15, 30)))
-    reciente = _lectura(cliente_simulacion, coci, e.momento)
+    fuera_de_servicio = _lectura(lector, datetime.combine(e.fecha, time(10, 30)))
+    otro_servicio = _lectura(lector, datetime.combine(e.fecha, time(15, 30)))
+    reciente = _lectura(lector, e.momento)
     assert _identificar(cliente, coci, resuelta, a, ahora=datetime.combine(e.fecha, time(11, 30))).status_code == 200
 
-    reloj.fijar(datetime.combine(e.fecha, time(13, 0)), congelar=True)
+    reloj_prueba.fijar(datetime.combine(e.fecha, time(13, 0)))
     r = cliente.get(POR_IDENTIFICAR, headers=coci)
     assert r.status_code == 200, r.text
     cuerpo = r.json()
@@ -1470,12 +1467,12 @@ def test_lecturas_por_identificar_trae_solo_las_del_servicio_actual_y_pendientes
 
 
 def test_lecturas_por_identificar_no_depende_de_la_ventana_de_la_lista_ni_del_limite(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
     coci = tokens["cocinera"]
     ids = [
-        _lectura(cliente_simulacion, coci, e.momento + timedelta(minutes=m)) for m in range(3)
+        _lectura(lector, e.momento + timedelta(minutes=m)) for m in range(3)
     ]
     # La lista por fecha corta: con límite 1 solo trae la más reciente.
     corta = cliente.get(PANTALLA, params={"fecha": e.fecha.isoformat(), "limite": 1}, headers=coci).json()
@@ -1486,32 +1483,32 @@ def test_lecturas_por_identificar_no_depende_de_la_ventana_de_la_lista_ni_del_li
 
 
 def test_lecturas_por_identificar_avisa_si_llega_al_tope(
-    cliente, cliente_simulacion, tokens, escenario, monkeypatch
+    cliente, lector, tokens, escenario, monkeypatch
 ):
     e = escenario
     coci = tokens["cocinera"]
     for m in range(3):
-        _lectura(cliente_simulacion, coci, e.momento + timedelta(minutes=m))
+        _lectura(lector, e.momento + timedelta(minutes=m))
     monkeypatch.setattr(consultas_pantalla, "MAXIMO_POR_IDENTIFICAR", 2)
     cuerpo = cliente.get(POR_IDENTIFICAR, headers=coci).json()
     assert cuerpo["truncado"] is True
     assert len(cuerpo["lecturas"]) == 2 == cuerpo["total"]
 
 
-def test_lecturas_por_identificar_sin_servicio_va_vacia(cliente, cliente_simulacion, tokens, escenario):
+def test_lecturas_por_identificar_sin_servicio_va_vacia(cliente, lector, tokens, escenario):
     e = escenario
     coci = tokens["cocinera"]
-    _lectura(cliente_simulacion, coci, datetime.combine(e.fecha, time(10, 30)))  # franja sin cubrir
+    _lectura(lector, datetime.combine(e.fecha, time(10, 30)))  # franja sin cubrir
     cuerpo = cliente.get(POR_IDENTIFICAR, headers=coci).json()
     assert cuerpo == {"servicio": None, "total": 0, "truncado": False, "lecturas": []}
 
 
 def test_lecturas_por_identificar_no_revela_nada_de_otras_cuentas(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, lector, tokens, escenario
 ):
     e = escenario
     persona_mala = _sin_derecho(e.fecha)
-    lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
+    lectura = _lectura(lector, e.momento)
     assert _identificar(cliente, tokens["cocinera2"], lectura, persona_mala, ahora=e.momento).json()["motivo"] == "sin_derecho"
     fila = cliente.get(POR_IDENTIFICAR, headers=tokens["cocinera"]).json()["lecturas"][0]
     assert fila["intervencion"]["revision"] == 0  # el intento rechazado ajeno no cuenta ni se nota
@@ -1521,7 +1518,7 @@ def test_lecturas_por_identificar_no_revela_nada_de_otras_cuentas(
 
 
 def test_una_lectura_de_ayer_en_un_servicio_nocturno_se_recupera_y_se_sigue(
-    cliente, cliente_simulacion, tokens, root, vacio
+    cliente, lector, tokens, root, vacio
 ):
     """El caso que `ultimas-marcaciones` no puede cubrir: a las 00:30 la lectura
     de las 23:58 sigue en el servicio, pero la consulta por la fecha de hoy no la
@@ -1532,11 +1529,11 @@ def test_una_lectura_de_ayer_en_un_servicio_nocturno_se_recupera_y_se_sigue(
     cena = comida_id("cena")
     fijar(datetime.combine(ayer, time(9)))
     assert guardar(cliente, root, cena, "22:00:00", "02:00:00", None).status_code == 201
-    lectura = _lectura(cliente_simulacion, coci, datetime.combine(ayer, time(23, 58)))
-    otra = _lectura(cliente_simulacion, coci, datetime.combine(ayer, time(23, 59)))
+    lectura = _lectura(lector, datetime.combine(ayer, time(23, 58)))
+    otra = _lectura(lector, datetime.combine(ayer, time(23, 59)))
 
     madrugada = datetime.combine(hoy, time(0, 30))
-    reloj.fijar(madrugada, congelar=True)
+    reloj_prueba.fijar(madrugada)
     clave = f"lectura_biometrica:{lectura}"
     # La lista por fecha de HOY no la trae: es de ayer.
     assert clave not in [f["clave_evento"] for f in _lista(cliente, coci, hoy)]
@@ -1560,7 +1557,7 @@ def test_una_lectura_de_ayer_en_un_servicio_nocturno_se_recupera_y_se_sigue(
     assert final["estado_final"] == "racion_servida" and final["intervencion"]["revision"] == 1
 
     # Termina el servicio (02:00): sale de la lista y el POST ya no la acepta.
-    reloj.fijar(datetime.combine(hoy, time(2, 30)), congelar=True)
+    reloj_prueba.fijar(datetime.combine(hoy, time(2, 30)))
     vacia = cliente.get(POR_IDENTIFICAR, headers=coci).json()
     assert (vacia["servicio"], vacia["lecturas"]) == (None, [])
     tarde = _identificar(cliente, coci, otra, persona)

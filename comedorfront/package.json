@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Mockup React del Sistema de Comedor y Nutricion Hospitalaria - Modulo Personal / Comensales",
+  "description": "Interfaz React del Sistema de Comedor y Nutricion Hospitalaria - Modulo Personal / Comensales",
   "scripts": {
     "test": "node --import ./tests/soporte/cargador-jsx.js --test",
     "dev": "vite",

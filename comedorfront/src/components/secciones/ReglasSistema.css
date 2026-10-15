@@ -13,7 +13,8 @@
   flex-direction: column;
   gap: var(--e-4);
   padding: 0 4px var(--e-7);
-  max-width: 1040px;
+  width: 100%;
+  min-width: 0;
 }
 
 /* -------------------------------------------------------------
@@ -176,8 +177,8 @@
    Lista de comidas: una tarjeta por comida
    ------------------------------------------------------------- */
 .reglas__lista {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--e-3);
   margin: 0;
   padding: 0;
@@ -185,6 +186,7 @@
 }
 
 .reglas__item {
+  min-width: 0;
   animation: reglas-aparece 260ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
   animation-delay: calc(var(--i, 0) * 45ms);
 }
@@ -193,7 +195,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--e-3);
-  padding: var(--e-4) var(--e-5);
+  padding: var(--e-4);
+  height: 100%;
   background: var(--c-superficie);
   border: 1px solid var(--c-borde-tarjeta);
   border-radius: var(--r-lg);
@@ -245,7 +248,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--e-1);
-  flex: 0 1 190px;
+  flex: 1 1 140px;
   min-width: 140px;
 }
 
@@ -445,6 +448,12 @@
   .reglas__input,
   .reglas__aviso-cerrar {
     transition: none;
+  }
+}
+
+@media (min-width: 1100px) {
+  .reglas__lista {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

@@ -8,7 +8,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.core.autorizacion import ErrorAuth, requiere_rol
-from app.main import _error_auth, app, crear_app
+from app.main import _error_auth, app
 from conftest import encabezado, ingresar
 
 JEFATURA = {"jefa", "sistemas"}
@@ -20,8 +20,6 @@ MATRIZ = [
     ("GET", "/pantalla/ultimas-marcaciones", None, TODOS),
     ("GET", "/pantalla/comidas-del-dia", None, TODOS),
     ("GET", "/pantalla/dia-personal?persona_id=1", None, TODOS),
-    # Biométrico desde una sesión: solo existe en simulación (ver _app_para).
-    ("POST", "/asistencias", {"metodo": "biometrico"}, TODOS),
     ("POST", "/asistencias", {"metodo": "manual", "usuario_id": 1}, JEFATURA),
     # Padrón: la cocinera lo lee para operar el lector.
     ("GET", "/personal", None, TODOS),
@@ -58,16 +56,6 @@ def tokens(cliente, crear_usuario) -> dict[str, str]:
     return {rol: ingresar(cliente, f"u_{rol}")["access"] for rol in TODOS}
 
 
-def _app_para(cuerpo):
-    """La marcación biométrica desde una sesión solo se acepta en simulación:
-    esa fila se prueba en una app de simulación sobre la misma base de tests.
-    Fuera de simulación es 403 biometrico_solo_lector para los tres roles
-    (test_biometria_origen.py)."""
-    if cuerpo is not None and cuerpo.get("metodo") == "biometrico":
-        return crear_app("simulacion")
-    return app
-
-
 @pytest.mark.parametrize("rol", sorted(TODOS))
 @pytest.mark.parametrize(
     "metodo,ruta,cuerpo,permitidos",
@@ -77,7 +65,7 @@ def _app_para(cuerpo):
 def test_matriz_rol_por_endpoint(tokens, rol, metodo, ruta, cuerpo, permitidos):
     # Sin propagar excepciones del servidor: acá se prueba solo si la puerta
     # se abre; lo que haga el endpoint después es de sus propios tests.
-    cliente = TestClient(_app_para(cuerpo), raise_server_exceptions=False)
+    cliente = TestClient(app, raise_server_exceptions=False)
     respuesta = cliente.request(metodo, ruta, json=cuerpo, headers=encabezado(tokens[rol]))
 
     if rol in permitidos:

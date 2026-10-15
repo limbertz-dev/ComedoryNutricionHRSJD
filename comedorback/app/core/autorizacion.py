@@ -11,8 +11,8 @@ para personas, así el front sabe qué hacer sin interpretar textos:
                                sirve POST /auth/cambio-password
     403 rol_no_autorizado      el rol no abre ese recurso
     403 metodo_no_autorizado   la cocinera intentó una marcación manual
-    403 biometrico_solo_lector marcación biométrica desde una sesión fuera
-                               de simulación (cualquier rol)
+    403 biometrico_solo_lector marcación biométrica desde una sesión
+                               (cualquier rol)
 """
 
 from collections.abc import Callable, Iterable
@@ -24,11 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.core import seguridad
 from app.core.db import SesionDep
-from app.core.permisos import (
-    BIOMETRICO_DESDE_SESION,
-    IDENTIFICACION_LECTURA,
-    MARCACION_MANUAL,
-)
+from app.core.permisos import IDENTIFICACION_LECTURA, MARCACION_MANUAL
 from app.modelos.usuarios import UsuarioSistema
 
 
@@ -150,18 +146,17 @@ def requiere_rol(
     return dependencia
 
 
-def exigir_origen_biometrico(entorno: str, metodo: str) -> None:
-    """Biométrico desde una sesión humana solo en simulación.
+def exigir_origen_biometrico(metodo: str) -> None:
+    """Biométrico nunca desde una sesión humana.
 
     Con un token de persona, `metodo='biometrico'` es solo lo que el navegador
-    declara: nada prueba que alguien haya apoyado el dedo. Fuera de
-    simulación se rechaza sin mirar el rol y sin convertirlo en manual.
-    `entorno` es el de la app (app/core/entorno.py).
+    declara: nada prueba que alguien haya apoyado el dedo. Se rechaza sin
+    mirar el rol y sin convertirlo en manual.
     """
-    if metodo == "biometrico" and entorno not in BIOMETRICO_DESDE_SESION:
+    if metodo == "biometrico":
         raise prohibido(
             "biometrico_solo_lector",
-            "La marcación biométrica requiere un lector autorizado fuera de simulación.",
+            "La marcación biométrica requiere un lector autorizado.",
         )
 
 
