@@ -24,6 +24,8 @@ import {
   seccionesDeRol,
 } from './navegacion.js';
 import {
+  puedeConsultarIntervenciones,
+  puedeIdentificarLecturas,
   puedeMarcarManual,
   puedeOperarReloj,
   puedeVerSeccion,
@@ -374,6 +376,10 @@ export function Panel({ rol, usuario = null }) {
               fechaServidor={reloj ? diaServidor : undefined}
               versionReloj={versionReloj}
               recargarEstado={recargarEstado}
+              puedeIdentificar={puedeIdentificarLecturas(rol)}
+              personal={estado.personal}
+              cargandoPadron={cargandoPersonal}
+              errorPadron={errorApi}
             />
           ) : null}
 
@@ -386,6 +392,7 @@ export function Panel({ rol, usuario = null }) {
               cargandoPadron={cargandoPersonal}
               errorPadron={errorApi}
               puedeRegistrarManual={puedeMarcarManual(rol)}
+              puedeConsultarIntervenciones={puedeConsultarIntervenciones(rol)}
               versionReloj={versionReloj}
               onMarcacionExitosa={() => recargarEstado({ conservar: true })}
             />

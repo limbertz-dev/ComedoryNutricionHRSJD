@@ -67,7 +67,18 @@
 .vivo__lateral {
   display: flex;
   flex-direction: column;
+  gap: var(--e-3);
   min-height: 0;
+}
+
+/* Huellas por identificar (solo cocinera) arriba de las marcaciones: la
+   pantalla no tiene scroll, así que el panel se acota y desplaza por dentro
+   en vez de empujar la tarjeta de marcaciones fuera de la vista. */
+.vivo__lateral > .identificar {
+  flex: 0 1 auto;
+  max-height: 60%;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .vivo__tarjeta-historial {

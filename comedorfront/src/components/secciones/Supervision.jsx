@@ -1,15 +1,15 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Boton from '../ui/Boton.jsx';
 import Etiqueta from '../ui/Etiqueta.jsx';
 import { IconoBuscar, IconoCheck, IconoEquis, IconoAlerta, IconoUsuario } from '../ui/Iconos.jsx';
 import {
   autorizarMarcacionManual,
-  marcacionIncierta,
   obtenerComidasDelDia,
   obtenerUltimasMarcaciones,
 } from '../../api.js';
 import { diaLegible } from '../../dias.js';
-import RegistroManual, { avisoDeFalloRegistro } from './RegistroManual.jsx';
+import IntervencionesCocina from './IntervencionesCocina.jsx';
+import RegistroManual from './RegistroManual.jsx';
 import './Supervision.css';
 
 const ETIQUETAS_MOTIVOS = {
@@ -107,79 +107,12 @@ export function resumenDePestana(dia, pestana) {
 }
 
 /**
- * Convierte el resultado devuelto por la API al autorizar una ración en el aviso
- * correspondiente (éxito o rechazo del servidor).
+ * La huella no reconocida terminó en una entrega que identificó cocina. La
+ * decisión original (el rechazo del lector) no cambia: esto es el resultado
+ * final, aparte.
  */
-export function resolverAvisoAutorizacion(resultado) {
-  if (resultado?.valido) {
-    return {
-      tipo: 'exito',
-      titulo: resultado.titulo || 'Ración autorizada',
-      detalle: resultado.detalle || '',
-    };
-  }
-  return {
-    tipo: 'rechazo',
-    titulo: resultado?.titulo || 'Marcación rechazada',
-    detalle: resultado?.detalle || '',
-  };
-}
-
-/**
- * Ejecuta la autorización manual gestionando estado, avisos y recarga:
- * - Si es válido, emite aviso de éxito, limpia el comensal seleccionado y notifica éxito.
- * - Si es rechazo del servidor (200 con valido: false), emite aviso de rechazo y NO limpia la selección.
- * - En cualquier caso, recarga los datos desde la API.
- * La fila se identifica por su `clave` (origen:id): el id numérico se repite
- * entre lecturas y asistencias manuales.
- * Devuelve el resultado del servidor para que la tabla sepa si cerrar la fila.
- */
-export async function ejecutarAutorizacionManual({
-  marcacion,
-  usuarioId,
-  autorizarFn = autorizarMarcacionManual,
-  cargarDatosFn,
-  setAvisoAccion,
-  setComensalElegido,
-  setAutorizandoId,
-  onMarcacionExitosa,
-}) {
-  if (!marcacion || marcacion.motivo === 'sin_derecho') {
-    // Regla obligatoria: sin_derecho no hace ninguna petición
-    return undefined;
-  }
-  const idNumero = Number(usuarioId);
-  if (!Number.isInteger(idNumero) || idNumero <= 0) return undefined;
-
-  setAutorizandoId?.(marcacion.clave);
-  setAvisoAccion?.(null);
-  try {
-    const resultado = await autorizarFn(idNumero);
-    const aviso = resolverAvisoAutorizacion(resultado);
-    setAvisoAccion?.(aviso);
-
-    if (resultado?.valido) {
-      setComensalElegido?.((prev) => {
-        const copia = { ...prev };
-        delete copia[marcacion.clave];
-        return copia;
-      });
-      onMarcacionExitosa?.();
-    }
-    return resultado;
-  } catch (err) {
-    // Sin una respuesta que lo descarte (red, tiempo, 5xx) no se sabe si la
-    // ración quedó registrada: se pide verificar, nunca se reenvía.
-    setAvisoAccion?.(marcacionIncierta(err) ? avisoDeFalloRegistro(err) : {
-      tipo: 'error',
-      titulo: 'Error al autorizar',
-      detalle: err.message,
-    });
-    return undefined;
-  } finally {
-    setAutorizandoId?.(null);
-    await cargarDatosFn?.();
-  }
+export function entregadaPorCocina(marcacion) {
+  return marcacion?.resultadoFinal?.via === 'identificacion_manual';
 }
 
 /** Segmentos de la barra de filtros, en el orden en que se leen. */
@@ -237,14 +170,15 @@ export function programarRefrescoSupervision({ cargarDatos, intervaloMs = 30000 
 }
 
 /**
- * Sección de Supervisión del Comedor (para jefa de nutrición y sistemas).
+ * Sección de Supervisión del Comedor (jefa de nutrición).
  *
  * Una sola tabla en vivo: arriba, las pestañas de las comidas del día
  * ("Todas" + una por comida); debajo, la barra de filtros y la tabla de
- * marcaciones de la pestaña activa. La acción de fila vive en la columna
- * Acción, solo para huellas no identificadas. Aparte, con
- * `puedeRegistrarManual` (jefa y sistemas), «Registrar ración manual» no
- * depende de ninguna fila.
+ * marcaciones de la pestaña activa. La tabla es de consulta: las huellas no
+ * reconocidas las identifica la cocinera, y aquí solo se ve su resultado
+ * final. Con `puedeRegistrarManual`, «Registrar ración manual» sigue aparte y
+ * no depende de ninguna fila. Con `puedeConsultarIntervenciones`, al pie se
+ * consultan las intervenciones de cocina, sin aprobar nada.
  */
 export default function Supervision({
   fecha,
@@ -253,6 +187,7 @@ export default function Supervision({
   cargandoPadron = false,
   errorPadron = '',
   puedeRegistrarManual = false,
+  puedeConsultarIntervenciones = false,
   registrarManual = autorizarMarcacionManual,
   versionReloj = 0,
   onMarcacionExitosa,
@@ -262,8 +197,8 @@ export default function Supervision({
   marcacionesIniciales = [],
   avisoAccionInicial = null,
   actualizadoInicial = null,
-  filaExpandidaInicial = null,
   errorRefrescoInicial = '',
+  intervencionesIniciales = undefined,
 }) {
   const [cargando, setCargando] = useState(cargandoInicial);
   const [actualizando, setActualizando] = useState(false);
@@ -285,10 +220,6 @@ export default function Supervision({
   const [filtroResultado, setFiltroResultado] = useState('todas');
   const [busqueda, setBusqueda] = useState('');
 
-  /* Fila con el selector de comensal abierto + comensal por fila */
-  const [filaExpandida, setFilaExpandida] = useState(filaExpandidaInicial);
-  const [comensalElegido, setComensalElegido] = useState({});
-  const [autorizandoId, setAutorizandoId] = useState(null);
   const [avisoAccion, setAvisoAccion] = useState(avisoAccionInicial);
 
   const cargarDatos = useCallback(async ({ signal, esRefresco = false, comidaId } = {}) => {
@@ -343,23 +274,7 @@ export default function Supervision({
   function manejarPestana(comidaId) {
     pestanaTocada.current = true;
     setPestana(comidaId);
-    setFilaExpandida(null);
     cargarDatos({ esRefresco: true, comidaId });
-  }
-
-  /* Acción exclusiva de rechazos no identificados */
-  async function manejarAutorizarManual(marcacion, usuarioId) {
-    const resultado = await ejecutarAutorizacionManual({
-      marcacion,
-      usuarioId,
-      autorizarFn: autorizarMarcacionManual,
-      cargarDatosFn: () => cargarDatos({ esRefresco: true }),
-      setAvisoAccion,
-      setComensalElegido,
-      setAutorizandoId,
-      onMarcacionExitosa,
-    });
-    if (resultado?.valido) setFilaExpandida(null);
   }
 
   /* Registro manual independiente de las filas: el aviso es el de cualquier
@@ -536,20 +451,6 @@ export default function Supervision({
       {/* Aceptadas, rechazadas y manuales de la pestaña activa, con su período. */}
       {resumen && comidas.length > 0 ? <ResumenPestana resumen={resumen} dia={dia} /> : null}
 
-      {/*
-        Intervenciones de cocina — PENDIENTE del contrato de A3; aquí no hay
-        interfaz ni llamadas a la API. Punto de incorporación previsto:
-          1. Un panel «Intervenciones» justo debajo del resumen, acotado a la
-             pestaña activa (la misma `comidaId` que ya filtra el resumen y la
-             tabla), antes de la barra de filtros.
-          2. Acciones por marcación en la columna «Acción» de la tabla, junto
-             a «Autorizar» (hoy, el botón deshabilitado de `sin_derecho` espera
-             esa excepción de jefatura).
-        El estado de carga, los avisos y el refresco ya viven en este
-        componente: la intervención reutiliza `setAvisoAccion` y
-        `cargarDatos({ esRefresco: true })`.
-      */}
-
       {/* Barra: resultado, búsqueda por nombre, actualizado y actualización. */}
       <div className="supervision__filtros">
         <div className="supervision__chips-filtro" role="tablist" aria-label="Filtrar por resultado">
@@ -641,80 +542,66 @@ export default function Supervision({
                   <th scope="col">Resultado</th>
                   <th scope="col">Motivo</th>
                   <th scope="col">Método</th>
-                  <th scope="col">Acción</th>
                 </tr>
               </thead>
               <tbody>
                 {marcacionesFiltradas.map((m) => (
-                  <Fragment key={m.clave}>
-                    <tr className={claseDeFila(m)}>
-                      <td>{m.hora}</td>
-                      <td>{m.persona?.nombre ?? 'Desconocido'}</td>
-                      <td>{m.persona?.categoria ?? 'Sin clasificar'}</td>
-                      <td>{m.comida ?? '—'}</td>
-                      <td>
-                        <span className="supervision__resultado">
-                          <Etiqueta tono={m.valido ? 'exito' : 'error'}>
-                            {m.valido ? 'Aceptada' : 'Rechazada'}
-                          </Etiqueta>
-                          {esManual(m) ? <Etiqueta tono="manual">Manual</Etiqueta> : null}
-                        </span>
-                      </td>
-                      <td>{m.valido ? '—' : (ETIQUETAS_MOTIVOS[m.motivo] ?? m.motivo ?? ETIQUETAS_MOTIVOS.desconocido)}</td>
-                      <td>{metodoDeMarcacion(m)}</td>
-                      <td>
-                        <AccionFila
-                          marcacion={m}
-                          expandida={filaExpandida === m.clave}
-                          onAutorizar={() => setFilaExpandida(filaExpandida === m.clave ? null : m.clave)}
-                        />
-                      </td>
-                    </tr>
-                    {filaExpandida === m.clave && m.motivo === 'no_identificado' ? (
-                      <tr className="supervision__fila-autorizar">
-                        <td colSpan={8}>
-                          <div className="supervision__autorizar-caja">
-                            <label className="supervision__autorizar-etiqueta" htmlFor={`autorizar-${m.clave}`}>
-                              Comensal
-                            </label>
-                            <select
-                              id={`autorizar-${m.clave}`}
-                              className="supervision__select-padron"
-                              value={comensalElegido[m.clave] ?? ''}
-                              onChange={(e) => setComensalElegido({
-                                ...comensalElegido,
-                                [m.clave]: e.target.value,
-                              })}
-                            >
-                              <option value="">Seleccione comensal del padrón…</option>
-                              {personal.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.nombre} — {p.categoria} ({p.legajo})
-                                </option>
-                              ))}
-                            </select>
-                            <Boton
-                              tamano="sm"
-                              disabled={!(comensalElegido[m.clave] ?? '') || autorizandoId === m.clave}
-                              onClick={() => manejarAutorizarManual(m, comensalElegido[m.clave])}
-                            >
-                              {autorizandoId === m.clave ? 'Autorizando…' : 'Confirmar ración manual'}
-                            </Boton>
-                            <Boton variante="secundario" tamano="sm" onClick={() => setFilaExpandida(null)}>
-                              Cancelar
-                            </Boton>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
+                  <tr key={m.clave} className={claseDeFila(m)}>
+                    <td>{m.hora}</td>
+                    <td>{m.persona?.nombre ?? 'Desconocido'}</td>
+                    <td>{m.persona?.categoria ?? 'Sin clasificar'}</td>
+                    <td>{m.comida ?? '—'}</td>
+                    <td>
+                      <span className="supervision__resultado">
+                        <Etiqueta tono={m.valido ? 'exito' : 'error'}>
+                          {m.valido ? 'Aceptada' : 'Rechazada'}
+                        </Etiqueta>
+                        {esManual(m) ? <Etiqueta tono="manual">Manual</Etiqueta> : null}
+                        {entregadaPorCocina(m) ? <ResultadoFinalCocina marcacion={m} /> : null}
+                      </span>
+                    </td>
+                    <td>{m.valido ? '—' : (ETIQUETAS_MOTIVOS[m.motivo] ?? m.motivo ?? ETIQUETAS_MOTIVOS.desconocido)}</td>
+                    <td>{metodoDeMarcacion(m)}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </section>
+
+      {/* Consulta de lo que hizo cocina con las huellas no reconocidas: solo
+          jefa, sin botones de aprobación. Acotada a la pestaña activa y
+          refrescada con el resto de la sección. */}
+      {puedeConsultarIntervenciones ? (
+        <IntervencionesCocina
+          key={pestana ?? 'todas'}
+          fecha={fecha}
+          comidaId={pestana}
+          comida={resumen?.comida?.comida ?? null}
+          version={actualizado?.getTime?.() ?? 0}
+          inicial={intervencionesIniciales}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Resultado final de una huella que identificó cocina: la entrega, a quién y,
+ * para la jefa, qué cuenta la registró. Nunca dice que el lector la reconoció.
+ */
+function ResultadoFinalCocina({ marcacion }) {
+  const nombre = marcacion.resultadoFinal?.comensal?.nombre;
+  const cuenta = marcacion.intervencion?.registradaPor;
+  const quien = cuenta ? cuenta.nombre || cuenta.usuario : null;
+  return (
+    <span className="supervision__final-cocina">
+      <Etiqueta tono="exito">Entregada por cocina</Etiqueta>
+      <span className="supervision__final-detalle">
+        {[nombre, quien ? `registró ${quien}` : null].filter(Boolean).join(' · ')}
+      </span>
+    </span>
   );
 }
 
@@ -781,39 +668,6 @@ function ResumenPestana({ resumen, dia }) {
         </div>
       </dl>
     </section>
-  );
-}
-
-/**
- * Acción de una fila: "Autorizar" solo para huellas no identificadas (abre el
- * selector debajo de la fila); en sin_derecho, botón desactivado sin petición;
- * en las demás filas, un guion que dice que no hay nada que hacer.
- */
-function AccionFila({ marcacion, expandida, onAutorizar }) {
-  if (marcacion.motivo === 'no_identificado') {
-    return (
-      <Boton variante="primario" tamano="sm" onClick={onAutorizar} aria-expanded={expandida}>
-        Autorizar
-      </Boton>
-    );
-  }
-  if (marcacion.motivo === 'sin_derecho') {
-    return (
-      <Boton
-        variante="secundario"
-        tamano="sm"
-        disabled
-        title="Requiere excepción de jefatura (pendiente)"
-      >
-        Autorizar
-      </Boton>
-    );
-  }
-  return (
-    <span className="supervision__sin-accion">
-      <span aria-hidden="true">—</span>
-      <span className="solo-lectores">Sin acción disponible</span>
-    </span>
   );
 }
 

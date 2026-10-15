@@ -54,6 +54,13 @@ export function detectarNueva(conocidas, filas, propias = new Set()) {
  *   anteriores quedan a la vista y la referencia se reinicia).
  * - `puedeDetectar()` false (una marcación local en curso) actualiza la lista
  *   sin tocar la referencia, para no anunciar dos veces la propia.
+ * - `consultarPendientes({ signal })`, opcional (solo cocinera): las huellas
+ *   no reconocidas que se pueden identificar ahora
+ *   (GET /pantalla/lecturas-por-identificar). Va en el mismo ciclo, con la
+ *   misma `signal`, porque la ventana de marcaciones corta en 100 filas y
+ *   por fecha: no sirve para seguir el servicio nocturno.
+ *   `alActualizarPendientes({ resultado, error })` recibe su resultado aparte:
+ *   un fallo suyo no tapa la lista, ni al revés.
  *
  * Sin solapes: `solicitar()` durante un ciclo pide uno más al terminar, sin
  * esperar los 3 s. Con la pestaña oculta no se programa ni se inicia nada
@@ -65,6 +72,8 @@ export function programarCicloCocina({
   refrescarEstado = async () => {},
   alActualizar = () => {},
   puedeDetectar = () => true,
+  consultarPendientes = null,
+  alActualizarPendientes = () => {},
   intervaloMs = MS_CICLO_COCINA,
   documento = globalThis.document,
   temporizador = globalThis,
@@ -94,14 +103,25 @@ export function programarCicloCocina({
   }
 
   async function ciclo(signal, origen) {
-    const [lista] = await Promise.all([
+    const [lista, , pendientes] = await Promise.all([
       consultarMarcaciones({ signal }).then(
         (filas) => ({ filas }),
         (fallo) => ({ fallo }),
       ),
       Promise.resolve().then(() => refrescarEstado({ origen, signal })).catch(() => {}),
+      consultarPendientes
+        ? Promise.resolve().then(() => consultarPendientes({ signal })).then(
+          (resultado) => ({ resultado }),
+          (fallo) => ({ fallo }),
+        )
+        : null,
     ]);
     if (signal.aborted || cancelado) return;
+    if (pendientes) {
+      alActualizarPendientes(pendientes.fallo
+        ? { error: pendientes.fallo?.message || 'No se pudieron cargar las huellas por identificar.' }
+        : { resultado: pendientes.resultado, error: '' });
+    }
     if (lista.fallo) {
       conocidas = null;
       alActualizar({ error: lista.fallo?.message || 'No se pudieron cargar las marcaciones.' });
