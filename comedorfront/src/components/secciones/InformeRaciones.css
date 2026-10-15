@@ -10,21 +10,25 @@
   background: var(--c-superficie);
   border: 1px solid var(--c-borde);
   border-radius: var(--r-lg);
-  box-shadow: 0 8px 22px rgba(18, 35, 61, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  /* Transición fluida idéntica a Tarjeta */
-  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  box-shadow: 0 2px 8px rgba(18, 35, 61, 0.04);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
+/* La hoja entera no se desplaza al pasar el cursor: es el contenedor, no una tarjeta. */
 .informe:hover {
   border-color: var(--c-borde-fuerte);
-  box-shadow: var(--s-2);
-  transform: translateY(-2px);
+  box-shadow: var(--s-3);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .informe:hover {
-    transform: none;
+  .informe {
+    transition: none;
   }
+}
+
+/* El filtro ya es parte de la hoja: el espaciado lo da la rejilla, no su margen. */
+.informe .report-controls {
+  margin-bottom: 0;
 }
 
 /* ---------- Cabecera ---------- */
@@ -57,6 +61,8 @@
   letter-spacing: -0.015em;
 }
 
+/* Período, Excel y PDF comparten renglón y altura (--alto-control), igual que
+   los selectores de fecha de arriba. */
 .informe__acciones {
   display: flex;
   align-items: center;
@@ -65,34 +71,69 @@
 }
 
 .informe__acciones .boton {
-  min-height: 46px;
+  height: var(--alto-control);
+  min-height: var(--alto-control);
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
+/* Una sola línea de alto fijo: el dato secundario (días, gestión) va al lado
+   del principal; si falta sitio se recorta el principal, nunca crece el control. */
 .informe__periodo {
-  display: grid;
-  justify-items: center;
-  gap: 1px;
-  padding: 9px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-3);
+  max-width: 100%;
+  height: var(--alto-control);
+  padding: 0 var(--e-4);
   color: var(--c-acento-oscuro);
   background: var(--c-acento-tenue);
   border: 1px solid var(--c-acento-linea);
-  border-radius: var(--r-md);
-  text-align: center;
+  border-radius: var(--r-boton);
 }
 
 .informe__periodo-mes {
-  font-size: var(--t-md);
+  overflow: hidden;
+  font-size: var(--t-sm);
   font-weight: 800;
-  line-height: 1.15;
+  line-height: 1.2;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .informe__periodo-gestion {
-  color: var(--c-texto-2);
+  flex: none;
+  padding: 2px 9px;
+  color: var(--c-acento-oscuro);
+  background: var(--c-acento-claro);
+  border-radius: var(--r-full);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.04em;
+  line-height: 1.4;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.informe__estado {
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.informe__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  color: var(--c-error);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  border-radius: var(--r-md);
+  font-size: var(--t-sm);
+  font-weight: 600;
 }
 
 /* Período sin registro: se dice, en vez de dejar una tabla de guiones muda. */

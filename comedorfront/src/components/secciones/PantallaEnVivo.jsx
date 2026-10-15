@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom';
 import Etiqueta from '../ui/Etiqueta.jsx';
 import GaugeRaciones from '../ui/GaugeRaciones.jsx';
 import Tarjeta from '../ui/Tarjeta.jsx';
-import { obtenerDiaPersonal, obtenerUltimasMarcaciones } from '../../api.js';
+import { obtenerDiaPersonal, obtenerLecturasPorIdentificar, obtenerUltimasMarcaciones } from '../../api.js';
 import { LIMITE_MARCACIONES_COCINA, programarCicloCocina } from '../../cocinaEnVivo.js';
+import { revisionesCambiadas } from '../../identificacion.js';
+import IdentificarLectura from './IdentificarLectura.jsx';
 import useConsultaApi from '../../hooks/useConsultaApi.js';
 import Boton from '../ui/Boton.jsx';
 import { IconoBuscar, IconoCheck, IconoEquis, IconoHuella } from '../ui/Iconos.jsx';
@@ -95,12 +97,38 @@ export function etiquetaDeOrigen(origen) {
   return null;
 }
 
+/** La huella no reconocida terminó en una entrega identificada por cocina. */
+export function identificadaPorCocina(fila) {
+  return fila?.resultadoFinal?.via === 'identificacion_manual';
+}
+
 /**
  * Fila de la lista con la misma forma que la marcación en vivo, para que el
  * escenario y la barra de comidas la muestren igual. `id` es la clave del
  * evento: el id numérico se repite entre lecturas y asistencias manuales.
+ *
+ * Una huella no reconocida que cocina identificó se muestra por su resultado
+ * final (la entrega, con la persona identificada), sin decir nunca que el
+ * lector la reconoció: la decisión original sigue siendo un rechazo.
  */
 export function eventoDeFila(fila) {
+  if (identificadaPorCocina(fila)) {
+    const comensal = fila.resultadoFinal.comensal;
+    return {
+      id: fila.clave,
+      origen: fila.origen ?? null,
+      valido: true,
+      titulo: 'Entrega registrada por cocina',
+      detalle: 'El lector no reconoció la huella; cocina identificó a la persona',
+      hora: fila.hora,
+      persona: {
+        id: comensal.usuarioId ?? null,
+        nombre: comensal.nombre ?? 'Persona identificada',
+        categoria: 'Identificada por cocina',
+        legajo: '—',
+      },
+    };
+  }
   const manual = fila.origen === 'asistencia_manual';
   return {
     id: fila.clave,
@@ -187,6 +215,10 @@ export default function PantallaEnVivo({
   fechaServidor,
   versionReloj = 0,
   recargarEstado,
+  puedeIdentificar = false,
+  personal = [],
+  cargandoPadron = false,
+  errorPadron = '',
 }) {
   /*
    * Lo que se muestra como «recién ocurrido»: la marcación que envió esta
@@ -238,6 +270,14 @@ export default function PantallaEnVivo({
    */
   const [marcaciones, setMarcaciones] = useState(null);
   const [errorMarcaciones, setErrorMarcaciones] = useState('');
+
+  /* Solo cocinera: las huellas no reconocidas identificables ahora, aparte de
+     la ventana de marcaciones (que corta por fecha y en 100 filas). */
+  const [pendientes, setPendientes] = useState(null);
+  const [errorPendientes, setErrorPendientes] = useState('');
+  const [lecturaAbierta, setLecturaAbierta] = useState(null);
+  /* `intervencion.revision` de cada fila en la consulta anterior. */
+  const revisiones = useRef(null);
   const cargandoMarcaciones = marcaciones === null && !errorMarcaciones;
 
   const idEvento = evento?.id ?? null;
@@ -261,6 +301,17 @@ export default function PantallaEnVivo({
         ? undefined
         : recargarEstadoRef.current?.({ conservar: true, signal })),
       puedeDetectar: () => !deteccionEnPausa.current,
+      consultarPendientes: puedeIdentificar
+        ? ({ signal }) => obtenerLecturasPorIdentificar({ signal })
+        : null,
+      alActualizarPendientes: ({ resultado, error }) => {
+        if (error) {
+          setErrorPendientes(error);
+          return;
+        }
+        setPendientes(resultado);
+        setErrorPendientes('');
+      },
       alActualizar: ({ filas: recibidas, error, nueva }) => {
         if (error) {
           setErrorMarcaciones(error);
@@ -268,6 +319,19 @@ export default function PantallaEnVivo({
         }
         setMarcaciones(recibidas);
         setErrorMarcaciones('');
+        /* Una fila que ya existía cambió (alguien registró su entrega): si es
+           la que está a la vista, se redibuja con su resultado final, sin
+           flash, porque no es una marcación nueva. */
+        const { revisiones: actuales, cambiadas } = revisionesCambiadas(revisiones.current, recibidas);
+        revisiones.current = actuales;
+        if (cambiadas.length > 0) {
+          setEnVivo((previo) => {
+            if (!previo) return previo;
+            const clave = previo.evento?.claveEvento ?? previo.llave;
+            const fila = cambiadas.includes(clave) ? recibidas.find((r) => r.clave === clave) : null;
+            return fila ? { ...previo, evento: { ...eventoDeFila(fila), claveEvento: fila.clave }, flash: false } : previo;
+          });
+        }
         if (nueva) {
           setEnVivo({ llave: nueva.clave, evento: eventoDeFila(nueva), flash: true });
           setClaveSeleccionada(null);
@@ -342,6 +406,12 @@ export default function PantallaEnVivo({
   /* Lo que manda en el escenario y en la barra de comidas: la fila elegida a
      mano si hay una, o si no, la marcación en vivo. */
   const eventoMostrado = eventoSeleccionado ?? enVivo?.evento ?? null;
+  /* La huella a la vista sigue pendiente de identificar: su resultado ofrece
+     abrirla directamente en «Huellas por identificar». */
+  const claveMostrada = eventoSeleccionado ? claveSeleccionada : enVivo?.evento?.claveEvento ?? enVivo?.llave;
+  const lecturaMostradaPendiente = puedeIdentificar && eventoMostrado && !eventoMostrado.valido
+    ? (pendientes?.lecturas ?? []).find((lectura) => lectura.clave === claveMostrada) ?? null
+    : null;
   const origenMostrado = etiquetaDeOrigen(eventoMostrado?.origen);
   const mostrarResultado = !leyendo && eventoMostrado !== null;
   const personaMostrada = eventoMostrado?.persona;
@@ -467,6 +537,12 @@ export default function PantallaEnVivo({
                     </div>
 
                     <p className="resultado__detalle">{eventoMostrado.detalle}</p>
+
+                    {lecturaMostradaPendiente && lecturaAbierta !== lecturaMostradaPendiente.id ? (
+                      <Boton onClick={() => setLecturaAbierta(lecturaMostradaPendiente.id)}>
+                        Identificar a la persona
+                      </Boton>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -505,6 +581,19 @@ export default function PantallaEnVivo({
         </div>
 
         <aside className="vivo__lateral">
+          {puedeIdentificar ? (
+            <IdentificarLectura
+              pendientes={pendientes}
+              error={errorPendientes}
+              personal={personal}
+              cargandoPadron={cargandoPadron}
+              errorPadron={errorPadron}
+              abierta={lecturaAbierta}
+              onAbrir={setLecturaAbierta}
+              onResultado={() => ciclo.current?.solicitar()}
+            />
+          ) : null}
+
           <Tarjeta
             titulo="Marcaciones del turno"
             accesorio={`${filasFiltradas.length}`}
@@ -568,7 +657,7 @@ export default function PantallaEnVivo({
                     tabIndex={0}
                     aria-pressed={claveSeleccionada === registro.clave}
                     className={`historial__fila historial__fila--${
-                      registro.valido ? 'exito' : 'error'
+                      registro.valido || identificadaPorCocina(registro) ? 'exito' : 'error'
                     }${claveSeleccionada === registro.clave ? ' historial__fila--activa' : ''}`}
                     onClick={() => setClaveSeleccionada(registro.clave)}
                     onKeyDown={(e) => {
@@ -583,11 +672,20 @@ export default function PantallaEnVivo({
                         {registro.persona.categoria}
                         {' · '}{registro.hora}
                         {registro.origen === 'asistencia_manual' ? ' · Registro manual' : null}
+                        {identificadaPorCocina(registro)
+                          ? ` · Identificada por cocina: ${registro.resultadoFinal.comensal.nombre ?? 'persona identificada'}`
+                          : null}
                       </span>
                     </span>
-                    <span className="historial__marca" aria-label={registro.titulo} data-tooltip={registro.titulo}>
-                      {registro.valido ? <IconoCheck tamano={16} /> : <IconoEquis tamano={16} />}
-                    </span>
+                    {identificadaPorCocina(registro) ? (
+                      <span className="historial__marca" aria-label="Entrega registrada por cocina" data-tooltip="Entrega registrada por cocina">
+                        <IconoCheck tamano={16} />
+                      </span>
+                    ) : (
+                      <span className="historial__marca" aria-label={registro.titulo} data-tooltip={registro.titulo}>
+                        {registro.valido ? <IconoCheck tamano={16} /> : <IconoEquis tamano={16} />}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
