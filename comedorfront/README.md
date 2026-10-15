@@ -72,7 +72,9 @@ servidas y rechazos, y una tabla en vivo con las últimas 100 marcaciones.
 Filtra por resultado y por nombre, se refresca cada 30 s y tiene botón
 Actualizar con la hora del último refresco. La tabla es de consulta: ya no hay
 «Autorizar» sobre las filas; la huella no reconocida la identifica la cocinera
-y aquí se ve su resultado final. «Registrar ración manual» sigue aparte.
+y aquí se ve su resultado final. Supervisión es solo lectura: no ofrece
+registrar, autorizar ni modificar raciones (el permiso manual de la API no
+cambió; solo la pantalla dejó de usarlo).
 
 Administración (solo sistemas) muestra la tabla de cuentas —usuario, nombre,
 rol, vínculo, estado y último ingreso— con «Reiniciar clave» y
@@ -194,8 +196,8 @@ transiciones cortas y `prefers-reduced-motion`. No se agregó ninguna dependenci
 debajo, un resumen de la pestaña activa con su período. Las manuales ya están
 dentro de las aceptadas (`servidas` incluye `manuales`): se muestran aparte, no se
 suman. La barra de filtros suma el segmento «Manuales» (por `origen`) y cada fila
-manual lleva su marca. El registro manual independiente sigue igual; el
-«Autorizar» de filas se retiró (ver abajo).
+manual lleva su marca. La pantalla es solo lectura: se retiraron el
+«Autorizar» de filas (ver abajo) y «Registrar ración manual».
 
 **Resumen.** Tres conteos distintos, cada uno con su período (`src/resumen.js`):
 
@@ -263,7 +265,7 @@ cocina» con la persona y la cuenta que la registró. Al pie, «Intervenciones d
 cocina» (`GET /intervenciones-cocina`, acotado al día y a la pestaña activa):
 momento, persona, comida, cocinera responsable, decisión original y resultado
 final, con totales, filtro por resultado y páginas de 50. Solo consulta: ningún
-botón de aprobación. El registro manual independiente no aparece ahí.
+botón de aprobación. Los registros manuales de jefatura no aparecen ahí.
 
 **Sistemas** no ve ninguna de las dos cosas (`src/permisos.js`), igual que en el
 backend.

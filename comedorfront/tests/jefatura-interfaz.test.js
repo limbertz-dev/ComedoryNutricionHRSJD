@@ -150,13 +150,85 @@ test('el segmento «Manuales» filtra por origen, no por resultado ni por dispos
   assert.equal(html.match(/supervision__fila--manual/g).length, 1);
 });
 
-test('Supervisión conserva el registro manual solo con permiso y consulta intervenciones solo con permiso', () => {
-  const conPermiso = supervision({ puedeRegistrarManual: true });
-  assert.match(conPermiso, /Registrar ración manual/);
-  assert.doesNotMatch(supervision({ puedeRegistrarManual: false }), /Registrar ración manual/);
+test('Supervisión no ofrece registro manual y consulta intervenciones solo con permiso', () => {
+  const html = supervision({ puedeRegistrarManual: true });
+  assert.doesNotMatch(html, /Registrar ración manual/);
 
   /* Sin el permiso de consulta (sistemas, o un rol futuro) no hay apartado. */
-  assert.doesNotMatch(conPermiso, /Intervenciones de cocina/);
+  assert.doesNotMatch(html, /Intervenciones de cocina/);
+  const pagina = {
+    desde: '2026-09-28', hasta: '2026-09-28', total: 0, limite: 50, desplazamiento: 0,
+    totales: { registradas: 0, rechazadas: 0 }, datos: [],
+  };
+  assert.match(supervision({ puedeConsultarIntervenciones: true, intervencionesIniciales: { pagina } }), /Intervenciones de cocina/);
+});
+
+test('Supervisión es SOLO LECTURA: ningún control registra, autoriza ni modifica raciones', () => {
+  const pagina = {
+    desde: '2026-09-28', hasta: '2026-09-28', total: 1, limite: 50, desplazamiento: 0,
+    totales: { registradas: 1, rechazadas: 0 },
+    datos: [{
+      id: 56, clave: 'intervencion_lectura:56', resultado: 'registrada', motivoRechazo: null, momento: '2026-09-28T12:30:00',
+      decisionOriginal: { lecturaId: 9, resultado: 'rechazada', motivo: 'no_identificado', fechaHora: '2026-09-28T12:29:00', dispositivo: 'lector-pb' },
+      cuenta: { id: 4, usuario: 'maria.cocina', nombre: 'María Cocina' },
+      comensal: { usuarioId: 99, nombre: 'Ana Gomez', categoria: 'Médico' },
+      servicio: { comidaId: 2, comida: 'Almuerzo', fechaComida: '2026-09-28', reconstruido: true },
+      entregaRegistrada: true, asistenciaId: 31, lecturaResuelta: true,
+    }],
+  };
+  const html = supervision({
+    puedeRegistrarManual: true,
+    puedeConsultarIntervenciones: true,
+    intervencionesIniciales: { pagina },
+    marcacionesIniciales: [
+      marcacion({ id: 1 }),
+      marcacion({ id: 2, valido: false, motivo: 'no_identificado', persona: { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar' } }),
+      marcacion({ id: 3, origen: 'asistencia_manual' }),
+    ],
+  });
+
+  /* Sin textos ni controles de escritura. */
+  assert.doesNotMatch(html, /Registrar|Autorizar|Confirmar|Aprobar|Anular|Deshacer|Guardar|Eliminar/);
+  assert.doesNotMatch(html, /<select|<form|<textarea|registro-manual/);
+  assert.equal(html.match(/<input/g).length, 1, 'solo el buscador por nombre');
+
+  /* Todo botón es de consulta: pestañas, filtros, Actualizar y los de Intervenciones. */
+  const textos = [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)]
+    .map(([, interior]) => interior.replace(/<[^>]+>/g, '').trim());
+  const permitidos = new Set([
+    'Todas', 'Aceptadas', 'Rechazadas', 'Manuales', 'Actualizar',
+    'Entregas registradas', 'Intentos rechazados',
+  ]);
+  for (const texto of textos) {
+    const esPestana = /^(Todas|Desayuno|Almuerzo)/.test(texto);
+    assert.ok(esPestana || permitidos.has(texto), `botón inesperado en Supervisión: «${texto}»`);
+  }
+
+  /* Conserva la consulta: pestañas, filtros, búsqueda, actualización e intervenciones. */
+  assert.match(html, /Filtrar por comida/);
+  assert.match(html, /Filtrar por resultado/);
+  assert.match(html, /placeholder="Buscar por nombre…"/);
+  assert.match(html, /<span class="boton__texto">Actualizar<\/span>/);
+  assert.match(html, /3 de 3 marcaciones/);
+  assert.match(html, /Intervenciones de cocina/);
+  assert.match(html, /Filtrar intervenciones por resultado/);
+});
+
+test('Supervisión e Intervenciones solo importan lecturas de la API y App no les pasa escritura', () => {
+  const importadas = (ruta) => {
+    const fuente = leer(ruta);
+    const bloque = /import\s*\{([^}]*)\}\s*from\s*'\.\.\/\.\.\/api\.js'/.exec(fuente);
+    return bloque ? bloque[1].split(',').map((nombre) => nombre.trim()).filter(Boolean) : [];
+  };
+  assert.deepEqual(importadas('../src/components/secciones/Supervision.jsx').sort(), ['obtenerComidasDelDia', 'obtenerUltimasMarcaciones']);
+  assert.deepEqual(importadas('../src/components/secciones/IntervencionesCocina.jsx'), ['obtenerIntervencionesCocina']);
+  const supervision = leer('../src/components/secciones/Supervision.jsx');
+  assert.doesNotMatch(supervision, /RegistroManual|autorizarMarcacionManual|marcarAsistencia|identificarLectura|method:/);
+
+  /* App monta Supervisión sin props de escritura. */
+  const app = leer('../src/App.jsx');
+  const montaje = app.slice(app.indexOf('<Supervision'), app.indexOf('/>', app.indexOf('<Supervision')));
+  assert.doesNotMatch(montaje, /puedeRegistrarManual|onMarcacionExitosa|personal=|registrar/);
 });
 
 test('la tabla de Supervisión es de consulta: sin «Autorizar» ni columna de acción', () => {
