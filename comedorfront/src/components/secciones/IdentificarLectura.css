@@ -310,3 +310,38 @@
     transition: none;
   }
 }
+
+/* ---------- Entregas por verificar ---------- */
+/* Intentos con resultado incierto: siguen a la vista aunque se cierre el
+   panel o la huella salga de los pendientes, hasta verificarlos. */
+.identificar__verificar {
+  display: grid;
+  gap: var(--e-2);
+  padding: var(--e-3);
+  background: var(--c-aviso-tenue);
+  border: 1px solid var(--c-aviso);
+  border-radius: var(--r-md);
+}
+
+.identificar__verificar-titulo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-2);
+  margin: 0;
+  color: var(--c-aviso);
+  font-size: var(--t-xs);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.identificar__fila--verificar {
+  border-left-color: var(--c-aviso);
+}
+
+.identificar__bloqueo {
+  margin: 0;
+  color: var(--c-texto);
+  font-size: var(--t-sm);
+  font-weight: 700;
+}

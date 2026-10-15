@@ -234,18 +234,26 @@ se envía `{usuario_id}`.
   generada con `getRandomValues` para funcionar también fuera de HTTPS) nace al
   confirmar a una persona para una lectura. Solo se reutiliza para repetir esa
   misma decisión: con `incierto` (503 `resultado_incierto`, otro 5xx, red,
-  tiempo de espera o respuesta ilegible) o `en_curso` se ofrece «Volver a
-  confirmar» con la persona fija. Otra persona, una entrega, un rechazo o un
-  conflicto cierran el intento. Un segundo clic con un envío en vuelo no hace
-  nada.
+  tiempo de espera, respuesta ilegible o cualquier error después de iniciar el
+  envío) o `en_curso` se ofrece «Verificar entrega». Solo un resultado
+  definitivo (entrega, rechazo, conflicto o un rechazo de sesión) cierra el
+  intento. Un segundo clic con un envío en vuelo no hace nada.
+- **Intento sin resolver.** Cerrar el panel no lo cancela: queda en «Por
+  verificar» con su lectura, su persona y su clave. Al reabrirlo solo se ofrece
+  verificarlo con esa misma persona; no se puede elegir a otra para esa huella
+  hasta resolverlo. El intento guarda una copia mínima de la persona (id,
+  nombre, categoría, legajo), así que se verifica aunque ya no esté en el padrón
+  visible. Vive mientras la pantalla de cocina está montada: cerrar sesión lo
+  pierde, porque la clave vale solo para esa cuenta.
 - **Resultados.** Solo `registrada` es una entrega. `rechazada` (sin_derecho,
   duplicado) es un intento sin entrega y nunca se le llama entrega. Un conflicto
   sobre la lectura (ya resuelta, otro servicio, servicio no determinable, reloj
   inconsistente) cierra el panel; «ya resuelta» dice si fue esta cuenta, nunca
   quién. Un resultado incierto nunca afirma que no hubo entrega.
-- **Seguimiento.** Una huella que sale de la lista dejó de ser identificable; si
-  quedaba un intento incierto, todavía se puede volver a confirmar con la misma
-  clave para recuperar lo que haya quedado. `intervencion.revision` de
+- **Seguimiento.** Una huella que sale de la lista dejó de ser identificable,
+  pero eso no prueba que se haya entregado (pudo terminar el servicio): si
+  quedaba un intento sin resolver, sigue en «Por verificar» y se verifica con la
+  misma clave para recuperar lo que haya quedado. `intervencion.revision` de
   `ultimas-marcaciones` sube cuando alguien (también otra cocinera) registra la
   entrega: la fila a la vista se redibuja con su resultado final, sin flash.
 

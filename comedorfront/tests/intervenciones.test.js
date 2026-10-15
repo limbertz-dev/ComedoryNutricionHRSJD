@@ -225,42 +225,88 @@ test('sin lectura, persona o clave válidas no se envía nada', async () => {
 
 /* ------------------------------------------------- intento e idempotencia */
 
-test('un resultado incierto se repite con la MISMA clave y la misma persona; la entrega cierra el intento', async () => {
+const LECTURA_9 = { id: 9, clave: 'lectura_biometrica:9', hora: '23:58:00', comida: 'Cena' };
+const LUIS = { id: 15, nombre: 'Luis Perez', categoria: 'Planta', legajo: 'P-15' };
+
+/** Identificador con POST grabado: `respuestas` se consumen en orden. */
+function identificadorGrabado(respuestas) {
   const llamadas = [];
-  const respuestas = [{ estado: 'incierto' }, { estado: 'registrada', reintento: true }, { estado: 'registrada' }];
   let n = 0;
+  let i = 0;
   const identificador = crearIdentificador({
     identificar: async (lecturaId, usuarioId, { clave }) => {
       llamadas.push({ lecturaId, usuarioId, clave });
-      return respuestas[n++];
+      const respuesta = respuestas[n++];
+      if (respuesta instanceof Error) throw respuesta;
+      return respuesta;
     },
-    nuevaClave: (() => { let i = 0; return () => `clave-${++i}`; })(),
+    nuevaClave: () => `clave-${++i}`,
   });
+  return { identificador, llamadas };
+}
 
-  assert.equal((await identificador.confirmar(7, 99)).estado, 'incierto');
-  assert.deepEqual(identificador.pendiente(7), { usuarioId: 99, clave: 'clave-1' });
-  assert.equal((await identificador.confirmar(7, 99)).reintento, true);
-  assert.equal(llamadas[1].clave, 'clave-1', 'la repetición usa la misma clave');
-  assert.equal(identificador.pendiente(7), null, 'la entrega confirmada cierra el intento');
+test('un resultado incierto se verifica con la MISMA clave y la misma persona; la entrega cierra el intento', async () => {
+  const { identificador, llamadas } = identificadorGrabado([
+    { estado: 'incierto' }, { estado: 'registrada', reintento: true }, { estado: 'registrada' },
+  ]);
+  assert.equal((await identificador.confirmar(LECTURA_9, ANA)).estado, 'incierto');
+  const pendiente = identificador.pendiente(9);
+  assert.equal(pendiente.usuarioId, 99);
+  assert.equal(pendiente.clave, 'clave-1');
+  assert.equal(pendiente.estado, 'incierto');
+
+  assert.equal((await identificador.verificar(9)).reintento, true);
+  assert.deepEqual(llamadas[1], { lecturaId: 9, usuarioId: 99, clave: 'clave-1' });
+  assert.equal(identificador.pendiente(9), null, 'la entrega confirmada cierra el intento');
 
   /* Un intento nuevo sobre otra lectura lleva otra clave. */
-  await identificador.confirmar(8, 99);
+  await identificador.confirmar({ ...LECTURA_9, id: 8 }, ANA);
   assert.equal(llamadas[2].clave, 'clave-2');
 });
 
-test('otra persona o un rechazo definitivo nunca reutilizan la clave', async () => {
-  const claves = [];
-  const respuestas = [{ estado: 'incierto' }, { estado: 'rechazada' }, { estado: 'rechazada' }];
-  let n = 0;
-  const identificador = crearIdentificador({
-    identificar: async (_lectura, _usuario, { clave }) => { claves.push(clave); return respuestas[n++]; },
-    nuevaClave: (() => { let i = 0; return () => `clave-${++i}`; })(),
-  });
-  await identificador.confirmar(7, 99);
-  await identificador.confirmar(7, 15); // otra persona: otra decisión
-  assert.deepEqual(claves, ['clave-1', 'clave-2']);
-  await identificador.confirmar(7, 15); // tras un rechazo, un intento nuevo
-  assert.deepEqual(claves, ['clave-1', 'clave-2', 'clave-3']);
+test('durante la incertidumbre no se puede cambiar de persona; tras un resultado definitivo, sí y con otra clave', async () => {
+  const { identificador, llamadas } = identificadorGrabado([
+    { estado: 'en_curso' }, { estado: 'rechazada' }, { estado: 'rechazada' },
+  ]);
+  await identificador.confirmar(LECTURA_9, ANA);
+  /* Otra persona sobre la misma huella: bloqueado, sin petición. */
+  assert.deepEqual(await identificador.confirmar(LECTURA_9, LUIS), { estado: 'bloqueado' });
+  assert.equal(llamadas.length, 1);
+  assert.equal(identificador.pendiente(9).usuarioId, 99, 'la decisión pendiente no se sustituye');
+  assert.equal(avisoDeIdentificacion({ estado: 'bloqueado' }).repetir, true);
+
+  /* Verificar resuelve (rechazo definitivo): recién ahí se puede elegir a otra. */
+  await identificador.verificar(9);
+  assert.equal(llamadas[1].clave, 'clave-1');
+  assert.equal(identificador.pendiente(9), null);
+  await identificador.confirmar(LECTURA_9, LUIS);
+  assert.deepEqual(llamadas[2], { lecturaId: 9, usuarioId: 15, clave: 'clave-2' });
+});
+
+test('un error inesperado después de iniciar el envío es incierto: conserva el intento y no dice que no hubo entrega', async () => {
+  const { identificador, llamadas } = identificadorGrabado([new Error('se cortó la respuesta'), undefined]);
+  const resultado = await identificador.confirmar(LECTURA_9, ANA);
+  assert.equal(resultado.estado, 'incierto');
+  assert.equal(identificador.pendiente(9).clave, 'clave-1');
+  const aviso = avisoDeIdentificacion(resultado, ANA);
+  assert.equal(aviso.repetir, true);
+  assert.doesNotMatch(aviso.titulo + aviso.detalle, /no se registró|no hubo entrega/i);
+
+  /* Una respuesta sin estado tampoco se toma como definitiva. */
+  assert.equal((await identificador.verificar(9)).estado, 'incierto');
+  assert.equal(llamadas[1].clave, 'clave-1');
+  assert.ok(identificador.pendiente(9));
+  /* Un estado desconocido tampoco afirma nada. */
+  assert.doesNotMatch(avisoDeIdentificacion({ estado: 'otra-cosa' }).titulo, /no se registró/i);
+});
+
+test('sin huella o persona válidas no se abre intento ni se envía nada', async () => {
+  const { identificador, llamadas } = identificadorGrabado([]);
+  assert.equal((await identificador.confirmar(LECTURA_9, { id: null })).estado, 'invalido');
+  assert.equal((await identificador.confirmar({ id: 0 }, ANA)).estado, 'invalido');
+  assert.equal(await identificador.verificar(9), null, 'nada que verificar');
+  assert.equal(llamadas.length, 0);
+  assert.deepEqual(identificador.pendientes(), []);
 });
 
 test('un segundo clic mientras el POST está en vuelo no envía nada', async () => {
@@ -269,19 +315,99 @@ test('un segundo clic mientras el POST está en vuelo no envía nada', async () 
   const identificador = crearIdentificador({
     identificar: () => { llamadas += 1; return new Promise((resolver) => { liberar = resolver; }); },
   });
-  const primero = identificador.confirmar(7, 99);
-  assert.equal(await identificador.confirmar(7, 99), null);
+  const primero = identificador.confirmar(LECTURA_9, ANA);
+  assert.equal(identificador.enVuelo(), true);
+  assert.equal(await identificador.confirmar(LECTURA_9, ANA), null);
+  assert.equal(await identificador.verificar(9), null);
   liberar({ estado: 'registrada' });
   assert.equal((await primero).estado, 'registrada');
   assert.equal(llamadas, 1);
 });
 
-test('olvidar descarta el intento pendiente (la cocinera cancela)', async () => {
-  const identificador = crearIdentificador({ identificar: async () => ({ estado: 'en_curso' }) });
-  await identificador.confirmar(7, 99);
-  assert.ok(identificador.pendiente(7));
-  identificador.olvidar(7);
-  assert.equal(identificador.pendiente(7), null);
+test('el identificador no ofrece forma de descartar un intento sin resolver', () => {
+  const identificador = crearIdentificador({ identificar: async () => ({ estado: 'incierto' }) });
+  assert.equal('olvidar' in identificador, false);
+  assert.deepEqual(Object.keys(identificador).sort(), ['confirmar', 'enVuelo', 'pendiente', 'pendientes', 'verificar']);
+});
+
+/* --------------------------- panel de cocina con un intento sin resolver */
+
+const panel = (props) => renderToStaticMarkup(h(IdentificarLectura, {
+  pendientes: pendientesFixture([lecturaUi(9), lecturaUi(12, '00:20:00')]),
+  personal: [ANA, LUIS],
+  ...props,
+}));
+
+test('1. incierto → cerrar → reabrir: se recupera la misma decisión y se verifica con la misma clave y usuario', async () => {
+  const { identificador, llamadas } = identificadorGrabado([{ estado: 'incierto' }, { estado: 'registrada', reintento: true }]);
+  await identificador.confirmar(LECTURA_9, ANA);
+
+  /* Cerrado: el intento sigue listado para verificar. */
+  const cerrado = panel({ identificador, abierta: null });
+  assert.match(cerrado, /Por verificar/);
+  assert.match(cerrado, /Ana Gomez/);
+  assert.match(cerrado, /<span class="boton__texto">Verificar<\/span>/);
+
+  /* Reabierto: la persona del intento, sin selector, y «Verificar entrega». */
+  const reabierto = panel({ identificador, abierta: 9 });
+  assert.match(reabierto, /<strong>Ana Gomez<\/strong>/);
+  assert.match(reabierto, /<span class="boton__texto">Verificar entrega<\/span>/);
+  assert.doesNotMatch(reabierto, /Confirmar entrega/);
+
+  await identificador.verificar(9);
+  assert.deepEqual(llamadas.map(({ usuarioId, clave }) => ({ usuarioId, clave })), [
+    { usuarioId: 99, clave: 'clave-1' },
+    { usuarioId: 99, clave: 'clave-1' },
+  ]);
+});
+
+test('2. la persona deja de aparecer en el padrón: el intento se puede verificar igual', async () => {
+  const { identificador, llamadas } = identificadorGrabado([{ estado: 'en_curso' }, { estado: 'registrada', reintento: true }]);
+  await identificador.confirmar(LECTURA_9, ANA);
+
+  /* Padrón sin Ana (o con una búsqueda que la deja fuera). */
+  for (const props of [{ personal: [LUIS] }, { personal: [] }, { personal: [ANA], busquedaInicial: 'zzz' }]) {
+    const html = panel({ identificador, abierta: 9, ...props });
+    assert.match(html, /<strong>Ana Gomez<\/strong>/);
+    assert.match(html, /Médico · Legajo M-99/);
+    assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*><span class="boton__icono">[\s\S]*?Verificar entrega/);
+  }
+  /* Ni el padrón vacío ni su error esconden el intento. */
+  const conError = panel({ identificador, abierta: 9, personal: [], errorPadron: 'HTTP 500' });
+  assert.match(conError, /Verificar entrega/);
+  assert.doesNotMatch(conError, /el padrón no se cargó/);
+
+  await identificador.verificar(9);
+  assert.equal(llamadas[1].usuarioId, 99);
+});
+
+test('3. la huella sale de los pendientes: el intento incierto no se pierde ni se da por entregado', async () => {
+  const { identificador } = identificadorGrabado([{ estado: 'incierto' }]);
+  await identificador.confirmar(LECTURA_9, ANA);
+  const sinHuellas = pendientesFixture([]);
+
+  const cerrado = panel({ identificador, pendientes: sinHuellas, abierta: null });
+  assert.match(cerrado, /Por verificar/);
+  assert.match(cerrado, /Huella · 23:58:00 · Cena/);
+  assert.doesNotMatch(cerrado, /No hay huellas sin reconocer pendientes/);
+
+  const abierto = panel({ identificador, pendientes: sinHuellas, abierta: 9 });
+  assert.match(abierto, /Eso no confirma la entrega: pudo terminar el\s+servicio/);
+  assert.doesNotMatch(abierto, /la resolvió alguien/);
+  assert.match(abierto, /Verificar entrega/);
+  assert.doesNotMatch(abierto, /<button[^>]*disabled=""[^>]*><span class="boton__icono">[\s\S]*?Verificar entrega/);
+  assert.ok(identificador.pendiente(9), 'el intento sigue vivo');
+});
+
+test('4. durante la incertidumbre el panel no deja elegir a otra persona', async () => {
+  const { identificador } = identificadorGrabado([{ estado: 'incierto' }]);
+  await identificador.confirmar(LECTURA_9, ANA);
+  const html = panel({ identificador, abierta: 9, elegidoInicial: '15' });
+  assert.doesNotMatch(html, /<select|<input/, 'sin buscador ni selector');
+  assert.doesNotMatch(html, /Luis Perez/);
+  assert.match(html, /No se puede elegir a otra hasta verificarla/);
+  /* La lista marca esa huella como por verificar, no como identificable. */
+  assert.equal(html.match(/<span class="boton__texto">Identificar<\/span>/g).length, 1, 'solo la otra huella');
 });
 
 /* ------------------------------------------- lecturas por identificar (nocturno) */
