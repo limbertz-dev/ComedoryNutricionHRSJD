@@ -1,0 +1,192 @@
+/*
+ * IntervencionesCocina.css — consulta de la jefa en Supervisión.
+ *
+ * Mismo panel plano que la tabla de marcaciones. Solo lectura: no hay
+ * controles de aprobación, solo el filtro por resultado y la paginación.
+ */
+
+.intervenciones {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-3);
+  padding: var(--e-4) var(--e-5);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+  box-shadow: 0 2px 8px rgba(18, 35, 61, 0.04);
+}
+
+.intervenciones__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+  flex-wrap: wrap;
+}
+
+.intervenciones__titulos {
+  display: grid;
+  gap: 2px;
+}
+
+.intervenciones__titulo {
+  color: var(--c-texto);
+  font-size: var(--t-md);
+  font-weight: 800;
+}
+
+.intervenciones__periodo {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.intervenciones__totales {
+  display: flex;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.intervenciones__nota {
+  margin: 0;
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.intervenciones__filtros {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+}
+
+.intervenciones__chip {
+  min-height: calc(var(--alto-control-compacto) - 8px);
+  padding: 0 14px;
+  border-radius: var(--r-sm);
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  transition: color var(--trans-boton), background var(--trans-boton);
+}
+
+.intervenciones__chip:hover {
+  background: var(--c-acento-tenue);
+  color: var(--c-acento-oscuro);
+}
+
+.intervenciones__chip--activo,
+.intervenciones__chip--activo:hover {
+  background: var(--gradiente-pildora-activa);
+  box-shadow: var(--s-pildora-activa);
+  color: #ffffff;
+}
+
+.intervenciones__estado {
+  margin: 0;
+  padding: var(--e-4);
+  background: var(--c-superficie-2);
+  border: 1px dashed var(--c-borde-fuerte);
+  border-radius: var(--r-md);
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  text-align: center;
+}
+
+.intervenciones__estado--error {
+  color: var(--c-error);
+  background: var(--c-error-tenue);
+  border: 1px solid var(--c-error);
+  text-align: left;
+}
+
+.intervenciones__tabla-caja {
+  overflow-x: auto;
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-md);
+}
+
+.intervenciones__tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+.intervenciones__tabla th,
+.intervenciones__tabla td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--c-borde);
+  text-align: left;
+  vertical-align: top;
+}
+
+.intervenciones__tabla thead th {
+  color: var(--c-texto-2);
+  background: var(--c-superficie-2);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.intervenciones__tabla tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.intervenciones__tabla td.intervenciones__hora {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.intervenciones__principal {
+  display: block;
+  color: var(--c-texto);
+  font-weight: 700;
+}
+
+.intervenciones__sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.intervenciones__fila--rechazada td:first-child {
+  box-shadow: inset 3px 0 0 var(--c-error);
+}
+
+.intervenciones__paginas {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--e-2);
+  flex-wrap: wrap;
+}
+
+.intervenciones__rango {
+  margin-right: auto;
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intervenciones__chip {
+    transition: none;
+  }
+}

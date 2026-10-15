@@ -150,16 +150,16 @@ test('el segmento «Manuales» filtra por origen, no por resultado ni por dispos
   assert.equal(html.match(/supervision__fila--manual/g).length, 1);
 });
 
-test('Supervisión conserva el registro manual solo con permiso y no ofrece intervenciones de cocina', () => {
+test('Supervisión conserva el registro manual solo con permiso y consulta intervenciones solo con permiso', () => {
   const conPermiso = supervision({ puedeRegistrarManual: true });
   assert.match(conPermiso, /Registrar ración manual/);
   assert.doesNotMatch(supervision({ puedeRegistrarManual: false }), /Registrar ración manual/);
 
-  /* El contrato de intervenciones aún no existe: no hay interfaz ni texto que lo anticipe. */
-  assert.doesNotMatch(conPermiso, /ntervenci/);
+  /* Sin el permiso de consulta (sistemas, o un rol futuro) no hay apartado. */
+  assert.doesNotMatch(conPermiso, /Intervenciones de cocina/);
 });
 
-test('las filas sin acción lo dicen y «Autorizar» sigue solo en huellas sin reconocer o sin derecho', () => {
+test('la tabla de Supervisión es de consulta: sin «Autorizar» ni columna de acción', () => {
   const html = supervision({
     marcacionesIniciales: [
       marcacion({ id: 1 }),
@@ -167,8 +167,7 @@ test('las filas sin acción lo dicen y «Autorizar» sigue solo en huellas sin r
       marcacion({ id: 3, valido: false, motivo: 'sin_derecho' }),
     ],
   });
-  assert.equal(html.match(/<span class="boton__texto">Autorizar<\/span>/g).length, 2);
-  assert.equal(html.match(/Sin acción disponible/g).length, 1);
+  assert.doesNotMatch(html, /Autorizar|Sin acción disponible|<th scope="col">Acción<\/th>/);
   assert.match(html, /3 de 3 marcaciones/);
 });
 

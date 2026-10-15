@@ -23,10 +23,26 @@ const SECCIONES_JEFATURA = ['supervision', 'dashboard', 'historial', 'reportes']
 /* Secciones que consultan el padrón y el cupo del turno. */
 const SECCIONES_DEL_COMEDOR = ['vivo', ...SECCIONES_JEFATURA];
 
+/*
+ * Intervenciones de cocina (huella no reconocida): solo la cocinera
+ * identifica a la persona y confirma la entrega (`identificaLecturas`); solo
+ * la jefa consulta lo que se hizo (`consultaIntervenciones`), sin aprobar ni
+ * ejecutar nada. Sistemas queda fuera de las dos, igual que en el backend
+ * (comedorback/app/core/permisos.py).
+ */
 const PERMISOS = {
-  cocinera: { etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false, reloj: false },
-  jefa: { etiqueta: 'Jefa de nutrición', secciones: [...SECCIONES_JEFATURA, 'cuentas'], marcacionManual: true, reloj: true },
-  sistemas: { etiqueta: 'Sistemas', secciones: ['reglas', 'admin', 'monitoreo'], marcacionManual: false, reloj: true },
+  cocinera: {
+    etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false, reloj: false,
+    identificaLecturas: true, consultaIntervenciones: false,
+  },
+  jefa: {
+    etiqueta: 'Jefa de nutrición', secciones: [...SECCIONES_JEFATURA, 'cuentas'], marcacionManual: true, reloj: true,
+    identificaLecturas: false, consultaIntervenciones: true,
+  },
+  sistemas: {
+    etiqueta: 'Sistemas', secciones: ['reglas', 'admin', 'monitoreo'], marcacionManual: false, reloj: true,
+    identificaLecturas: false, consultaIntervenciones: false,
+  },
 };
 
 const permisosDe = (rol) => (typeof rol === 'string' ? PERMISOS[rol.trim().toLowerCase()] : undefined);
@@ -47,6 +63,16 @@ export function puedeVerSeccion(rol, id) {
 
 export function puedeMarcarManual(rol) {
   return permisosDe(rol)?.marcacionManual === true;
+}
+
+/** Identificar una huella no reconocida y confirmar la entrega: solo cocinera. */
+export function puedeIdentificarLecturas(rol) {
+  return permisosDe(rol)?.identificaLecturas === true;
+}
+
+/** Consultar las intervenciones de cocina (sin aprobar nada): solo jefa. */
+export function puedeConsultarIntervenciones(rol) {
+  return permisosDe(rol)?.consultaIntervenciones === true;
 }
 
 /*

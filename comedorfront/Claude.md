@@ -33,14 +33,19 @@ Secciones del sidebar (`src/navegacion.js`):
    pantalla completa sin sidebar ni header. El simulador del lector vive en su
    panel flotante y envía la misma marcación que el lector real
    (`POST /asistencias`, `metodo: 'biometrico'`); el registro a mano usa
-   `metodo: 'manual'`.
-2. **Supervisión del comedor** — tabla en vivo para jefa y sistemas: pestañas
+   `metodo: 'manual'`. «Huellas por identificar» (solo cocinera) sigue el
+   servicio actual con `GET /pantalla/lecturas-por-identificar` y confirma la
+   entrega con `POST /asistencias/lecturas/{id}/identificar` e
+   `Idempotency-Key` (`src/identificacion.js`), sin nota ni motivo.
+2. **Supervisión del comedor** — tabla en vivo para la jefa: pestañas
    por comida (estado, aceptadas, rechazos, manuales), resumen de la pestaña
    con su período y las últimas 100 marcaciones con filtros por resultado
    (incluye «Manuales») y nombre, refresco cada 30 s y botón Actualizar.
-   «Autorizar» solo aparece en la huella no reconocida y envía
-   `autorizarMarcacionManual` (`POST /asistencias`, `metodo: 'manual'`). En
-   simulación, su header lleva los controles del reloj.
+   Sin «Autorizar» sobre las filas: la huella no reconocida la identifica la
+   cocinera; aquí se ve su resultado final y, al pie, la consulta de
+   intervenciones de cocina (`GET /intervenciones-cocina`), sin aprobaciones.
+   «Registrar ración manual» (`POST /asistencias`, `metodo: 'manual'`) sigue
+   aparte. En simulación, su header lleva los controles del reloj.
 3. **Resumen** — cupo del turno, raciones del día por categoría y lecturas del
    lector, cada conteo con su período (`GET /pantalla/estado`, `src/resumen.js`).
 4. **Historial de comidas** — historial diario y mensual por comensal, paginado.

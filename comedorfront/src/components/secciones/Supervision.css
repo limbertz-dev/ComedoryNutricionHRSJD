@@ -713,3 +713,18 @@
     transition: none;
   }
 }
+
+/* Resultado final de una huella que identificó cocina: va junto a la decisión
+   original (el rechazo del lector), sin reemplazarla. */
+.supervision__final-cocina {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.supervision__final-detalle {
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}

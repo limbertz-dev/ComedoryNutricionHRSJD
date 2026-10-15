@@ -329,7 +329,7 @@ test('un fallo del refresco posterior no oculta que el POST tuvo éxito', async 
   assert.match(html, /Se muestran los datos anteriores\. HTTP 500/);
 });
 
-test('la autorización de filas sigue: no_identificado activa, sin_derecho desactivada; filas por clave', () => {
+test('las filas se distinguen por clave y ya no se autorizan desde Supervisión; el registro manual sigue', () => {
   const html = renderToStaticMarkup(h(Supervision, {
     cargandoInicial: false,
     comidasIniciales: { comidas: [], rechazosSinComida: 0 },
@@ -338,15 +338,16 @@ test('la autorización de filas sigue: no_identificado activa, sin_derecho desac
       fila('asistencia_manual', 5),
       fila('lectura_biometrica', 6, { valido: false, motivo: 'sin_derecho' }),
     ],
-    filaExpandidaInicial: 'lectura_biometrica:5',
     personal: [ANA],
     puedeRegistrarManual: true,
   }));
-  // Mismo id 5 en dos orígenes: ambas filas, y solo la lectura se expande.
+  // Mismo id 5 en dos orígenes: las dos filas.
   assert.equal(html.match(/<td>Registro manual<\/td>/g).length, 1);
-  assert.equal(html.match(/supervision__fila-autorizar/g).length, 1);
-  assert.match(html, /id="autorizar-lectura_biometrica:5"/);
-  assert.match(html, /<button[^>]*data-tooltip="Requiere excepción de jefatura \(pendiente\)"[^>]*disabled=""/);
+  assert.equal(html.match(/<td>Lectura biométrica<\/td>/g).length, 2);
+  // El Autorizar de filas se retiró: la huella la identifica la cocinera.
+  assert.doesNotMatch(html, /Autorizar|supervision__fila-autorizar|Requiere excepción de jefatura/);
+  // El registro manual independiente de jefatura permanece.
+  assert.match(html, /<span class="boton__texto">Registrar ración manual<\/span>/);
 });
 
 test('un 403 al registrar sigue el manejo central de sesión', async () => {
