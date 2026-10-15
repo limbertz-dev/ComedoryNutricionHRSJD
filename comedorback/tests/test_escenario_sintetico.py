@@ -224,11 +224,24 @@ def test_el_catalogo_encaja_con_las_semillas_y_las_reglas(script):
 
 def test_comensales_y_cuentas_separados(script):
     assert script.caso("principal")["login"] == script.USUARIO_LOGIN == "usuariosimulado"
+    # En esta etapa solo las dos cocineras: jefa y sistemas no se crean.
     assert [(c["username"], c["rol"]) for c in script.CUENTAS] == [
-        ("cocinera2", "cocinera"), ("cocinera3", "cocinera"), ("jefa", "jefa"),
+        ("cocinera2", "cocinera"), ("cocinera3", "cocinera"),
     ]
     assert not {c["username"] for c in script.CUENTAS} & {c["login"] for c in script.CASOS}
-    assert len({c["nombre"] for c in script.CUENTAS}) == 3
+    assert len({c["nombre"] for c in script.CUENTAS}) == 2
+
+
+def test_sin_env_la_conexion_sale_solo_de_variables_de_entorno(script):
+    todas = {"DB_HOST": "h", "DB_PORT": "1", "DB_USER": "u", "DB_PASSWORD": ""}
+    assert script.variables_faltantes(todas, hay_env=False) == []
+    assert script.variables_faltantes({}, hay_env=False) == [
+        "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD",
+    ]
+    assert script.variables_faltantes({"DB_HOST": "h"}, hay_env=False) == [
+        "DB_PORT", "DB_USER", "DB_PASSWORD",
+    ]
+    assert script.variables_faltantes({}, hay_env=True) == []
 
 
 # --- el esquema mínimo cubre exactamente lo que leen las vistas ---------------------------
@@ -576,8 +589,7 @@ def test_cuentas_propias_existentes_no_son_conflicto(script):
         ("cocinera2", dict(nombre=None)),  # la creó otro (p. ej. app.semillas.admin)
         ("cocinera3", dict(usuario_turnos_id=123)),
         ("cocinera3", dict(activo=0)),  # dada de baja: no se reactiva
-        ("jefa", dict(rol="sistemas")),
-        ("jefa", dict(nombre=None)),
+        ("cocinera3", dict(rol="sistemas")),
         ("cocinera2", dict(usuario_turnos_id=900003)),
     ],
 )
@@ -595,18 +607,16 @@ def test_ningun_comensal_puede_tener_cuenta(script, login):
 
 
 def _claves_en_entorno(monkeypatch, **valores):
-    for cuenta in ("COCINERA2", "COCINERA3", "JEFA"):
+    for cuenta in ("COCINERA2", "COCINERA3"):
         monkeypatch.delenv(f"ESCENARIO_CLAVE_{cuenta}", raising=False)
     for nombre, valor in valores.items():
         monkeypatch.setenv(f"ESCENARIO_CLAVE_{nombre.upper()}", valor)
 
 
 def test_claves_desde_el_entorno_sin_mostrarlas(script, monkeypatch, capsys):
-    _claves_en_entorno(monkeypatch, cocinera2="clave-prueba-dos", cocinera3="clave-prueba-tres",
-                       jefa="clave-prueba-jefa")
+    _claves_en_entorno(monkeypatch, cocinera2="clave-prueba-dos", cocinera3="clave-prueba-tres")
     claves = script._pedir_claves(list(script.CUENTAS), 8, False)
-    assert claves == {"cocinera2": "clave-prueba-dos", "cocinera3": "clave-prueba-tres",
-                      "jefa": "clave-prueba-jefa"}
+    assert claves == {"cocinera2": "clave-prueba-dos", "cocinera3": "clave-prueba-tres"}
     salida = capsys.readouterr()
     assert "clave-prueba" not in salida.out + salida.err
 
@@ -614,8 +624,8 @@ def test_claves_desde_el_entorno_sin_mostrarlas(script, monkeypatch, capsys):
 def test_claves_sin_revelar_al_azar_y_distintas(script, monkeypatch, capsys):
     _claves_en_entorno(monkeypatch)
     claves = script._pedir_claves(list(script.CUENTAS), 8, True)
-    assert set(claves) == {"cocinera2", "cocinera3", "jefa"}
-    assert len(set(claves.values())) == 3 and all(len(c) >= 32 for c in claves.values())
+    assert set(claves) == {"cocinera2", "cocinera3"}
+    assert len(set(claves.values())) == 2 and all(len(c) >= 32 for c in claves.values())
     salida = capsys.readouterr()
     assert not any(c in salida.out + salida.err for c in claves.values())
 
@@ -640,8 +650,8 @@ def test_claves_rechazadas_sin_eco(script, monkeypatch, dos, tres, esperado):
 def test_sin_consola_y_sin_variable_aborta(script, monkeypatch):
     _claves_en_entorno(monkeypatch)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
-    with pytest.raises(script.Abortado, match="ESCENARIO_CLAVE_JEFA"):
-        script._pedir_claves([script.CUENTAS[2]], 8, False)
+    with pytest.raises(script.Abortado, match="ESCENARIO_CLAVE_COCINERA3"):
+        script._pedir_claves([script.CUENTAS[1]], 8, False)
 
 
 def test_solo_se_piden_las_claves_de_las_cuentas_que_faltan(script, monkeypatch):
@@ -804,7 +814,7 @@ def test_evidencia_completa_sin_problemas(script):
         lambda e: e.update(comida_en_curso_a_mitad_de_ventana=None),
         lambda e: e["cuentas"].pop(),
         lambda e: e["cuentas"][0].update(rol="jefa"),
-        lambda e: e["cuentas"][2].update(vinculo_padron=5),
+        lambda e: e["cuentas"][1].update(vinculo_padron=5),
     ],
 )
 def test_evidencia_incompleta(script, romper):
@@ -853,7 +863,7 @@ def bases_nuevas():
 
 def _correr(demo, sim, *extra, claves=None, fecha=FECHA):
     entorno = {**os.environ, "PYTHONIOENCODING": "utf-8"}
-    for cuenta in ("COCINERA2", "COCINERA3", "JEFA"):
+    for cuenta in ("COCINERA2", "COCINERA3"):
         entorno.pop(f"ESCENARIO_CLAVE_{cuenta}", None)
     entorno.update(claves or {})
     return subprocess.run(
@@ -866,7 +876,6 @@ def _claves():
     return {
         "ESCENARIO_CLAVE_COCINERA2": "c2-" + secrets.token_urlsafe(12),
         "ESCENARIO_CLAVE_COCINERA3": "c3-" + secrets.token_urlsafe(12),
-        "ESCENARIO_CLAVE_JEFA": "jf-" + secrets.token_urlsafe(12),
     }
 
 
@@ -924,14 +933,24 @@ def test_integracion_prepara_repite_sin_cambios_y_no_registra_racion(bases_nueva
     _verificar_auditoria(_auditoria(primera.stdout), demo, sim)
 
     datos = json.loads(manifiesto.read_text(encoding="utf-8"))
-    assert [c["username"] for c in datos["cuentas"]] == ["cocinera2", "cocinera3", "jefa"]
-    assert all(c["vinculo_padron"] is None and c["debe_cambiar"] for c in datos["cuentas"])
-    assert datos["comensal"]["usuario_id"] == 900001 and datos["comensal"]["cuentas_de_acceso"] == 0
-    assert datos["derecho_principal"]["derecho_al_almuerzo"] is True
+    assert [c["username"] for c in datos["cuentas"]] == ["cocinera2", "cocinera3"]
+    assert all(c["rol"] == "cocinera" and c["vinculo_padron"] is None and c["debe_cambiar"]
+               for c in datos["cuentas"])
+    assert datos["comensal"]["usuario_id"] == 900001
+    assert datos["comensal"]["cuentas_de_acceso_vinculadas"] == 0
+    assert datos["derecho_principal"]["obtenido"] is True
     assert datos["turno"]["duracion_horas"] == 12 and datos["asignacion"]["fecha"] == FECHA.isoformat()
+    assert datos["novedades_de_la_asignacion"] == []
     assert datos["ventana"]
-    assert len(datos["casos_negativos"]) == 5
-    assert all(c["derecho_al_almuerzo"] is False for c in datos["casos_negativos"])
+    controles = datos["controles_12h_no_bastan"]
+    assert {c["caso"] for c in controles} == {
+        "negativo_categoria", "negativo_novedad", "negativo_sin_mapeo", "negativo_otra_fecha",
+    }
+    assert all(c["turno_horas"] == 12 and c["derecho_obtenido"] is False for c in controles)
+    assert [c["caso"] for c in datos["control_adicional_duracion"]] == ["negativo_duracion"]
+    assert datos["aislamiento"]["esquemas_creados"] == sorted([demo, sim])
+    assert datos["aislamiento"]["base_propia"]["view_table_usage_esquemas"] == [demo]
+    assert datos["aislamiento"]["escrituras_fuera_del_escenario"] == []
     contraste = datos["contraste_novedad"]
     assert contraste["sin_novedad"]["derecho_al_almuerzo"] is True
     assert contraste["con_novedad"]["derecho_al_almuerzo"] is False
@@ -944,7 +963,7 @@ def test_integracion_prepara_repite_sin_cambios_y_no_registra_racion(bases_nueva
         assert antes - _esquemas(cx) == set()
         foto_demo, foto_sim = _foto(cx, demo), _foto(cx, sim)
         hashes = dict(cx.execute(text(f"SELECT username, password_hash FROM `{sim}`.usuarios_sistema")).all())
-        assert set(hashes) == {"cocinera2", "cocinera3", "jefa"}
+        assert set(hashes) == {"cocinera2", "cocinera3"}
         for tabla in ("asistencias", "lecturas_biometricas", "intervenciones_lectura"):
             assert cx.execute(text(f"SELECT COUNT(*) FROM `{sim}`.`{tabla}`")).scalar_one() == 0
         leidas = set(cx.execute(
@@ -989,7 +1008,7 @@ def test_integracion_racion_registrada_no_se_borra(bases_nuevas):
     primera = _correr(demo, sim, "--claves-sin-revelar")
     assert primera.returncode == 0, primera.stderr
     with servidor.connect() as cx:
-        assert cx.execute(text(f"SELECT COUNT(*) FROM `{sim}`.usuarios_sistema WHERE debe_cambiar = 1")).scalar_one() == 3
+        assert cx.execute(text(f"SELECT COUNT(*) FROM `{sim}`.usuarios_sistema WHERE debe_cambiar = 1")).scalar_one() == 2
         # Simula el flujo de cocina: el almuerzo principal ya servido.
         cx.execute(
             text(

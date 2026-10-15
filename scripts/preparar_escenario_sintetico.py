@@ -23,7 +23,7 @@ Deja listo, sin registrar ninguna ración:
   · Contraste de novedad (900007): la MISMA asignación da derecho sin novedad
     y no lo da con una novedad impeditiva. La novedad se inserta dentro de
     una transacción que se revierte: el estado guardado no la tiene.
-  · Cuentas `cocinera2`, `cocinera3` (rol cocinera) y `jefa` (rol jefa), sin
+  · Cuentas `cocinera2` y `cocinera3` (rol cocinera), independientes, sin
     vínculo con el padrón y con clave temporal (debe_cambiar = 1).
   · Asociación simulada `SIM-ID-900001` -> 900001 en
     `escenario_identificaciones` de `--demo`: solo texto, sin imagen, huella
@@ -45,8 +45,8 @@ para su paso se corta ANTES de ejecutarse y aborta la corrida:
 Todas las sentencias de escritura (sin parámetros: ni claves ni hashes) van a
 un registro JSONL; el resumen entra en el manifiesto.
 
-Claves: por consola sin eco, por ESCENARIO_CLAVE_COCINERA2 / _COCINERA3 /
-_JEFA, o `--claves-sin-revelar` (al azar, no se guardan ni se muestran: la
+Claves: por consola sin eco, por ESCENARIO_CLAVE_COCINERA2 / _COCINERA3,
+o `--claves-sin-revelar` (al azar, no se guardan ni se muestran: la
 cuenta queda inutilizable hasta `python -m app.semillas.admin --username X
 --resetear`, que el operador corre en su propia consola). Nunca se imprimen.
 
@@ -150,8 +150,6 @@ CUENTAS = (
      "variable": "ESCENARIO_CLAVE_COCINERA2"},
     {"username": "cocinera3", "rol": "cocinera", "nombre": "Cocinera simulada 3",
      "variable": "ESCENARIO_CLAVE_COCINERA3"},
-    {"username": "jefa", "rol": "jefa", "nombre": "Jefa simulada",
-     "variable": "ESCENARIO_CLAVE_JEFA"},
 )
 
 OPCIONES_TABLA = "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
@@ -477,6 +475,17 @@ def errores_de_clave(username: str, clave: str, largo_minimo: int) -> list[str]:
     if clave.strip().lower() == username:
         errores.append(f"la clave de '{username}' no puede ser el nombre de usuario.")
     return errores
+
+
+VARIABLES_DE_CONEXION = ("DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD")
+
+
+def variables_faltantes(entorno, hay_env: bool) -> list[str]:
+    """Sin comedorback/.env, la conexión sale SOLO de variables de entorno:
+    nunca de los valores por omisión (root sin clave). Devuelve nombres."""
+    if hay_env:
+        return []
+    return [v for v in VARIABLES_DE_CONEXION if v not in entorno]
 
 
 def errores_de_cuentas(existentes: dict[str, dict]) -> list[str]:
@@ -1037,7 +1046,7 @@ def _paso_interno(paso: str, args, registro: Path) -> str:
     return resultado.stdout
 
 
-def _migrar_sim(servidor, args, estado: str, cabeza: str, registro: Path) -> None:
+def _migrar_sim(servidor, args, estado: str, cabeza: str, registro: Path) -> dict:
     text = _text()
     if estado == "ausente":
         with servidor.connect() as conexion:
@@ -1060,6 +1069,7 @@ def _migrar_sim(servidor, args, estado: str, cabeza: str, registro: Path) -> Non
             ),
             {"b": args.sim},
         ).all()
+        tablas = _tablas(conexion, args.sim) - {"alembic_version"}
     if version != [cabeza]:
         raise Abortado(f"'{args.sim}' quedó en {version}, no en la cabeza {cabeza}: no se siembra.")
     from app.core.tablas_heredadas import VISTAS_CONTRATO
@@ -1073,6 +1083,13 @@ def _migrar_sim(servidor, args, estado: str, cabeza: str, registro: Path) -> Non
             f"VIEW_TABLE_USAGE de '{args.sim}': lecturas fuera de '{args.demo}' {fuera}, "
             f"vistas sin tablas registradas {sorted(sin_uso)}"
         )
+    return {
+        "alembic": version[0],
+        "tablas_propias": len(tablas),
+        "vistas": len(vistas),
+        "select_1_por_vista": "ok",
+        "view_table_usage_esquemas": sorted({b for _, b in leidas}),
+    }
 
 
 def _crear_cuentas(motor_sim, claves: dict[str, str]) -> list[str]:
@@ -1360,65 +1377,106 @@ def problemas_de_evidencia(datos: dict) -> list[str]:
     return problemas
 
 
-def armar_manifiesto(datos: dict, *, demo: str, sim: str, cabeza: str, mysql: str,
-                     auditoria: list[dict], protegidas: dict, script_sha: str) -> dict:
-    """Todo lo que A3 necesita, sin claves, hashes ni tokens."""
+def armar_manifiesto(datos: dict, *, demo: str, sim: str, mysql: str, revision: dict,
+                     aislamiento: dict, protegidas: dict, habilitacion: dict) -> dict:
+    """Lo que A3 necesita, sin claves, hashes ni tokens."""
     principal = next(c for c in datos["casos"] if c["caso"] == "principal")
     turno = next(t for t in CATALOGO["turnos"] if t["id"] == TURNO_12H)
     categoria = next(x for x in CATALOGO["categorias"] if x["id"] == CATEGORIA_ADMIN)
     asignacion = next(
         (a for a in principal["asignaciones"] if a["fecha"] == datos["fecha"]), None
     )
+
+    def control(c: dict) -> dict:
+        horas = c["asignaciones"][0]["duracion_horas"] if c["asignaciones"] else None
+        return {
+            **{k: c[k] for k in ("caso", "usuario_id", "login", "categoria", "factor")},
+            "turno_horas": horas,
+            "asignaciones": c["asignaciones"],
+            "filas_v_comidas_por_turno": c["filas_v_comidas_por_turno"],
+            "novedades_v_novedades_laborales": c["novedades_v_novedades_laborales"],
+            "derecho_esperado": c["derecho_esperado"],
+            "derecho_obtenido": c["derecho_al_almuerzo"],
+        }
+
+    negativos = [control(c) for c in datos["casos"] if c["caso"].startswith("negativo_")]
     return {
         "escenario": MARCADOR_CLAVE,
-        "version": MARCADOR_VERSION,
+        "version_escenario": MARCADOR_VERSION,
         "generado": datetime.now().isoformat(timespec="seconds"),
-        "script_sha256": script_sha,
-        "bases": {"turnos_sintetica": demo, "propia": sim, "alembic": cabeza, "mysql": mysql},
-        "cuentas": datos["cuentas"],
+        "revision": revision,
+        "bases": {"turnos_sintetica": demo, "propia": sim, "mysql": mysql},
         "comensal": {
             "usuario_id": USUARIO_ID,
             "login": USUARIO_LOGIN,
+            "tipo": "comensal (users.id de la base sintética); NO es una cuenta de acceso",
             "categoria": {"id": categoria["id"], "nombre": categoria["nombre"]},
             "columna_del_informe": datos["columna_del_informe_principal"],
-            "cuentas_de_acceso": 0 if not datos["cuentas_de_comensales"] else "REVISAR",
+            "cuentas_de_acceso_vinculadas": datos["cuentas_de_comensales"],
             "identificacion_simulada": {
                 "identificador": IDENTIFICADOR_SIMULADO,
                 "tabla": f"{demo}.escenario_identificaciones",
                 "contenido": "solo texto: sin imagen, huella ni plantilla",
-                "uso_en_el_lector_simulado": f"POST /asistencias {{usuario_id: {USUARIO_ID}}} "
-                                             "con ENTORNO=simulacion",
             },
         },
+        "cuentas": [
+            {**c, "tipo": "cuenta de acceso (usuarios_sistema.id de la base propia)"}
+            for c in datos["cuentas"]
+        ],
+        "habilitacion_de_cuentas": habilitacion,
         "turno": {k: turno[k] for k in ("id", "nombre_turno", "duracion_horas", "hora_inicio", "hora_fin")},
+        "categoria": {"id": categoria["id"], "nombre": categoria["nombre"]},
         "asignacion": asignacion,
+        "novedades_de_la_asignacion": principal["novedades_v_novedades_laborales"],
         "comida": {"id": COMIDA_ID, "codigo": COMIDA_CODIGO},
         "fecha": datos["fecha"],
         "ventana": datos["ventanas_del_almuerzo"],
+        "comida_en_curso_a_mitad_de_ventana": datos["comida_en_curso_a_mitad_de_ventana"],
         "regla_vigente": datos["regla_vigente"],
         "derecho_principal": {
-            "derecho_al_almuerzo": principal["derecho_al_almuerzo"],
+            "esperado": True,
+            "obtenido": principal["derecho_al_almuerzo"],
             "derechos_del_dia": principal["derechos_del_dia"],
+            "turno_asignado_que_lo_justifica": principal["turno_asignado_que_lo_justifica"],
             "fila_v_comidas_por_turno": principal["filas_v_comidas_por_turno"],
-            "calculado_con": "vistas v_* de la base propia + app/consultas/derecho.py (MySQL)",
+            "calculado_con": "vistas v_* de la base propia sobre la sintética + "
+                             "app/consultas/derecho.py, en MySQL",
         },
+        "controles_12h_no_bastan": [n for n in negativos if n["turno_horas"] == 12],
+        "control_adicional_duracion": [n for n in negativos if n["turno_horas"] != 12],
+        "contraste_novedad": datos["contraste_novedad"],
+        "personas_con_derecho_al_almuerzo": datos["personas_con_derecho_al_almuerzo"],
         "racion_principal": {
             "raciones": datos["raciones_principal"],
             "lecturas": datos["lecturas_principal"],
             "disponible_para_cocina": datos["raciones_principal"] == 0,
         },
-        "casos_negativos": [
-            {k: c[k] for k in ("caso", "usuario_id", "login", "categoria", "factor",
-                               "asignaciones", "filas_v_comidas_por_turno",
-                               "novedades_v_novedades_laborales", "derecho_esperado",
-                               "derecho_al_almuerzo")}
-            for c in datos["casos"] if c["caso"].startswith("negativo_")
-        ],
-        "contraste_novedad": datos["contraste_novedad"],
-        "personas_con_derecho_al_almuerzo": datos["personas_con_derecho_al_almuerzo"],
-        "auditoria_escrituras": auditoria,
+        "aislamiento": aislamiento,
         "bases_protegidas_checksum": protegidas,
     }
+
+
+def _revision() -> dict:
+    def git(*argumentos: str) -> str:
+        resultado = subprocess.run(
+            ["git", "-C", str(RAIZ), *argumentos], capture_output=True, text=True
+        )
+        return resultado.stdout.strip() if resultado.returncode == 0 else "desconocido"
+
+    return {
+        "commit": git("rev-parse", "HEAD"),
+        "rama": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "cambios_sin_commit_en_el_codigo": bool(
+            git("status", "--porcelain", "--", "scripts", "comedorback/app", "comedorback/alembic")
+        ),
+        "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+    }
+
+
+def _esquemas(conexion) -> set[str]:
+    """Solo NOMBRES de bases (metadatos), para mostrar qué apareció."""
+    text = _text()
+    return set(conexion.execute(text("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA")).scalars())
 
 
 # --- orquestación -------------------------------------------------------------------
@@ -1463,6 +1521,12 @@ def _preparar(args: argparse.Namespace) -> int:
     from app.core.config import config
 
     fecha = args.fecha_efectiva
+    faltan = variables_faltantes(os.environ, (RAIZ_BACK / ".env").exists())
+    if faltan:
+        raise Abortado(
+            "falta la configuración de conexión. Defina como variables de entorno: "
+            + ", ".join(faltan)
+        )
     protegidas = {config.db_name, config.db_name_turnos} | BASES_PROTEGIDAS
     errores = errores_de_nombres(args.demo, args.sim, protegidas)
     if errores:
@@ -1477,6 +1541,7 @@ def _preparar(args: argparse.Namespace) -> int:
         with servidor.connect() as conexion:
             presentes = _protegidas_presentes(conexion, protegidas)
             antes = {b: _checksums(conexion, b) for b in presentes}
+            esquemas_antes = _esquemas(conexion)
         _paso(0, f"Bases protegidas presentes (solo CHECKSUM): {', '.join(presentes) or 'ninguna'}")
         for base in presentes:
             print(f"      {base}: {_huella(antes[base])} ({len(antes[base])} tablas)")
@@ -1509,7 +1574,7 @@ def _preparar(args: argparse.Namespace) -> int:
             f"idénticas. Asignación principal {id_asignacion(fecha)} para {fecha}.",
         )
 
-        _migrar_sim(servidor, args, estados["sim"], cabeza, registro)
+        migracion = _migrar_sim(servidor, args, estados["sim"], cabeza, registro)
         salida_semilla = _paso_interno("semilla", args, registro)
         _paso(4, f"'{args.sim}': alembic en {cabeza}, vistas sobre '{args.demo}', semilla corrida.")
         for linea in salida_semilla.strip().splitlines():
@@ -1529,6 +1594,7 @@ def _preparar(args: argparse.Namespace) -> int:
 
         with servidor.connect() as conexion:
             despues = {b: _checksums(conexion, b) for b in presentes}
+            esquemas_despues = _esquemas(conexion)
         cambiadas = sorted(b for b in presentes if antes[b] != despues[b])
         _paso(7, "CHECKSUM de las bases protegidas después: "
               + (", ".join(f"{b}={_huella(despues[b])}" for b in presentes) or "ninguna"))
@@ -1546,11 +1612,38 @@ def _preparar(args: argparse.Namespace) -> int:
             f"cambiaron durante la corrida: {cambiadas}. Este script no les escribe; "
             "¿había una API o un proceso trabajando sobre ellas?"
         )
+    desaparecidas = sorted(esquemas_antes - esquemas_despues)
+    if desaparecidas:
+        problemas.append(f"desaparecieron bases durante la corrida: {desaparecidas}")
+    aislamiento = {
+        "estado_inicial": estados,
+        "esquemas_creados": sorted(esquemas_despues - esquemas_antes),
+        "esquemas_desaparecidos": desaparecidas,
+        "esquemas_existentes_antes": sorted(esquemas_antes - BASES_DEL_SISTEMA),
+        "base_propia": {**migracion, "cabeza_del_codigo": cabeza},
+        "auditoria_escrituras": resumir_auditoria(registros),
+        "escrituras_fuera_del_escenario": sorted(
+            {str(r["base"]) for r in registros} - {args.demo, args.sim}
+        ),
+    }
+    habilitacion = {
+        "claves": "al azar, nadie las conoce (--claves-sin-revelar)"
+        if args.claves_sin_revelar else "fijadas por el operador; no se registran",
+        "estado": "pendiente de habilitar por el operador" if args.claves_sin_revelar
+        else "clave temporal: se cambia en el primer ingreso",
+        "como_habilitar": (
+            "En la consola del operador, desde comedorback/: $env:DB_NAME='" + args.sim
+            + "'; $env:DB_NAME_TURNOS='" + args.demo + "'; .venv/Scripts/python -m "
+            "app.semillas.admin --username <cocinera2|cocinera3> --resetear. Muestra una "
+            "clave temporal una sola vez; el primer ingreso exige cambiarla. Solo toca "
+            "la base " + args.sim + "."
+        ),
+    }
     manifiesto = armar_manifiesto(
-        datos, demo=args.demo, sim=args.sim, cabeza=cabeza, mysql=version_mysql,
-        auditoria=resumir_auditoria(registros),
-        protegidas={b: {"antes": _huella(antes[b]), "despues": _huella(despues[b])} for b in presentes},
-        script_sha=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        datos, demo=args.demo, sim=args.sim, mysql=version_mysql, revision=_revision(),
+        aislamiento=aislamiento, habilitacion=habilitacion,
+        protegidas={b: {"antes": _huella(antes[b]), "despues": _huella(despues[b]),
+                        "tablas": len(despues[b])} for b in presentes},
     )
     texto = json.dumps(manifiesto, ensure_ascii=False, indent=2)
     print(texto)
@@ -1593,6 +1686,8 @@ def _correr_paso_interno(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     _salida_utf8()
     args = _argumentos(argv)
+    if args.manifiesto is not None:
+        args.manifiesto = args.manifiesto.resolve()  # antes del chdir
     # Recién acá se toca el entorno del proceso: importar el script no hace
     # nada (ver tests/test_escenario_sintetico.py).
     os.chdir(RAIZ_BACK)
