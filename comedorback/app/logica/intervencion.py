@@ -229,6 +229,19 @@ def _recuperar(sesion: Session, ctx: _Contexto) -> tuple[dict, int | None] | Non
     return datos, registradora
 
 
+def nombre_en_padron(sesion: Session, usuario_id: int):
+    """`(nombre,)` si la persona está en el padrón (`v_comensales`), o None.
+
+    Un SELECT plano sobre la vista, sin bloqueo. Está aparte, igual que
+    `buscar_derecho`, para que las pruebas puedan sustituir SOLO la fuente del
+    padrón con datos sintéticos sin tocar la base de turnos ni nada de lo que
+    la operación escribe.
+    """
+    return sesion.execute(
+        select(Comensal.nombre_completo).where(Comensal.usuario_id == usuario_id)
+    ).first()
+
+
 def _cuenta_registradora(sesion: Session, lectura_id: int) -> int | None:
     return sesion.execute(
         select(IntervencionLectura.cuenta_id).where(
@@ -478,9 +491,7 @@ def _una_pasada(sesion: Session, ctx: _Contexto) -> Respuesta:
         return _responder(previo[0], ctx, reintento=True, registradora=previo[1])
 
     # 5. La persona.
-    ficha = sesion.execute(
-        select(Comensal.nombre_completo).where(Comensal.usuario_id == ctx.usuario_id)
-    ).first()
+    ficha = nombre_en_padron(sesion, ctx.usuario_id)
     if ficha is None:
         sesion.rollback()
         raise ErrorIntervencion(404, "comensal_inexistente", "No existe ese comensal.")
