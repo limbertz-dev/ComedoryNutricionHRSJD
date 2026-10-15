@@ -51,6 +51,8 @@ const MOTIVOS_LEGIBLES = {
   duplicado: 'Ya recibió su comida',
   sin_derecho: 'Sin derecho en este turno',
   fuera_horario: 'Fuera de horario',
+  /* El motivo guardado de una huella sin usuario (antes llegaba sin texto). */
+  no_identificado: 'Huella no reconocida',
   desconocida: 'Huella no reconocida',
 };
 
@@ -71,6 +73,143 @@ export function claveDeEvento(origen, id) {
   return `${origen}:${id}`;
 }
 
+/** Por dónde terminó en ración una fila (`resultado_final.via`). */
+export const VIAS_RESULTADO_FINAL = ['lector', 'identificacion_manual', 'registro_manual'];
+const ESTADOS_FINALES = ['racion_servida', 'sin_racion'];
+
+/** Texto o null: la API manda null en lo que no aplica. */
+const textoONull = (valor) => (typeof valor === 'string' && valor.length > 0 ? valor : null);
+
+/*
+ * Bloques de intervenciones de cocina en una marcación (contrato de
+ * comedorback/app/esquemas/pantalla.py). Son aditivos: una API sin ellos
+ * deja los valores por omisión y la fila se ve como siempre.
+ *
+ * - `decisionOriginal`: lo que decidió el lector. Inmutable.
+ * - `estadoFinal` / `resultadoFinal`: si la fila terminó en una ración y por
+ *   qué vía, aparte de `valido` (que sigue siendo la decisión del lector).
+ * - `intervencion`: lo que el ROL ve de los intentos. La cocinera recibe
+ *   revision/resuelta/resueltaPorMi; la jefa además registradaPor e
+ *   intentosRechazados; sistemas, null. `revision` solo crece.
+ */
+function adaptarBloquesIntervencion(dato) {
+  const decision = dato.decision_original;
+  if (decision != null && (typeof decision !== 'object' || typeof decision.resultado !== 'string')) {
+    throw new Error('La API devolvió una decisión original inválida.');
+  }
+  const estadoFinal = dato.estado_final ?? 'sin_racion';
+  if (!ESTADOS_FINALES.includes(estadoFinal)) {
+    throw new Error('La API devolvió un estado final inválido.');
+  }
+  const final = dato.resultado_final;
+  if (final != null && (!VIAS_RESULTADO_FINAL.includes(final.via) || !Number.isInteger(final.asistencia_id))) {
+    throw new Error('La API devolvió un resultado final inválido.');
+  }
+  if ((final != null) !== (estadoFinal === 'racion_servida')) {
+    throw new Error('La API devolvió un resultado final que no coincide con su estado.');
+  }
+  const bloque = dato.intervencion;
+  if (bloque != null && (!Number.isInteger(bloque.revision) || bloque.revision < 0
+    || typeof bloque.resuelta !== 'boolean' || typeof bloque.resuelta_por_mi !== 'boolean')) {
+    throw new Error('La API devolvió una intervención inválida.');
+  }
+  return {
+    comidaOrigen: dato.comida_origen ?? null,
+    decisionOriginal: decision == null ? null : {
+      resultado: decision.resultado,
+      motivo: decision.motivo ?? null,
+      fechaHora: decision.fecha_hora ?? null,
+      dispositivo: decision.dispositivo ?? null,
+    },
+    estadoFinal,
+    resultadoFinal: final == null ? null : {
+      via: final.via,
+      asistenciaId: final.asistencia_id,
+      comensal: {
+        usuarioId: final.comensal?.usuario_id ?? null,
+        nombre: textoONull(final.comensal?.nombre),
+      },
+      comida: final.comida ?? null,
+      fechaComida: final.fecha_comida ?? null,
+      momento: final.momento ?? null,
+    },
+    puedeIdentificar: dato.puede_identificar === true,
+    motivoNoIdentificable: dato.motivo_no_identificable ?? null,
+    identificableHasta: dato.identificable_hasta ?? null,
+    intervencion: bloque == null ? null : {
+      revision: bloque.revision,
+      actualizadoEn: bloque.actualizado_en ?? null,
+      resuelta: bloque.resuelta,
+      resueltaPorMi: bloque.resuelta_por_mi,
+      /* Solo los recibe la jefa; para la cocinera quedan en null. */
+      registradaPor: bloque.registrada_por
+        ? {
+          cuentaId: bloque.registrada_por.cuenta_id ?? null,
+          usuario: textoONull(bloque.registrada_por.usuario),
+          nombre: textoONull(bloque.registrada_por.nombre),
+        }
+        : null,
+      intentosRechazados: Number.isInteger(bloque.intentos_rechazados) ? bloque.intentos_rechazados : null,
+    },
+  };
+}
+
+/**
+ * Una fila de marcación del servidor, con la forma de la tarjeta de
+ * marcaciones (`persona`, `hora`, `valido`, `titulo`) más los bloques de
+ * intervención. La usan `ultimas-marcaciones` y `lecturas-por-identificar`,
+ * que comparten forma.
+ */
+function adaptarMarcacion(dato) {
+  if (!Number.isInteger(dato?.id)) {
+    throw new Error('La API devolvió una marcación sin identificador.');
+  }
+  if (!ORIGENES_MARCACION.includes(dato.origen)
+    || dato.clave_evento !== claveDeEvento(dato.origen, dato.id)) {
+    throw new Error('La API devolvió una marcación sin origen válido.');
+  }
+  const valido = typeof dato.valido === 'boolean' ? dato.valido : dato.resultado === 'aceptada';
+  return {
+    id: dato.id,
+    origen: dato.origen,
+    clave: dato.clave_evento,
+    usuarioId: dato.usuario_id ?? null,
+    valido,
+    titulo: valido ? 'Marcación válida'
+      : MOTIVOS_LEGIBLES[dato.motivo] ?? (dato.motivo || 'Marcación rechazada'),
+    motivo: dato.motivo ?? null,
+    dispositivo: dato.dispositivo ?? null,
+    hora: horaDeMarcacion(dato.fecha_hora),
+    fechaHora: dato.fecha_hora ?? null,
+    // Sin comida: el lector no llegó a resolver ningún turno para esa hora
+    // (fuera de horario) o la lectura es de una huella no reconocida.
+    comidaId: dato.comida_id ?? null,
+    comida: dato.comida ?? null,
+    persona: {
+      id: dato.usuario_id ?? null,
+      nombre: dato.nombre || 'Desconocido',
+      categoria: dato.categoria || 'Sin clasificar',
+    },
+    ...adaptarBloquesIntervencion(dato),
+  };
+}
+
+/** Adapta una lista de marcaciones; dos filas con la misma clave la vuelven inconsistente. */
+function adaptarListaMarcaciones(marcaciones) {
+  if (!Array.isArray(marcaciones)) {
+    throw new Error('La API devolvió una lista de marcaciones inválida.');
+  }
+  const claves = new Set();
+  return marcaciones.map((dato) => {
+    const fila = adaptarMarcacion(dato);
+    if (claves.has(fila.clave)) {
+      throw new Error('La API devolvió marcaciones con la misma clave de evento: la lista es inconsistente.');
+    }
+    claves.add(fila.clave);
+    return fila;
+  });
+}
+
 /**
  * GET /pantalla/ultimas-marcaciones: el hilo real del lector, ya persistido.
  *
@@ -86,58 +225,68 @@ export function claveDeEvento(origen, id) {
  * `limite`), no un cursor: entre dos consultas pueden quedar eventos fuera.
  * Dos filas con la misma `clave_evento` vuelven inconsistente la respuesta:
  * se rechaza entera, sin elegir una fila ni inventar otra clave.
+ *
+ * Por eso NO sirve para seguir lo que cocina puede identificar: una lectura
+ * de las 23:58 sigue en el servicio a las 00:30 pero ya es de «ayer». Eso es
+ * `obtenerLecturasPorIdentificar`.
  */
 export async function obtenerUltimasMarcaciones({ fecha, comidaId, limite = 20, signal } = {}) {
   try {
     const parametros = new URLSearchParams({ limite: String(limite) });
     if (fecha !== undefined && fecha !== null) parametros.set('fecha', formatearFechaEstado(fecha));
     if (comidaId !== undefined && comidaId !== null) parametros.set('comida_id', String(comidaId));
-    const marcaciones = await solicitarApi(`/pantalla/ultimas-marcaciones?${parametros}`, { signal });
-    if (!Array.isArray(marcaciones)) {
-      throw new Error('La API devolvió una lista de marcaciones inválida.');
-    }
-    const claves = new Set();
-    return marcaciones.map((dato) => {
-      if (!Number.isInteger(dato?.id)) {
-        throw new Error('La API devolvió una marcación sin identificador.');
-      }
-      if (!ORIGENES_MARCACION.includes(dato.origen)
-        || dato.clave_evento !== claveDeEvento(dato.origen, dato.id)) {
-        throw new Error('La API devolvió una marcación sin origen válido.');
-      }
-      if (claves.has(dato.clave_evento)) {
-        throw new Error('La API devolvió marcaciones con la misma clave de evento: la lista es inconsistente.');
-      }
-      claves.add(dato.clave_evento);
-      const valido = typeof dato.valido === 'boolean' ? dato.valido : dato.resultado === 'aceptada';
-      return {
-        id: dato.id,
-        origen: dato.origen,
-        clave: dato.clave_evento,
-        usuarioId: dato.usuario_id ?? null,
-        valido,
-        titulo: valido ? 'Marcación válida'
-          : MOTIVOS_LEGIBLES[dato.motivo] ?? (dato.motivo || 'Marcación rechazada'),
-        motivo: dato.motivo ?? null,
-        dispositivo: dato.dispositivo ?? null,
-        hora: horaDeMarcacion(dato.fecha_hora),
-        // Sin comida: el lector no llegó a resolver ningún turno para esa hora
-        // (fuera de horario) o la lectura es de una huella no reconocida.
-        comidaId: dato.comida_id ?? null,
-        comida: dato.comida ?? null,
-        persona: {
-          id: dato.usuario_id ?? null,
-          nombre: dato.nombre || 'Desconocido',
-          categoria: dato.categoria || 'Sin clasificar',
-        },
-      };
-    });
+    return adaptarListaMarcaciones(
+      await solicitarApi(`/pantalla/ultimas-marcaciones?${parametros}`, { signal }),
+    );
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new Error(`No se pudieron cargar las últimas marcaciones. ${error.message}`, { cause: error });
   }
 }
 
+/**
+ * GET /pantalla/lecturas-por-identificar (solo cocinera): las huellas no
+ * reconocidas que se pueden identificar AHORA, en el servicio actual, de ayer
+ * o de hoy si el servicio cruza la medianoche. No depende de la fecha ni de
+ * las 100 filas de `ultimas-marcaciones`.
+ *
+ * Devuelve `{ servicio, total, truncado, lecturas }`. `servicio` es null si no
+ * hay un servicio determinable (la lista va vacía). Una lectura que sale de la
+ * lista dejó de ser identificable: la resolvió alguien o terminó el servicio.
+ */
+export async function obtenerLecturasPorIdentificar({ signal } = {}) {
+  try {
+    const dato = await solicitarApi('/pantalla/lecturas-por-identificar', { signal });
+    const servicio = dato?.servicio;
+    if (!dato || typeof dato !== 'object' || !Number.isInteger(dato.total) || dato.total < 0
+      || typeof dato.truncado !== 'boolean' || !Array.isArray(dato.lecturas)
+      || (servicio != null && (!Number.isInteger(servicio.comida_id) || typeof servicio.comida !== 'string'
+        || typeof servicio.fecha_comida !== 'string' || typeof servicio.inicio !== 'string'
+        || typeof servicio.fin !== 'string'))
+      || (servicio == null && dato.lecturas.length > 0)) {
+      throw new Error('La API devolvió lecturas por identificar inválidas.');
+    }
+    const lecturas = adaptarListaMarcaciones(dato.lecturas);
+    if (lecturas.some((fila) => fila.origen !== 'lectura_biometrica' || !fila.puedeIdentificar)) {
+      throw new Error('La API devolvió una lectura que no se puede identificar.');
+    }
+    return {
+      servicio: servicio == null ? null : {
+        comidaId: servicio.comida_id,
+        comida: servicio.comida,
+        fechaComida: servicio.fecha_comida,
+        inicio: servicio.inicio,
+        fin: servicio.fin,
+      },
+      total: dato.total,
+      truncado: dato.truncado,
+      lecturas,
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar las huellas por identificar. ${error.message}`, { cause: error });
+  }
+}
 /** Estados de una comida del día según GET /pantalla/comidas-del-dia. */
 const ESTADOS_COMIDA_DEL_DIA = ['pendiente', 'en_curso', 'cerrada'];
 
@@ -1232,6 +1381,245 @@ export function marcacionIncierta(error) {
   const causa = error?.cause;
   if (!(causa instanceof ErrorApi)) return true;
   return !(causa.status >= 400 && causa.status < 500 && causa.status !== 408);
+}
+
+/* ----------------------------- Intervenciones de cocina */
+
+/*
+ * Contrato: comedorback/app/api/asistencias.py (POST
+ * /asistencias/lecturas/{id}/identificar, solo cocinera) y
+ * comedorback/app/api/intervenciones.py (GET /intervenciones-cocina, solo
+ * jefa). La cocinera identifica a quien está frente al lector y confirma la
+ * entrega; la jefa solo consulta. Sin nota ni motivo escrito: la causa la fija
+ * el servidor, la cuenta sale del token y la hora del reloj del servidor.
+ */
+
+const CLAVE_UUID4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/**
+ * Clave de idempotencia de un INTENTO: un UUID v4. Se genera con
+ * getRandomValues y no con randomUUID, que el navegador solo ofrece en
+ * contextos seguros (HTTPS o localhost); el puesto de cocina puede abrir la
+ * app por la IP de la red del hospital.
+ */
+export function nuevaClaveIdempotencia(cripto = globalThis.crypto) {
+  const bytes = new Uint8Array(16);
+  cripto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** true si `clave` es un UUID v4 en minúsculas, como lo normaliza el servidor. */
+export function esClaveIdempotencia(clave) {
+  return typeof clave === 'string' && CLAVE_UUID4.test(clave);
+}
+
+/** Motivos de 409 que dicen que esa lectura ya no se puede identificar. */
+export const CONFLICTOS_DE_LECTURA = [
+  'lectura_ya_resuelta',
+  'lectura_no_resoluble',
+  'servicio_distinto',
+  'servicio_no_determinable',
+  'reloj_inconsistente',
+];
+
+function respuestaIdentificacionValida(dato, lecturaId, usuarioId) {
+  if (!dato || typeof dato.valido !== 'boolean' || !['registrada', 'rechazada'].includes(dato.resultado)
+    || dato.valido !== (dato.resultado === 'registrada')
+    || dato.lectura_id !== lecturaId || dato.usuario_id !== usuarioId
+    || !Number.isInteger(dato.intervencion_id) || typeof dato.titulo !== 'string'
+    || typeof dato.detalle !== 'string' || typeof dato.reintento !== 'boolean') {
+    return false;
+  }
+  return dato.resultado === 'registrada' ? Number.isInteger(dato.asistencia_id) : dato.asistencia_id == null;
+}
+
+/**
+ * POST /asistencias/lecturas/{lecturaId}/identificar con la cabecera
+ * `Idempotency-Key`. Nunca lanza por un resultado del servidor: devuelve uno
+ * de estos estados, para que cocina decida qué ofrecer.
+ *
+ * - `registrada`: la única ENTREGA. Trae nombre, comida y asistencia.
+ * - `rechazada`: 200 con `valido: false` (sin_derecho, duplicado). Un intento
+ *   sin entrega; nunca se le llama entrega.
+ * - `conflicto`: 4xx sobre la lectura o la solicitud (ya resuelta, fuera del
+ *   servicio, clave reutilizada, comensal inexistente…). Con `motivo` y, en
+ *   `lectura_ya_resuelta`, `resueltaPorMi` (nunca quién fue).
+ * - `en_curso`: 409 `intervencion_en_curso`. Repetir con la MISMA clave.
+ * - `incierto`: no se sabe qué quedó (503 `resultado_incierto`, otro 5xx,
+ *   red, tiempo de espera o respuesta ilegible). Repetir con la MISMA clave
+ *   recupera lo confirmado, si lo hubo; nunca se afirma que no hubo entrega.
+ * - `error`: sesión o permiso (401, 403, 428), que ya siguió el manejo
+ *   central; el servidor no ejecutó nada.
+ *
+ * La misma clave con la misma persona es la misma decisión: el servidor
+ * devuelve lo guardado (`reintento: true`) sin reevaluar nada.
+ */
+export async function identificarLectura(lecturaId, usuarioId, { clave, signal } = {}) {
+  if (!Number.isInteger(lecturaId) || lecturaId <= 0) throw new Error('Lectura inválida.');
+  if (!Number.isInteger(usuarioId) || usuarioId <= 0) throw new Error('Seleccione un comensal del padrón.');
+  if (!esClaveIdempotencia(clave)) throw new Error('Clave de idempotencia inválida.');
+
+  let dato;
+  try {
+    dato = await solicitarApi(`/asistencias/lecturas/${lecturaId}/identificar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': clave },
+      body: JSON.stringify({ usuario_id: usuarioId }),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return resultadoDeFalloIdentificacion(error);
+  }
+
+  if (!respuestaIdentificacionValida(dato, lecturaId, usuarioId)) {
+    return {
+      estado: 'incierto',
+      detalle: 'La respuesta del servidor no se pudo leer. Repita la confirmación: se recupera lo que haya quedado registrado.',
+    };
+  }
+  const comun = {
+    titulo: dato.titulo,
+    detalle: dato.detalle,
+    reintento: dato.reintento,
+    lecturaId: dato.lectura_id,
+    intervencionId: dato.intervencion_id,
+    usuarioId: dato.usuario_id,
+    nombre: textoONull(dato.nombre),
+    comida: dato.comida ?? null,
+    fechaComida: dato.fecha_comida ?? null,
+    momento: dato.momento ?? null,
+  };
+  if (dato.resultado === 'registrada') {
+    return {
+      estado: 'registrada',
+      ...comun,
+      asistenciaId: dato.asistencia_id,
+      racionesRestantes: Number.isInteger(dato.raciones_restantes) ? dato.raciones_restantes : null,
+    };
+  }
+  return { estado: 'rechazada', ...comun, motivo: dato.motivo ?? null };
+}
+
+function resultadoDeFalloIdentificacion(error) {
+  if (!(error instanceof ErrorApi)) {
+    return {
+      estado: 'incierto',
+      detalle: `No llegó una respuesta del servidor (${error.message}). Repita la confirmación: se recupera lo que haya quedado registrado.`,
+    };
+  }
+  const datos = error.datos ?? {};
+  const detalle = detalleDe(datos, error.message);
+  if (error.status >= 500 || error.status === 408) {
+    return {
+      estado: 'incierto',
+      motivo: datos.motivo ?? null,
+      detalle: datos.motivo === 'resultado_incierto' ? detalle
+        : `El servidor no pudo confirmar el resultado (HTTP ${error.status}). Repita la confirmación: se recupera lo que haya quedado registrado.`,
+    };
+  }
+  if (error.status === 409 && datos.motivo === 'intervencion_en_curso') {
+    return { estado: 'en_curso', motivo: datos.motivo, detalle };
+  }
+  if ([401, 403, 428].includes(error.status)) {
+    return { estado: 'error', motivo: datos.motivo ?? null, detalle };
+  }
+  return {
+    estado: 'conflicto',
+    motivo: datos.motivo ?? null,
+    detalle,
+    resueltaPorMi: datos.resuelta_por_mi === true,
+    reintento: datos.reintento === true,
+  };
+}
+
+const RESULTADOS_INTERVENCION = ['registrada', 'rechazada'];
+const ESTADOS_LECTURA = ['pendiente', 'resuelta'];
+
+function adaptarIntervencion(dato) {
+  const decision = dato?.decision_original;
+  const final = dato?.resultado_final;
+  if (!Number.isInteger(dato?.id) || typeof dato.clave_evento !== 'string'
+    || !RESULTADOS_INTERVENCION.includes(dato.resultado) || typeof dato.momento !== 'string'
+    || !Number.isInteger(decision?.lectura_id) || typeof decision.resultado !== 'string'
+    || !Number.isInteger(dato.cuenta?.id) || typeof dato.cuenta.usuario !== 'string'
+    || !Number.isInteger(dato.comensal?.usuario_id) || typeof dato.servicio_usado !== 'object'
+    || typeof final?.entrega_registrada !== 'boolean'
+    || final.entrega_registrada !== (dato.resultado === 'registrada')
+    || !ESTADOS_LECTURA.includes(dato.estado_actual_lectura)) {
+    throw new Error('La API devolvió una intervención de cocina inválida.');
+  }
+  const servicio = dato.servicio_usado ?? {};
+  return {
+    id: dato.id,
+    clave: dato.clave_evento,
+    resultado: dato.resultado,
+    motivoRechazo: dato.motivo_rechazo ?? null,
+    momento: dato.momento,
+    decisionOriginal: {
+      lecturaId: decision.lectura_id,
+      resultado: decision.resultado,
+      motivo: decision.motivo ?? null,
+      fechaHora: decision.fecha_hora ?? null,
+      dispositivo: decision.dispositivo ?? null,
+    },
+    cuenta: { id: dato.cuenta.id, usuario: dato.cuenta.usuario, nombre: textoONull(dato.cuenta.nombre) },
+    comensal: {
+      usuarioId: dato.comensal.usuario_id,
+      nombre: textoONull(dato.comensal.nombre),
+      categoria: textoONull(dato.comensal.categoria),
+    },
+    servicio: {
+      comidaId: servicio.comida_id ?? null,
+      comida: servicio.comida ?? null,
+      fechaComida: servicio.fecha_comida ?? null,
+      reconstruido: servicio.origen === 'reconstruido_por_horario',
+    },
+    entregaRegistrada: final.entrega_registrada,
+    asistenciaId: final.asistencia_id ?? null,
+    lecturaResuelta: dato.estado_actual_lectura === 'resuelta',
+  };
+}
+
+/**
+ * GET /intervenciones-cocina (solo jefa): los intentos de identificación del
+ * rango, la más reciente primero, paginados. Solo consulta: la jefa no
+ * aprueba ni ejecuta nada. Sin `desde`/`hasta` el servidor usa hoy.
+ * `total` y `totales` cubren todo el filtro, no solo la página.
+ */
+export async function obtenerIntervencionesCocina({
+  desde, hasta, resultado, comidaId, limite = 50, desplazamiento = 0, signal,
+} = {}) {
+  try {
+    const parametros = new URLSearchParams({ limite: String(limite), desplazamiento: String(desplazamiento) });
+    if (desde != null) parametros.set('desde', formatearFechaEstado(desde));
+    if (hasta != null) parametros.set('hasta', formatearFechaEstado(hasta));
+    if (resultado) parametros.set('resultado', resultado);
+    if (comidaId != null) parametros.set('comida_id', String(comidaId));
+    const pagina = await solicitarApi(`/intervenciones-cocina?${parametros}`, { signal });
+    if (!pagina || typeof pagina.desde !== 'string' || typeof pagina.hasta !== 'string'
+      || !Number.isInteger(pagina.total) || pagina.total < 0
+      || !Number.isInteger(pagina.limite) || !Number.isInteger(pagina.desplazamiento)
+      || !Number.isInteger(pagina.totales?.registradas) || !Number.isInteger(pagina.totales?.rechazadas)
+      || !Array.isArray(pagina.datos)) {
+      throw new Error('La API devolvió una página de intervenciones inválida.');
+    }
+    return {
+      desde: pagina.desde,
+      hasta: pagina.hasta,
+      total: pagina.total,
+      limite: pagina.limite,
+      desplazamiento: pagina.desplazamiento,
+      totales: { registradas: pagina.totales.registradas, rechazadas: pagina.totales.rechazadas },
+      datos: pagina.datos.map(adaptarIntervencion),
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudieron cargar las intervenciones de cocina. ${error.message}`, { cause: error });
+  }
 }
 
 /* ----------------------------- Historial nominal de la API */

@@ -4,7 +4,6 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import Header from '../src/components/layout/Header.jsx';
 import Supervision, {
-  ejecutarAutorizacionManual,
   filtrarMarcaciones,
   metodoDeMarcacion,
   pestanaPorDefecto,
@@ -135,7 +134,8 @@ test('obtenerUltimasMarcaciones conserva campos existentes y agrega aditivamente
   // Campos existentes conservados intactos
   assert.equal(lista[0].id, 101);
   assert.equal(lista[0].valido, false);
-  assert.equal(lista[0].titulo, 'no_identificado');
+  // El motivo guardado de una huella sin usuario se lee como tal.
+  assert.equal(lista[0].titulo, 'Huella no reconocida');
   assert.equal(lista[0].comidaId, 2);
   assert.equal(lista[0].comida, 'Almuerzo');
   assert.equal(lista[0].persona.nombre, 'Huella no reconocida');
@@ -150,9 +150,9 @@ test('obtenerUltimasMarcaciones conserva campos existentes y agrega aditivamente
 });
 
 // -------------------------------------------------------------
-// 3. Autorizar no_identificado envía {usuario_id, metodo:'manual'} sin momento
+// 3. El registro manual de jefatura envía {usuario_id, metodo:'manual'} sin momento
 // -------------------------------------------------------------
-test('autorizar no_identificado envía {usuario_id, metodo: manual} sin momento', async () => {
+test('el registro manual independiente envía {usuario_id, metodo: manual} sin momento', async () => {
   const peticiones = [];
   globalThis.fetch = async (ruta, opciones) => {
     peticiones.push({ ruta: new URL(ruta).pathname, opciones });
@@ -188,9 +188,9 @@ test('autorizar no_identificado envía {usuario_id, metodo: manual} sin momento'
 });
 
 // -------------------------------------------------------------
-// 4. sin_derecho: botón desactivado y ninguna petición
+// 4. Las filas de rechazo son de consulta: sin Autorizar ni peticiones
 // -------------------------------------------------------------
-test('sin_derecho muestra Autorizar desactivado y no hace ninguna petición HTTP', async () => {
+test('un rechazo sin_derecho o no_identificado no ofrece Autorizar ni hace peticiones', async () => {
   let llamadasFetch = 0;
   globalThis.fetch = async () => {
     llamadasFetch += 1;
@@ -211,14 +211,16 @@ test('sin_derecho muestra Autorizar desactivado y no hace ninguna petición HTTP
     h(Supervision, {
       cargandoInicial: false,
       comidasIniciales: diaFixture(),
-      marcacionesIniciales: [marcacionSinDerecho],
+      marcacionesIniciales: [
+        marcacionSinDerecho,
+        marcacionFixture({ id: 56, valido: false, motivo: 'no_identificado', persona: { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar' } }),
+      ],
     })
   );
 
-  // El botón está desactivado con el texto requerido
-  assert.match(html, /Requiere excepción de jefatura \(pendiente\)/);
-  assert.match(html, /disabled/);
-  assert.match(html, /<span class="boton__texto">Autorizar<\/span>/);
+  // Ni el Autorizar viejo ni la excepción pendiente: la huella la identifica cocina.
+  assert.doesNotMatch(html, /Autorizar|Requiere excepción de jefatura|Confirmar ración manual/);
+  assert.doesNotMatch(html, /<th scope="col">Acción<\/th>/);
 
   // No se realizó ninguna llamada a la API
   assert.equal(llamadasFetch, 0, 'No debe realizar ninguna petición HTTP');
@@ -392,7 +394,7 @@ test('la tabla muestra Hora, Comensal, Categoría, Comida, Resultado, Motivo, M�
   );
 
   // Cabeceras en orden
-  for (const columna of ['Hora', 'Comensal', 'Categoría', 'Comida', 'Resultado', 'Motivo', 'Método', 'Acción']) {
+  for (const columna of ['Hora', 'Comensal', 'Categoría', 'Comida', 'Resultado', 'Motivo', 'Método']) {
     assert.match(html, new RegExp(`<th scope="col">${columna}</th>`));
   }
 
@@ -415,8 +417,9 @@ test('la tabla muestra Hora, Comensal, Categoría, Comida, Resultado, Motivo, M�
   // Las tres rechazadas llevan fondo de rechazo
   assert.equal(html.match(/supervision__fila--rechazada/g).length, 3);
 
-  // "Autorizar" solo en no_identificado (activa) y sin_derecho (desactivada)
-  assert.equal(html.match(/<span class="boton__texto">Autorizar<\/span>/g).length, 2);
+  // Sin «Autorizar»: la tabla es de consulta (la huella la identifica cocina)
+  assert.doesNotMatch(html, /Autorizar/);
+  assert.doesNotMatch(html, /<th scope="col">Acción<\/th>/);
 
   // Sin aviso de truncado con pocas filas
   assert.doesNotMatch(html, /Mostrando las últimas 100/);
@@ -479,12 +482,15 @@ test('la barra trae segmentado, búsqueda, Actualizado y Actualizar; el filtrado
 });
 
 // -------------------------------------------------------------
-// 9. Fila expandida: selector de comensal debajo de la marcación
+// 9. Huella identificada por cocina: decisión original y resultado final
 // -------------------------------------------------------------
-test('la fila expandida muestra el selector del padrón con Confirmar ración manual y Cancelar', () => {
+test('una huella que identificó cocina muestra el rechazo original y la entrega aparte', () => {
   const fila = marcacionFixture({
     id: 702, dispositivo: 'lector-2', valido: false, motivo: 'no_identificado',
     persona: { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar' },
+    estadoFinal: 'racion_servida',
+    resultadoFinal: { via: 'identificacion_manual', asistenciaId: 9, comensal: { usuarioId: 99, nombre: 'Ana Gomez' } },
+    intervencion: { revision: 1, resuelta: true, resueltaPorMi: false, registradaPor: { cuentaId: 4, usuario: 'maria.cocina', nombre: 'María Cocina' }, intentosRechazados: 0 },
   });
   const html = renderToStaticMarkup(
     h(Supervision, {
@@ -492,26 +498,16 @@ test('la fila expandida muestra el selector del padrón con Confirmar ración ma
       comidasIniciales: diaFixture(),
       marcacionesIniciales: [fila],
       personal: [{ id: 99, nombre: 'Ana Gomez', categoria: 'Bioquimica', legajo: 'B-99' }],
-      filaExpandidaInicial: 'lectura_biometrica:702',
     })
   );
-  assert.match(html, /supervision__fila-autorizar/);
-  assert.match(html, /Seleccione comensal del padrón/);
-  assert.match(html, /Ana Gomez/);
-  assert.match(html, /<span class="boton__texto">Confirmar ración manual<\/span>/);
-  assert.match(html, /<span class="boton__texto">Cancelar<\/span>/);
-
-  // Sin fila expandida no hay selector ni confirmación
-  const htmlCerrada = renderToStaticMarkup(
-    h(Supervision, {
-      cargandoInicial: false,
-      comidasIniciales: diaFixture(),
-      marcacionesIniciales: [fila],
-      personal: [{ id: 99, nombre: 'Ana Gomez', categoria: 'Bioquimica', legajo: 'B-99' }],
-    })
-  );
-  assert.doesNotMatch(htmlCerrada, /supervision__fila-autorizar/);
-  assert.doesNotMatch(htmlCerrada, /Confirmar ración manual/);
+  // La decisión del lector no cambia: sigue siendo un rechazo de huella no reconocida.
+  assert.match(html, /etiqueta--error[^>]*>\s*Rechazada/);
+  assert.match(html, /Huella no reconocida \(no identificado\)/);
+  // El resultado final va aparte, con la persona y quién lo registró.
+  assert.match(html, /Entregada por cocina/);
+  assert.match(html, /Ana Gomez · registró María Cocina/);
+  // Y nada que aprobar.
+  assert.doesNotMatch(html, /Autorizar|Confirmar ración manual|supervision__fila-autorizar/);
 });
 
 // -------------------------------------------------------------
@@ -573,46 +569,14 @@ test('el header de vivo de la cocinera se dibuja igual que antes, y en supervisi
 });
 
 // -------------------------------------------------------------
-// 12. Respuesta de autorizar manual (éxito y rechazo de negocio)
+// 12. Aviso de una acción (registro manual): éxito y rechazo de negocio
 // -------------------------------------------------------------
-test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el rechazo y no el éxito, y conserva selección', async () => {
-  let recargado = false;
-  let exitoNotificado = false;
-  let comensalEstado = { 'lectura_biometrica:101': '42' };
-  let avisoRecibido = null;
-
-  const respuestaRechazo = {
-    valido: false,
-    motivo: 'duplicado',
-    titulo: 'Ya recibió su comida',
-    detalle: 'Comensal ya almorzó a las 12:15',
-  };
-
-  const resultado = await ejecutarAutorizacionManual({
-    marcacion: { id: 101, clave: 'lectura_biometrica:101', motivo: 'no_identificado' },
-    usuarioId: 42,
-    autorizarFn: async () => respuestaRechazo,
-    cargarDatosFn: async () => { recargado = true; },
-    setAvisoAccion: (aviso) => { avisoRecibido = aviso; },
-    setComensalElegido: (fn) => { comensalEstado = fn(comensalEstado); },
-    setAutorizandoId: () => {},
-    onMarcacionExitosa: () => { exitoNotificado = true; },
-  });
-
-  // Devuelve el resultado para que la tabla sepa si cerrar la fila
-  assert.equal(resultado, respuestaRechazo);
-  // Emite aviso de rechazo con titulo y detalle del servidor
-  assert.deepEqual(avisoRecibido, {
+test('un aviso de rechazo se muestra como rechazo y no como éxito', () => {
+  const avisoRecibido = {
     tipo: 'rechazo',
     titulo: 'Ya recibió su comida',
     detalle: 'Comensal ya almorzó a las 12:15',
-  });
-  // NO limpia la selección del comensal
-  assert.equal(comensalEstado['lectura_biometrica:101'], '42');
-  // NO notifica marcación exitosa
-  assert.equal(exitoNotificado, false);
-  // Recarga siempre después
-  assert.equal(recargado, true);
+  };
 
   // Render en UI: muestra aviso de rechazo y no el de éxito
   const html = renderToStaticMarkup(
@@ -632,44 +596,12 @@ test('autorizar con respuesta { valido: false, motivo: "duplicado" } muestra el 
   assert.doesNotMatch(html, /supervision__aviso-accion--exito/);
 });
 
-test('autorizar con respuesta { valido: true } muestra el éxito y limpia la selección', async () => {
-  let recargado = false;
-  let exitoNotificado = false;
-  let comensalEstado = { 'lectura_biometrica:101': '42' };
-  let avisoRecibido = null;
-
-  const respuestaExito = {
-    valido: true,
-    motivo: 'ok',
-    titulo: 'Ración autorizada',
-    detalle: 'Comensal habilitado para Almuerzo',
-  };
-
-  const resultado = await ejecutarAutorizacionManual({
-    marcacion: { id: 101, clave: 'lectura_biometrica:101', motivo: 'no_identificado' },
-    usuarioId: 42,
-    autorizarFn: async () => respuestaExito,
-    cargarDatosFn: async () => { recargado = true; },
-    setAvisoAccion: (aviso) => { avisoRecibido = aviso; },
-    setComensalElegido: (fn) => { comensalEstado = fn(comensalEstado); },
-    setAutorizandoId: () => {},
-    onMarcacionExitosa: () => { exitoNotificado = true; },
-  });
-
-  // Devuelve el resultado para que la tabla sepa si cerrar la fila
-  assert.equal(resultado, respuestaExito);
-  // Emite aviso de éxito con titulo y detalle
-  assert.deepEqual(avisoRecibido, {
+test('un aviso de éxito se muestra como éxito y no como rechazo', () => {
+  const avisoRecibido = {
     tipo: 'exito',
     titulo: 'Ración autorizada',
     detalle: 'Comensal habilitado para Almuerzo',
-  });
-  // Limpia la selección del comensal
-  assert.equal(comensalEstado['lectura_biometrica:101'], undefined);
-  // Notifica éxito
-  assert.equal(exitoNotificado, true);
-  // Recarga siempre después
-  assert.equal(recargado, true);
+  };
 
   // Render en UI: muestra aviso de éxito y no el de rechazo
   const html = renderToStaticMarkup(

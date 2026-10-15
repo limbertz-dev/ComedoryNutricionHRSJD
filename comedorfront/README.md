@@ -49,9 +49,12 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | eliminarHorarioProgramado | DELETE /reglas/horarios/{horario_id} | Borra un horario programado, reabre el anterior (204) |
 | obtenerPersonal | GET /personal | Reúne páginas de 200 comensales para el selector |
 | marcarAsistencia | GET /personal/{id} + POST /asistencias | metodo biometrico desde el simulador del lector, manual desde el registro a mano |
-| autorizarMarcacionManual | POST /asistencias | Autoriza una huella no reconocida con {usuario_id, metodo: 'manual'} sin momento; muestra la respuesta del servidor |
+| autorizarMarcacionManual | POST /asistencias | Registro manual independiente de jefatura: {usuario_id, metodo: 'manual'} sin momento; muestra la respuesta del servidor |
+| identificarLectura | POST /asistencias/lecturas/{id}/identificar | Solo cocinera: identifica una huella no reconocida y confirma la entrega. Cabecera Idempotency-Key (UUID v4), cuerpo {usuario_id}; devuelve registrada, rechazada, conflicto, en_curso, incierto o error |
+| obtenerLecturasPorIdentificar | GET /pantalla/lecturas-por-identificar | Solo cocinera: huellas identificables ahora en el servicio actual, aunque sean de ayer (servicio nocturno) |
+| obtenerIntervencionesCocina | GET /intervenciones-cocina | Solo jefa: intentos de cocina del día (o del rango), paginados, con totales de todo el filtro |
 | obtenerEstadoPantalla | GET /pantalla/estado | Comida vigente, cupo, totales del día y gráfico |
-| obtenerUltimasMarcaciones | GET /pantalla/ultimas-marcaciones | Lecturas guardadas de hoy, incluidos los rechazos |
+| obtenerUltimasMarcaciones | GET /pantalla/ultimas-marcaciones | Lecturas guardadas de hoy, incluidos los rechazos, con decisión original, resultado final y revisión de intervención |
 | obtenerDiaPersonal | GET /pantalla/dia-personal | Detalle del día de un comensal bajo la marcación |
 | obtenerComidasDelDia | GET /pantalla/comidas-del-dia | Comidas del día con estado, servidas y rechazos por motivo (pestañas de Supervisión) |
 | obtenerHistorialDiarioPersonal | GET /historial/diario | Historial diario, 50 registros por página |
@@ -64,13 +67,12 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | saltarAProximaFranja | POST /simulacion/reloj/proxima-franja | Salta al inicio de la próxima comida; 409 se muestra como mensaje |
 | volverARelojReal | DELETE /simulacion/reloj | Devuelve el sistema a la hora real |
 
-Supervisión (solo jefa y sistemas) muestra una pestaña por comida con su
-estado, raciones servidas y rechazos, y una tabla en vivo con las últimas 100
-marcaciones. Filtra por resultado y por nombre, se refresca cada 30 s y tiene
-botón Actualizar con la hora del último refresco. «Autorizar» aparece solo en
-la huella no reconocida: abre el selector del padrón y envía
-autorizarMarcacionManual, mostrando el éxito o el rechazo que responda el
-servidor.
+Supervisión (jefa) muestra una pestaña por comida con su estado, raciones
+servidas y rechazos, y una tabla en vivo con las últimas 100 marcaciones.
+Filtra por resultado y por nombre, se refresca cada 30 s y tiene botón
+Actualizar con la hora del último refresco. La tabla es de consulta: ya no hay
+«Autorizar» sobre las filas; la huella no reconocida la identifica la cocinera
+y aquí se ve su resultado final. «Registrar ración manual» sigue aparte.
 
 Administración (solo sistemas) muestra la tabla de cuentas —usuario, nombre,
 rol, vínculo, estado y último ingreso— con «Reiniciar clave» y
@@ -148,8 +150,9 @@ La cocinera no tiene sidebar ni header: Control Biométrico ocupa toda la
 ventana. Un botón flotante abajo a la derecha abre su panel de sesión: usuario
 y rol, el simulador del lector, «Pantalla completa» (si el navegador la
 soporta) y «Cerrar sesión». El «Modo manual» vive en Control Biométrico y
-sigue oculto para ella; jefa y sistemas autorizan desde Supervisión con
-«Autorizar».
+sigue oculto para ella. Ella sí identifica las huellas no reconocidas
+(«Huellas por identificar», ver Intervenciones de cocina); la jefa solo las
+consulta.
 
 Los nombres de los campos del cuerpo de login y de cambio de contraseña no están en el
 contrato: viven solos en `cuerpoLogin` / `cuerpoCambio` de `src/api.js`.
@@ -170,11 +173,103 @@ diario, usando fecha_comida cuando está disponible.
 Reportes muestra una sola vista, el formulario de Estadística, pedida por rango
 de fechas a /reportes/informe: «este mes» y «esta gestión» son rangos. Un rango
 sin raciones se presenta vacío, sin cifras de demostración. Excel y PDF salen de
-ese mismo informe (exportarInformeExcel / exportarInformePdf).
+ese mismo informe (exportarInformeExcel / exportarInformePdf). La vista no ofrece
+pestaña ni acceso a «Reportes de pacientes»: llegarán con su módulo. El selector de
+fechas, el período, Excel y PDF miden lo mismo (`--alto-control` en tokens.css) y la
+línea secundaria del período (días o gestión) va en la misma fila: no agranda el control.
 
 useConsultaApi cancela lecturas obsoletas al cambiar de período o desmontar una
 vista. Carga, respuesta vacía y error son estados distintos. Hay reintento manual
 para lecturas; no hay reintentos automáticos del POST ni datos ficticios de respaldo.
+
+## Interfaz de jefatura
+
+Supervisión, Resumen, Reportes y Cuentas comparten el lenguaje visual de
+laaguilarsilva en verde: superficies planas de borde fino, controles compactos
+(`--alto-control` de 46 px en las barras de reporte y `--alto-control-compacto` de
+40 px en las de filtro), foco visible (el global, más `--s-foco` en los campos),
+transiciones cortas y `prefers-reduced-motion`. No se agregó ninguna dependencia.
+
+**Supervisión.** Las pestañas por comida traen aceptadas, rechazadas y manuales;
+debajo, un resumen de la pestaña activa con su período. Las manuales ya están
+dentro de las aceptadas (`servidas` incluye `manuales`): se muestran aparte, no se
+suman. La barra de filtros suma el segmento «Manuales» (por `origen`) y cada fila
+manual lleva su marca. El registro manual independiente sigue igual; el
+«Autorizar» de filas se retiró (ver abajo).
+
+**Resumen.** Tres conteos distintos, cada uno con su período (`src/resumen.js`):
+
+| Bloque | Campo de /pantalla/estado | Período |
+|---|---|---|
+| Turno actual | cupo (servidas, previstas, restantes, porcentaje) | solo la comida en curso, en su fecha de comida |
+| Raciones servidas del día y gráfico por categoría | totales_del_dia.raciones_servidas, por_categoria | todas las comidas de la fecha de comida |
+| Lecturas del lector | aceptadas, rechazadas, lecturas | día del reloj; son toques de dedo, no raciones |
+
+Un cupo sin previstas se dice («sin cupo cargado») y no se le inventa porcentaje.
+
+*Métricas propuestas para el Resumen (no se aproximan en el front):* comparación
+con el día o la semana anterior y ritmo de servidas por hora dentro de la franja
+necesitan backend nuevo. La cobertura del día completo (servidas contra previstas
+de todas las comidas) y los rechazos del día por motivo ya salen por comida de
+`/pantalla/comidas-del-dia` (Supervisión), pero llevarlos al Resumen es una
+decisión de producto, no un cambio de presentación.
+
+**Cuentas.** Solo lectura: buscador, conteo por estado, tabla y, en pantallas
+pequeñas, una tarjeta por cuenta. Administración de cuentas (sistemas) no se tocó.
+
+## Intervenciones de cocina
+
+Contrato: `comedorback` en `feat/jefa-intervenciones-back` (bfcacb3).
+
+**Cocinera (Control Biométrico).** «Huellas por identificar» lista lo que
+devuelve `GET /pantalla/lecturas-por-identificar`, en el mismo ciclo de 3 s que
+las marcaciones. Esa lista parte del servicio actual: una huella de las 23:58
+sigue ahí a las 00:30, aunque ya sea de «ayer» y `ultimas-marcaciones` de hoy no
+la traiga, y no depende de las 100 filas. La cocinera abre una huella (o pulsa
+«Identificar a la persona» en el resultado del lector), elige a la persona del
+padrón, ve su identidad y pulsa «Confirmar entrega». No hay nota ni motivo: solo
+se envía `{usuario_id}`.
+
+- **Idempotencia por intento** (`src/identificacion.js`). La clave (UUID v4,
+  generada con `getRandomValues` para funcionar también fuera de HTTPS) nace al
+  confirmar a una persona para una lectura. Solo se reutiliza para repetir esa
+  misma decisión: con `incierto` (503 `resultado_incierto`, otro 5xx, red,
+  tiempo de espera, respuesta ilegible o cualquier error después de iniciar el
+  envío) o `en_curso` se ofrece «Verificar entrega». Solo un resultado
+  definitivo (entrega, rechazo, conflicto o un rechazo de sesión) cierra el
+  intento. Un segundo clic con un envío en vuelo no hace nada.
+- **Intento sin resolver.** Cerrar el panel no lo cancela: queda en «Por
+  verificar» con su lectura, su persona y su clave. Al reabrirlo solo se ofrece
+  verificarlo con esa misma persona; no se puede elegir a otra para esa huella
+  hasta resolverlo. El intento guarda una copia mínima de la persona (id,
+  nombre, categoría, legajo), así que se verifica aunque ya no esté en el padrón
+  visible. Vive mientras la pantalla de cocina está montada: cerrar sesión lo
+  pierde, porque la clave vale solo para esa cuenta.
+- **Resultados.** Solo `registrada` es una entrega. `rechazada` (sin_derecho,
+  duplicado) es un intento sin entrega y nunca se le llama entrega. Un conflicto
+  sobre la lectura (ya resuelta, otro servicio, servicio no determinable, reloj
+  inconsistente) cierra el panel; «ya resuelta» dice si fue esta cuenta, nunca
+  quién. Un resultado incierto nunca afirma que no hubo entrega.
+- **Seguimiento.** Una huella que sale de la lista dejó de ser identificable,
+  pero eso no prueba que se haya entregado (pudo terminar el servicio): si
+  quedaba un intento sin resolver, sigue en «Por verificar» y se verifica con la
+  misma clave para recuperar lo que haya quedado. `intervencion.revision` de
+  `ultimas-marcaciones` sube cuando alguien (también otra cocinera) registra la
+  entrega: la fila a la vista se redibuja con su resultado final, sin flash.
+
+**Jefa (Supervisión).** Sin «Autorizar» ni columna «Acción»: la tabla de
+marcaciones muestra la decisión original del lector y, aparte, «Entregada por
+cocina» con la persona y la cuenta que la registró. Al pie, «Intervenciones de
+cocina» (`GET /intervenciones-cocina`, acotado al día y a la pestaña activa):
+momento, persona, comida, cocinera responsable, decisión original y resultado
+final, con totales, filtro por resultado y páginas de 50. Solo consulta: ningún
+botón de aprobación. El registro manual independiente no aparece ahí.
+
+**Sistemas** no ve ninguna de las dos cosas (`src/permisos.js`), igual que en el
+backend.
+
+Pendiente de decisión del backend, no implementado: impedir que una cuenta se
+identifique a sí misma y un tope de intentos rechazados por lectura.
 
 ## Pendiente de mapeo
 
