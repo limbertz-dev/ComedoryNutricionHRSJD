@@ -405,9 +405,9 @@ def test_indices_y_tablas_nuevas():
         assert opciones["mysql_collate"] == "utf8mb4_unicode_ci", tabla
 
 
-def test_salud_cuenta_once_tablas(cliente):
-    """Diez tablas anteriores más `cerrojos`."""
+def test_salud_cuenta_doce_tablas(cliente):
+    """Diez tablas anteriores, más `cerrojos` y `intervenciones_lectura`."""
     r = cliente.get("/salud")
     assert r.status_code == 200, r.text
-    assert r.json()["tablas_propias"] == 11
+    assert r.json()["tablas_propias"] == 12
     assert r.json()["vistas_contrato"] == 9

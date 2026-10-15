@@ -117,7 +117,7 @@ def _nombre_de(sesion: Session, usuario_id: int) -> str | None:
     return sesion.execute(consulta).scalar_one_or_none()
 
 
-def _categoria_reporte_de(sesion: Session, usuario_id: int) -> int:
+def categoria_reporte_de(sesion: Session, usuario_id: int) -> int:
     """La columna del informe que le toca a esta persona.
 
     Si su categoría todavía no está mapeada, cae en "Sin clasificar" en vez de
@@ -140,7 +140,7 @@ def _categoria_reporte_de(sesion: Session, usuario_id: int) -> int:
     ).scalar_one()
 
 
-def _ya_comio(sesion: Session, usuario_id: int, comida: ComidaEnCurso) -> bool:
+def ya_comio(sesion: Session, usuario_id: int, comida: ComidaEnCurso) -> bool:
     return sesion.execute(
         select(Asistencia.id).where(
             Asistencia.usuario_id == usuario_id,
@@ -247,14 +247,14 @@ def registrar_marcacion(
                 f"Su turno asignado no incluye {comida.comida.lower()} en esta fecha",
                 comida,
             )
-        if _ya_comio(sesion, usuario_id, comida):
+        if ya_comio(sesion, usuario_id, comida):
             return rechazar(
                 "duplicado",
                 f"Ya recibió su {comida.comida.lower()} de hoy",
                 comida,
             )
     else:
-        if _ya_comio(sesion, usuario_id, comida):
+        if ya_comio(sesion, usuario_id, comida):
             return rechazar(
                 "duplicado",
                 f"Ya recibió su {comida.comida.lower()} de hoy",
@@ -280,7 +280,7 @@ def registrar_marcacion(
         usuario_id=usuario_id,
         fecha_comida=comida.fecha_comida,
         comida_id=comida.comida_id,
-        categoria_reporte_id=_categoria_reporte_de(sesion, usuario_id),
+        categoria_reporte_id=categoria_reporte_de(sesion, usuario_id),
         servicio_id=derecho.servicio_id,
         turno_asignado_id=derecho.turno_asignado_id,
         metodo=metodo,

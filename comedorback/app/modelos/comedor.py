@@ -24,6 +24,8 @@ saber para qué están.
 from datetime import date, datetime, time
 
 from sqlalchemy import (
+    CHAR,
+    CheckConstraint,
     Date,
     DateTime,
     Enum as SAEnum,
@@ -267,6 +269,9 @@ class Asistencia(Base):
         UniqueConstraint(
             "usuario_id", "fecha_comida", "comida_id", name="uq_asistencias_racion"
         ),
+        # Una lectura da, como mucho, una ración. Varias filas con lectura_id
+        # NULL (registros manuales) siguen siendo posibles.
+        UniqueConstraint("lectura_id", name="uq_asistencias_lectura_id"),
         Index("idx_asistencias_fecha_comida", "fecha_comida", "comida_id"),
     )
 
@@ -331,6 +336,139 @@ class Asistencia(Base):
             "usuarios_sistema.id de quien la registro a mano, tomado del "
             "token. FK interna: las cuentas se dan de baja, no se borran."
         ),
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+CAUSA_IDENTIFICACION = "identificacion_manual_por_no_identificado"
+RESULTADOS_INTERVENCION = ("registrada", "rechazada")
+MOTIVOS_RECHAZO_INTERVENCION = (
+    "sin_derecho",
+    "duplicado",
+    "lectura_ya_resuelta",
+    "lectura_no_resoluble",
+    "servicio_distinto",
+    "servicio_no_determinable",
+    "reloj_inconsistente",
+)
+ORIGEN_SERVICIO = "reconstruido_por_horario"
+
+# Idénticos carácter por carácter a los de la migración e1a7c3b9d5f2.
+COMENTARIO_TABLA_INTERVENCIONES = (
+    "Auditoria de la identificacion manual de una lectura no reconocida. "
+    "Solo inserciones: cada fila es un intento de la cocinera, registrado o "
+    "rechazado. La lectura original no se modifica."
+)
+COMENTARIO_INTERVENCION_CLAVE = (
+    "Idempotency-Key del intento, por cuenta. Con la misma huella devuelve "
+    "lo guardado en vez de repetir."
+)
+COMENTARIO_INTERVENCION_HUELLA = (
+    "SHA-256 de {lectura_id, usuario_id}. La misma clave con otra huella es "
+    "un conflicto."
+)
+COMENTARIO_INTERVENCION_SERVICIO = (
+    "Servicio que el sistema uso. Se RECONSTRUYE por horario a partir de "
+    "lecturas_biometricas.fecha_hora, que no guarda comida ni fecha_comida: "
+    "no es un dato historico de la lectura."
+)
+COMENTARIO_INTERVENCION_COPIAS = (
+    "Copia del momento del intento, para responder un reintento sin depender "
+    "del padron ni de los horarios."
+)
+
+
+class IntervencionLectura(Base):
+    """Un intento de identificar a mano una lectura `no_identificado`.
+
+    Solo se inserta: ninguna fila se actualiza ni se borra, y por eso el
+    conjunto de filas visibles para un rol solo crece (la `revision` de la
+    pantalla se apoya en eso). `registrada` es la única que tiene ración;
+    `rechazada` es un intento que no la tuvo y nunca es una entrega.
+
+    Esa relación (`registrada` ⇔ `asistencia_id` no nulo) NO la protege ningún
+    CHECK de la base: el CHECK de la tabla solo cubre `motivo_rechazo`, y no se
+    verificó si MySQL admite uno sobre una columna con FK RESTRICT. La sostiene
+    el único camino de inserción (app/logica/intervencion.py), que escribe la
+    ración y la fila en una sola transacción, y la comprueban las pruebas
+    sobre lo que queda en la base tras carreras y fallos.
+    """
+
+    __tablename__ = "intervenciones_lectura"
+    __table_args__ = opciones(
+        COMENTARIO_TABLA_INTERVENCIONES,
+        UniqueConstraint(
+            "cuenta_id",
+            "clave_idempotencia",
+            name="uq_intervenciones_lectura_cuenta_clave",
+        ),
+        UniqueConstraint("asistencia_id", name="uq_intervenciones_lectura_asistencia_id"),
+        CheckConstraint(
+            "(resultado = 'registrada' AND motivo_rechazo IS NULL) OR "
+            "(resultado = 'rechazada' AND motivo_rechazo IS NOT NULL)",
+            name="motivo_coherente",
+        ),
+        Index("idx_intervenciones_momento", "momento"),
+        Index("idx_intervenciones_lectura", "lectura_id"),
+        Index("idx_intervenciones_cuenta_momento", "cuenta_id", "momento"),
+    )
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True)
+    lectura_id: Mapped[int] = mapped_column(
+        ID,
+        ForeignKey("lecturas_biometricas.id", ondelete="RESTRICT"),
+        comment="La lectura intervenida. RESTRICT: la auditoria no se queda sin ella.",
+    )
+    usuario_id: Mapped[int] = mapped_column(
+        ID,
+        comment="users.id de la persona propuesta por la cocinera, sin FK entre bases.",
+    )
+    cuenta_id: Mapped[int] = mapped_column(
+        ID,
+        ForeignKey("usuarios_sistema.id", ondelete="RESTRICT"),
+        comment=(
+            "usuarios_sistema.id de la cocinera, tomado del token. FK interna: "
+            "las cuentas se dan de baja, no se borran."
+        ),
+    )
+    clave_idempotencia: Mapped[str] = mapped_column(
+        CHAR(36), comment=COMENTARIO_INTERVENCION_CLAVE
+    )
+    huella_solicitud: Mapped[str] = mapped_column(
+        CHAR(64), comment=COMENTARIO_INTERVENCION_HUELLA
+    )
+    resultado: Mapped[str] = mapped_column(
+        SAEnum(*RESULTADOS_INTERVENCION, name="resultado_intervencion"),
+        comment="registrada = hubo entrega y racion. rechazada = no la hubo.",
+    )
+    motivo_rechazo: Mapped[str | None] = mapped_column(
+        SAEnum(*MOTIVOS_RECHAZO_INTERVENCION, name="motivo_rechazo_intervencion")
+    )
+    causa: Mapped[str] = mapped_column(
+        SAEnum(CAUSA_IDENTIFICACION, name="causa_intervencion"),
+        comment="La fija el servidor. La usuaria no escribe motivo ni nota.",
+    )
+    comida_id: Mapped[int | None] = mapped_column(
+        ID, comment=COMENTARIO_INTERVENCION_SERVICIO
+    )
+    fecha_comida: Mapped[date | None] = mapped_column(Date)
+    ventana_inicio: Mapped[datetime | None] = mapped_column(INSTANTE)
+    ventana_fin: Mapped[datetime | None] = mapped_column(INSTANTE)
+    origen_servicio: Mapped[str | None] = mapped_column(
+        SAEnum(ORIGEN_SERVICIO, name="origen_servicio")
+    )
+    nombre_comensal: Mapped[str | None] = mapped_column(
+        String(100), comment=COMENTARIO_INTERVENCION_COPIAS
+    )
+    nombre_comida: Mapped[str | None] = mapped_column(String(80))
+    servicio_id: Mapped[int | None] = mapped_column(ID)
+    asistencia_id: Mapped[int | None] = mapped_column(
+        ID,
+        ForeignKey("asistencias.id", ondelete="RESTRICT"),
+        comment="La racion de una intervencion registrada. NULL en las rechazadas.",
+    )
+    momento: Mapped[datetime] = mapped_column(
+        INSTANTE, comment="Instante del reloj del servidor en que se resolvio el intento."
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

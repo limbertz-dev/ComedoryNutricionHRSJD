@@ -39,7 +39,12 @@ CAMPOS_PREVIOS = {
     "id", "fecha_hora", "usuario_id", "nombre", "categoria", "comida_id",
     "comida", "resultado", "motivo", "valido", "dispositivo",
 }
-CAMPOS = CAMPOS_PREVIOS | {"origen", "clave_evento"}
+CAMPOS_INTERVENCIONES = {
+    "comida_origen", "decision_original", "estado_final", "resultado_final",
+    "puede_identificar", "motivo_no_identificable", "identificable_hasta",
+    "intervencion",
+}
+CAMPOS = CAMPOS_PREVIOS | {"origen", "clave_evento"} | CAMPOS_INTERVENCIONES
 ORIGENES = {"lectura_biometrica", "asistencia_manual"}
 FORMA_CLAVE = re.compile(r"(lectura_biometrica|asistencia_manual):[1-9]\d*")
 

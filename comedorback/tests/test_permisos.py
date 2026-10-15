@@ -34,6 +34,10 @@ MATRIZ = [
     ("GET", "/reportes/mensual", None, JEFATURA),
     ("GET", "/reportes/gestion", None, JEFATURA),
     ("GET", "/reportes/informe?desde=2026-01-01&hasta=2026-01-31", None, JEFATURA),
+    # Intervenciones de cocina: identifica solo la cocinera; consulta solo la jefa.
+    ("POST", "/asistencias/lecturas/1/identificar", {"usuario_id": 1}, {"cocinera"}),
+    ("GET", "/intervenciones-cocina", None, {"jefa"}),
+    ("GET", "/pantalla/lecturas-por-identificar", None, {"cocinera"}),
     ("GET", "/auth/yo", None, TODOS),
     ("GET", "/monitoreo/estado", None, {"sistemas"}),
 ]
