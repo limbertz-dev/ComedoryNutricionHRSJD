@@ -99,19 +99,25 @@ Qué deja (ids 9001-9003 / 900001-900007; asignaciones `90000000 + (usuario - 90
 - Casos negativos independientes, cada uno con un solo factor distinto del principal: turno de 8 h (900002), categoría Enfermería (900003), turno de 12 h sin `turno_comida` (900004), novedad `permiso` guardada (900005), asignación al día siguiente (900006).
 - Contraste de novedad (900007): la misma asignación se mide con las vistas y reglas reales sin novedad (derecho) y con `permiso` (sin derecho), dentro de una transacción que se revierte; el estado guardado no tiene la novedad.
 - `--sim`: `alembic upgrade head`, verificación de la cabeza, de las 9 vistas (`SELECT 1` y `VIEW_TABLE_USAGE`: leen solo `--demo`) y recién entonces la semilla general. Las reglas de derecho son las de la migración; el script no las escribe.
-- Cuentas `cocinera2`, `cocinera3` (cocinera) y `jefa` (jefa), sin vínculo, con clave temporal.
+- Cuentas `cocinera2` y `cocinera3`, independientes, rol cocinera, sin vínculo, con clave temporal. Jefa y sistemas no se crean en esta etapa.
 
 No registra ninguna ración ni lectura: el almuerzo principal queda disponible para el flujo de cocina.
 
+**Conexión.** En un worktree sin `comedorback\.env` (no se copia), la conexión sale solo de variables de entorno: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`. Si falta alguna, el script aborta nombrándolas, sin abrir conexión ni usar los valores por omisión. Las bases del escenario las pone el script en los subprocesos; no hace falta `DB_NAME`.
+
 ```powershell
-# desde la raíz; comedorback\.env con las credenciales de MySQL (ver "Modo simulación", paso 0)
-comedorback\.venv\Scripts\python scripts\preparar_escenario_sintetico.py --solo-inventario
-comedorback\.venv\Scripts\python scripts\preparar_escenario_sintetico.py --fecha 2026-10-16 --manifiesto manifiesto.json --claves-sin-revelar
+# desde la raíz del worktree, en la consola del operador (la clave no se muestra ni queda en el historial)
+$env:DB_HOST = '127.0.0.1'; $env:DB_PORT = '3306'; $env:DB_USER = '<usuario>'
+$s = Read-Host 'Clave de MySQL' -AsSecureString
+$env:DB_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+$py = '<un venv con comedorback\requirements.txt, p. ej. ..\wt-develop\comedorback\.venv\Scripts\python.exe>'
+& $py scripts\preparar_escenario_sintetico.py --solo-inventario
+& $py scripts\preparar_escenario_sintetico.py --fecha 2026-10-16 --claves-sin-revelar --manifiesto docs\escenario-sintetico\manifiesto-2026-10-16.json
 ```
 
-- **Claves**: por consola sin eco, por `ESCENARIO_CLAVE_COCINERA2` / `_COCINERA3` / `_JEFA`, o `--claves-sin-revelar` (al azar, nadie las conoce). En este último caso cada cuenta se habilita en la propia consola del operador, que es donde se muestra la clave temporal: `$env:DB_NAME='bd_nutricion_escenario_sim'; $env:DB_NAME_TURNOS='bd_turnos_escenario_demo'; .venv\Scripts\python -m app.semillas.admin --username cocinera2 --resetear` (ídem `cocinera3`, `jefa`). El script nunca imprime claves, hashes ni tokens.
+- **Claves y habilitación**: por consola sin eco, por `ESCENARIO_CLAVE_COCINERA2` / `_COCINERA3`, o `--claves-sin-revelar` (al azar, nadie las conoce: las cuentas existen pero no se puede entrar). Con `--claves-sin-revelar`, cada cocinera se habilita en la consola del operador, que es el único lugar donde se muestra la clave temporal, y solo sobre la base del escenario: desde `comedorback\`, con las variables de conexión puestas, `$env:DB_NAME='bd_nutricion_escenario_sim'; $env:DB_NAME_TURNOS='bd_turnos_escenario_demo'; & $py -m app.semillas.admin --username cocinera2 --resetear` (ídem `cocinera3`). El primer ingreso exige cambiarla. El script nunca imprime claves, hashes ni tokens, y el manifiesto deja escrito este procedimiento.
 - **Auditor de escrituras**: los cuatro procesos del preparador (principal, alembic, semilla, evidencia) clasifican cada sentencia antes de ejecutarla y cortan cualquier escritura fuera de `--demo`/`--sim`, sobre una vista `v_*`/`vw_*`, en una tabla de nombre heredado fuera de `--demo`, o cualquier DELETE/UPDATE/DROP/TRUNCATE propio. El SQL de escritura (sin parámetros) queda en un JSONL cuya ruta se imprime; el resumen va al manifiesto.
-- **Manifiesto** (`--manifiesto`): ids de las cuentas y del comensal, turno, categoría, asignación, comida, fecha, ventana, regla vigente, derecho principal, casos negativos, contraste, ración principal (0), auditoría y huellas CHECKSUM de las bases protegidas antes/después. Sin secretos.
+- **Manifiesto** (`--manifiesto`): revisión del código, ids del comensal y de las cuentas (diferenciados), rol y estado de las cuentas, turno, duración, categoría, asignación, novedades, comida, fecha, ventana, regla vigente, derecho esperado y obtenido, controles de que 12 h no bastan (categoría, novedad, mapeo, fecha) y el adicional de duración, contraste, ración principal (0), aislamiento (bases creadas, `VIEW_TABLE_USAGE`, auditoría) y huellas CHECKSUM antes/después. Sin secretos.
 - **Repetición**: con los mismos parámetros no escribe nada ("0 filas creadas"). Aborta sin escribir ante cualquier colisión ajena (base sin marcador, tabla o fila distinta, cuenta con otro rol, vínculo o nombre, cuenta dada de baja, comensal con cuenta).
 - **Salida**: `0` listo; `1` abortado; `3` el almuerzo principal de esa fecha ya se registró (no se borra: usar otra `--fecha`).
 
