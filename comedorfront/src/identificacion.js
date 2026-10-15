@@ -4,11 +4,17 @@
  *
  * Sin JSX, para probarlo con `node --test`. Aquí vive lo que no puede fallar:
  *
- *  - Un INTENTO es (lectura, persona, clave). La clave de idempotencia se
- *    genera la primera vez que se confirma esa persona para esa lectura y se
- *    reutiliza SOLO para repetir esa misma decisión (resultado incierto o
- *    intervención en curso). Elegir otra persona, o un resultado definitivo
- *    (entrega, rechazo, conflicto), cierra el intento: el próximo lleva otra.
+ *  - Un INTENTO es (lectura, persona, clave). La clave de idempotencia nace
+ *    al confirmar a una persona para una lectura y se reutiliza SOLO para
+ *    repetir esa misma decisión. Solo un resultado definitivo (entrega,
+ *    rechazo, conflicto o un rechazo de sesión) cierra el intento.
+ *  - Mientras el resultado es incierto o hay otra intervención en curso, el
+ *    intento se conserva aunque se cierre el panel o la huella salga de la
+ *    lista de pendientes (salir de la lista no prueba la entrega: pudo
+ *    terminar el servicio). No se puede elegir a otra persona para esa huella
+ *    hasta verificarlo, y verificarlo repite la misma clave y la misma persona.
+ *  - El intento guarda los datos mínimos de la persona y de la huella: la
+ *    verificación no depende de que la persona siga en el padrón visible.
  *  - Un solo envío a la vez: mientras un POST está en vuelo, otro clic no hace
  *    nada.
  *  - Nada de nota ni motivo: solo se envía la persona elegida.
@@ -20,17 +26,43 @@ import { identificarLectura, nuevaClaveIdempotencia } from './api.js';
 /** Estados en los que hay que repetir la MISMA decisión con la MISMA clave. */
 export const ESTADOS_PARA_REPETIR = ['incierto', 'en_curso'];
 
+const idValido = (valor) => Number.isInteger(valor) && valor > 0;
+
+/** Lo mínimo de la persona para mostrarla y repetir sin el padrón. */
+function copiaDePersona(persona) {
+  return {
+    id: persona.id,
+    nombre: persona.nombre ?? null,
+    categoria: persona.categoria ?? null,
+    legajo: persona.legajo ?? null,
+  };
+}
+
+/** Lo mínimo de la huella para listarla aunque salga de los pendientes. */
+function copiaDeLectura(lectura) {
+  return {
+    id: lectura.id,
+    clave: lectura.clave ?? null,
+    hora: lectura.hora ?? null,
+    comida: lectura.comida ?? null,
+  };
+}
+
 /**
  * Crea el identificador de cocina. `identificar(lecturaId, usuarioId, {clave})`
  * es el POST (inyectable para las pruebas) y `nuevaClave()` da un UUID v4.
  *
- * Devuelve `{ confirmar, pendiente, olvidar }`:
- *  - `confirmar(lecturaId, usuarioId)` envía (o repite) el intento y resuelve
- *    con el resultado de `identificarLectura`, o null si ya había uno en vuelo.
- *  - `pendiente(lecturaId)` es el intento que quedó por repetir de esa lectura
- *    ({ usuarioId, clave }) o null.
- *  - `olvidar(lecturaId)` descarta el intento pendiente (la lectura salió de la
- *    lista o la cocinera cerró el panel).
+ * - `confirmar(lectura, persona)` abre un intento nuevo y lo envía. Si esa
+ *   huella ya tiene un intento sin resolver, no envía nada y devuelve
+ *   `{ estado: 'bloqueado' }`: primero hay que verificarlo.
+ * - `verificar(lecturaId)` repite el intento sin resolver con su misma clave
+ *   y su misma persona.
+ * - Los dos devuelven null si ya hay un envío en vuelo.
+ * - `pendiente(lecturaId)` / `pendientes()`: los intentos sin resolver
+ *   ({ lecturaId, usuarioId, clave, persona, lectura, estado }), en copia.
+ *
+ * No hay forma de descartar un intento sin resolver: cerrar el panel solo lo
+ * deja a la vista para verificarlo después.
  */
 export function crearIdentificador({
   identificar = identificarLectura,
@@ -39,35 +71,70 @@ export function crearIdentificador({
   const intentos = new Map();
   let enVuelo = false;
 
-  async function confirmar(lecturaId, usuarioId) {
-    if (enVuelo) return null;
-    let intento = intentos.get(lecturaId);
-    /* Otra persona es otra decisión: nunca se reutiliza la clave. */
-    if (!intento || intento.usuarioId !== usuarioId) {
-      intento = { usuarioId, clave: nuevaClave() };
-      intentos.set(lecturaId, intento);
-    }
+  async function enviar(intento) {
     enVuelo = true;
+    let resultado;
     try {
-      const resultado = await identificar(lecturaId, usuarioId, { clave: intento.clave });
-      if (!ESTADOS_PARA_REPETIR.includes(resultado.estado)) intentos.delete(lecturaId);
-      return resultado;
+      resultado = await identificar(intento.lecturaId, intento.usuarioId, { clave: intento.clave });
     } catch (error) {
-      /* Un fallo antes de enviar (datos inválidos) no deja nada por repetir. */
-      intentos.delete(lecturaId);
-      throw error;
+      /* La petición ya había empezado: no se sabe qué quedó. */
+      resultado = {
+        estado: 'incierto',
+        detalle: `No se pudo leer el resultado (${error?.message ?? 'error inesperado'}).`,
+      };
     } finally {
       enVuelo = false;
     }
+    if (!resultado || typeof resultado.estado !== 'string') {
+      resultado = { estado: 'incierto', detalle: 'El resultado no se pudo leer.' };
+    }
+    if (ESTADOS_PARA_REPETIR.includes(resultado.estado)) {
+      intento.estado = resultado.estado;
+    } else {
+      intentos.delete(intento.lecturaId);
+    }
+    return resultado;
   }
+
+  async function confirmar(lectura, persona) {
+    if (enVuelo) return null;
+    if (!idValido(lectura?.id) || !idValido(persona?.id)) {
+      return { estado: 'invalido', detalle: 'Elija una huella y una persona del padrón.' };
+    }
+    if (intentos.has(lectura.id)) return { estado: 'bloqueado' };
+    const intento = {
+      lecturaId: lectura.id,
+      usuarioId: persona.id,
+      clave: nuevaClave(),
+      persona: copiaDePersona(persona),
+      lectura: copiaDeLectura(lectura),
+      estado: 'enviando',
+    };
+    intentos.set(lectura.id, intento);
+    return enviar(intento);
+  }
+
+  async function verificar(lecturaId) {
+    if (enVuelo) return null;
+    const intento = intentos.get(lecturaId);
+    return intento ? enviar(intento) : null;
+  }
+
+  const copia = (intento) => ({
+    ...intento,
+    persona: { ...intento.persona },
+    lectura: { ...intento.lectura },
+  });
 
   return {
     confirmar,
+    verificar,
+    enVuelo: () => enVuelo,
     pendiente: (lecturaId) => {
       const intento = intentos.get(lecturaId);
-      return intento ? { ...intento } : null;
+      return intento ? copia(intento) : null;
     },
-    olvidar: (lecturaId) => intentos.delete(lecturaId),
+    pendientes: () => [...intentos.values()].map(copia),
   };
 }
 
@@ -85,9 +152,10 @@ const TEXTO_CONFLICTO = {
 /**
  * El aviso que ve la cocinera para un resultado. `tipo` es 'exito' (solo una
  * entrega registrada), 'rechazo' (intento sin entrega), 'aviso' (hay que
- * repetir con la misma clave) o 'error'. `repetir` dice si se ofrece «Volver a
- * confirmar» con la misma persona; `cerrar`, si la lectura dejó de ser
- * identificable y el panel se cierra.
+ * verificar con la misma clave) o 'error'. `repetir` dice si se ofrece
+ * «Verificar entrega» con la misma persona; `cerrar`, si la lectura dejó de
+ * ser identificable y el panel se cierra. Un estado que no se reconoce se
+ * trata como incierto: nunca se afirma que no hubo entrega.
  */
 export function avisoDeIdentificacion(resultado, persona = null) {
   const quien = resultado?.nombre || persona?.nombre || '';
@@ -113,7 +181,7 @@ export function avisoDeIdentificacion(resultado, persona = null) {
       return {
         tipo: 'aviso',
         titulo: 'Otra confirmación está en curso',
-        detalle: 'Vuelva a confirmar: se usa la misma solicitud y no se duplica la entrega.',
+        detalle: 'Verifique la entrega: se repite la misma solicitud y no se duplica.',
         repetir: true,
         cerrar: false,
       };
@@ -121,7 +189,7 @@ export function avisoDeIdentificacion(resultado, persona = null) {
       return {
         tipo: 'aviso',
         titulo: 'No se pudo confirmar si quedó registrada',
-        detalle: 'Vuelva a confirmar con la misma persona: si la entrega ya quedó, se recupera sin duplicarla.',
+        detalle: 'Verifique la entrega: se repite la misma solicitud con la misma persona y, si ya quedó, se recupera sin duplicarla.',
         repetir: true,
         cerrar: false,
       };
@@ -137,12 +205,38 @@ export function avisoDeIdentificacion(resultado, persona = null) {
         cerrar: CONFLICTO_CIERRA.includes(resultado.motivo),
       };
     }
-    default:
+    case 'bloqueado':
+      return {
+        tipo: 'aviso',
+        titulo: 'Hay una confirmación sin verificar',
+        detalle: 'Esta huella tiene una entrega por verificar. Verifíquela antes de elegir a otra persona.',
+        repetir: true,
+        cerrar: false,
+      };
+    case 'invalido':
+      /* No se envió nada: faltaba la huella o la persona. */
       return {
         tipo: 'error',
-        titulo: 'No se registró la entrega',
-        detalle: resultado?.detalle || 'Revise la sesión y vuelva a intentarlo.',
+        titulo: 'Falta elegir a la persona',
+        detalle: resultado.detalle,
         repetir: false,
+        cerrar: false,
+      };
+    case 'error':
+      /* 401, 403 o 428: el servidor la rechazó antes de procesarla. */
+      return {
+        tipo: 'error',
+        titulo: 'La confirmación no se procesó',
+        detalle: resultado.detalle || 'Revise la sesión y vuelva a intentarlo.',
+        repetir: false,
+        cerrar: false,
+      };
+    default:
+      return {
+        tipo: 'aviso',
+        titulo: 'No se pudo confirmar si quedó registrada',
+        detalle: 'Verifique la entrega con la misma persona antes de hacer otra cosa con esta huella.',
+        repetir: true,
         cerrar: false,
       };
   }
