@@ -1,6 +1,6 @@
 /*
  * Iconos SVG inline: sin librería externa y sin dependencia de red, de modo
- * que el mockup se vea igual en cualquier máquina. Todos heredan el color del
+ * que la interfaz se vea igual en cualquier máquina. Todos heredan el color del
  * texto (`currentColor`) y el trazo es uniforme para que la app se vea de una
  * sola pieza.
  *

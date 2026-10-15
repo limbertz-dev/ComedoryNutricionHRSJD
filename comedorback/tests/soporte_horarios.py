@@ -1,7 +1,7 @@
 """Soporte común de las pruebas de horarios inmediatos.
 
 Los datos se preparan SOLO por las vías autorizadas: `POST /reglas/horarios`
-con el reloj de simulación y `semillas.horarios.sembrar()`. La limpieza usa los
+con el reloj fijado y `semillas.horarios.sembrar()`. La limpieza usa los
 mismos DELETE que ya usan las demás pruebas, sobre tablas propias de la base
 `_test`.
 """
@@ -11,7 +11,7 @@ from datetime import date, datetime, time
 import pytest
 from sqlalchemy import select, text
 
-from app.core import reloj
+import reloj_prueba
 from app.core.config import config
 from app.core.db import SesionLocal
 from app.modelos.heredados import Comida
@@ -41,7 +41,7 @@ def a_las(hora: int, minuto: int = 0, segundo: int = 0, micro: int = 0, dia: dat
 
 def fijar(momento: datetime) -> None:
     """Reloj congelado: el instante de guardado es exactamente `momento`."""
-    reloj.fijar(momento, congelar=True)
+    reloj_prueba.fijar(momento)
 
 
 def comida_id(codigo: str) -> int:
@@ -118,9 +118,9 @@ def vigente_en(cliente, token, momento: datetime) -> dict[int, dict]:
 
 @pytest.fixture
 def reloj_libre():
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
     yield
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
 
 
 @pytest.fixture

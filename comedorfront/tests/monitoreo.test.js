@@ -7,7 +7,7 @@ import test, { afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { adaptarEstadoMonitoreo, obtenerEstadoMonitoreo, obtenerSalud } from '../src/api.js';
+import { adaptarEstadoMonitoreo, obtenerEstadoMonitoreo } from '../src/api.js';
 import { buscarSeccion, seccionesDeRol } from '../src/navegacion.js';
 import { puedeVerSeccion, seccionesPermitidas } from '../src/permisos.js';
 import { borrarTokens, escucharSesion, guardarTokens, leerTokens } from '../src/sesion.js';
@@ -49,7 +49,7 @@ afterEach(() => {
 const estadoApi = (cambios = {}) => ({
   momento_real: '2026-10-09T14:03:10',
   entorno: 'produccion',
-  reloj_negocio: { ahora: '2026-10-09T14:03:10', fecha: '2026-10-09', simulado: false, congelado: false },
+  reloj_negocio: { ahora: '2026-10-09T14:03:10', fecha: '2026-10-09' },
   base: { estado: 'ok', revision_alembic: 'f6a7b8c9d0e1', tablas_propias: 14, vistas_contrato: 3, faltan: [] },
   lector: { estado: 'desconocido', razon: 'sin_telemetria' },
   actividad: {
@@ -204,15 +204,6 @@ test('401 vacía la sesión y avisa «expirada»; un 500 sin cuerpo no inventa c
     assert.doesNotMatch(error.message, /base de datos|actividad|MySQL/i);
     return true;
   });
-  assert.deepEqual(avisos, []);
-});
-
-test('obtenerSalud no cambia: sigue sin firmar avisos y acepta el 503 con cuerpo', async () => {
-  globalThis.fetch = async (url) => {
-    assert.equal(new URL(url).pathname, '/salud');
-    return json({ entorno: 'produccion' }, 503);
-  };
-  assert.deepEqual(await obtenerSalud(), { entorno: 'produccion', simulacion: false, reloj: null });
   assert.deepEqual(avisos, []);
 });
 
@@ -374,7 +365,7 @@ test('vigencia: 90 s desde la recepción; suspensión, saltos y relojes ausentes
   assert.equal(datoVigente(null, { pared: 1_010_000, mono: 15_000 }), false);
 });
 
-test('estado de la vista: error, regreso y antigüedad retiran el verde; el reloj simulado no cuenta', () => {
+test('estado de la vista: error, regreso y antigüedad retiran el verde; el reloj de negocio no cuenta', () => {
   const recepcion = { pared: 1_000_000, mono: 5_000 };
   const reciente = { pared: 1_010_000, mono: 15_000 };
   const viejo = { pared: 1_200_000, mono: 205_000 };
@@ -388,15 +379,14 @@ test('estado de la vista: error, regreso y antigüedad retiran el verde; el relo
   assert.equal(estadoDeVista({ ...base, pendiente: true }, reciente), 'revalidando');
   assert.equal(estadoDeVista(base, viejo), 'antiguo');
 
-  // Un reloj de negocio simulado años atrás o adelante no cambia la vigencia.
+  // Un reloj del servidor años atrás o adelante no cambia la vigencia.
   for (const ahora of ['2020-01-01T00:00:00', '2031-12-31T23:59:59']) {
-    const simulado = adaptarEstadoMonitoreo(estadoApi({
-      entorno: 'simulacion',
+    const desfasado = adaptarEstadoMonitoreo(estadoApi({
       momento_real: ahora,
-      reloj_negocio: { ahora, fecha: ahora.slice(0, 10), simulado: true, congelado: true },
+      reloj_negocio: { ahora, fecha: ahora.slice(0, 10) },
     }));
-    assert.equal(estadoDeVista({ ...base, diagnostico: simulado }, reciente), 'vigente');
-    assert.equal(estadoDeVista({ ...base, diagnostico: simulado }, viejo), 'antiguo');
+    assert.equal(estadoDeVista({ ...base, diagnostico: desfasado }, reciente), 'vigente');
+    assert.equal(estadoDeVista({ ...base, diagnostico: desfasado }, viejo), 'antiguo');
   }
 });
 
@@ -435,10 +425,10 @@ test('vista vigente: lector desconocido en texto neutro, sin verde ni «desconec
 });
 
 test('vista: solo información del lector; nada de API, base, reloj, actividad ni Grafana', () => {
-  const html = vista({ cuerpo: estadoApi({ entorno: 'simulacion' }) });
+  const html = vista({ cuerpo: estadoApi({ entorno: 'desarrollo' }) });
   for (const retirado of [
     /Grafana/, /Integración pendiente/, /Catálogo de la base/, /Actividad del día/, /Reloj de negocio/,
-    /Respondió/, /Revisión de migración/, /Lecturas aceptadas/, /Entorno de simulación/,
+    /Respondió/, /Revisión de migración/, /Lecturas aceptadas/, /Entorno de/,
     /sin zona horaria/, /Registro con el id más alto/, /Tablas propias/, />API</,
   ]) {
     assert.doesNotMatch(html, retirado, String(retirado));

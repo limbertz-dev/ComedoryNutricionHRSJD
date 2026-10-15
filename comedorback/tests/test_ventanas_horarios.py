@@ -4,7 +4,7 @@ vigencia de su versión.
 Primero la aritmética pura (sin base): cambios a mitad de franja, huecos,
 cruce de medianoche, la ventana que empieza en el corte y no en la hora
 nominal. Después lo que cada consumidor hace con ella: supervisión,
-historial, marcación y lectura alrededor del corte, y próxima franja.
+historial, y marcación y lectura alrededor del corte.
 """
 
 from datetime import date, datetime, time, timedelta
@@ -14,7 +14,6 @@ from sqlalchemy import text
 
 from app.consultas import horarios as consulta
 from app.consultas.historial import NO_RECIBIDA, PENDIENTE, _estado
-from app.core import reloj
 from app.core.db import SesionLocal
 from conftest import encabezado, ingresar
 from soporte_horarios import (  # noqa: F401  fixtures y ayudas compartidas
@@ -266,15 +265,13 @@ def test_cena_que_cruza_cierra_al_dia_siguiente(cliente, root, vacio):
 # --- marcación y lectura: el instante del evento -----------------------------------------
 
 
-def _marcar(sim, token, momento: datetime) -> dict:
+def _marcar(lector, momento: datetime) -> dict:
     fijar(momento)
-    r = sim.post("/asistencias", json={"metodo": "biometrico"}, headers=token)
-    assert r.status_code == 200, r.text
-    return r.json()
+    return lector.leer()
 
 
 def test_marcaciones_antes_en_y_despues_del_corte(
-    cliente, cliente_simulacion, crear_usuario, root, con_horarios
+    cliente, lector, crear_usuario, root, con_horarios
 ):
     """Almuerzo 11:00-15:00; a las 14:00:00.5 se acorta a 11:00-14:00. Una
     huella a un microsegundo del corte cae en la versión de ese instante, y la
@@ -286,9 +283,9 @@ def test_marcaciones_antes_en_y_despues_del_corte(
     fijar(corte)
     assert guardar(cliente, root, almuerzo, "11:00:00", "14:00:00", base).status_code == 201
 
-    antes = _marcar(cliente_simulacion, tokens["cocinera"], a_las(14, 0, 0, 499999))
-    en = _marcar(cliente_simulacion, tokens["cocinera"], corte)
-    despues = _marcar(cliente_simulacion, tokens["cocinera"], a_las(14, 0, 0, 500001))
+    antes = _marcar(lector, a_las(14, 0, 0, 499999))
+    en = _marcar(lector, corte)
+    despues = _marcar(lector, a_las(14, 0, 0, 500001))
     # Antes del corte rige 11-15: huella sin identificar. Desde el corte, 11-14: fuera.
     assert (antes["motivo"], antes["comida_id"]) == ("no_identificado", almuerzo)
     assert (en["motivo"], en["comida_id"]) == ("fuera_horario", None)
@@ -318,86 +315,3 @@ def test_marcaciones_antes_en_y_despues_del_corte(
     assert comida_por_lectura[antes["lectura_id"]] == almuerzo
     assert comida_por_lectura[en["lectura_id"]] is None
     assert comida_por_lectura[despues["lectura_id"]] is None
-
-
-# --- próxima franja ------------------------------------------------------------------------
-
-
-def _proxima(sim, token, desde: datetime):
-    fijar(desde)
-    return sim.post("/simulacion/reloj/proxima-franja", headers=token)
-
-
-def test_proxima_franja_desde_la_ventana_efectiva(
-    cliente, cliente_simulacion, crear_usuario, root, vacio
-):
-    jefa = _tokens(cliente, crear_usuario)["jefa"]
-    almuerzo = comida_id("almuerzo")
-    fijar(a_las(9))
-    base = guardar(cliente, root, almuerzo, "11:00:00", "15:00:00", None).json()["horario_id"]
-    fijar(a_las(16))
-    assert guardar(cliente, root, almuerzo, "11:00:00", "20:00:00", base).status_code == 201
-
-    # Con el reloj en la hueca de las 15:30 la próxima empieza a las 16:00
-    # (el corte), no a las 11:00 nominales.
-    r = _proxima(cliente_simulacion, jefa, a_las(15, 30))
-    assert r.status_code == 200, r.text
-    assert datetime.fromisoformat(r.json()["inicio"]) == a_las(16)
-    # Estrictamente posterior: en el 16:00 exacto, la siguiente es mañana.
-    r = _proxima(cliente_simulacion, jefa, a_las(16))
-    assert datetime.fromisoformat(r.json()["inicio"]) == a_las(11, dia=MANANA)
-    r = _proxima(cliente_simulacion, jefa, a_las(17))
-    assert datetime.fromisoformat(r.json()["inicio"]) == a_las(11, dia=MANANA)
-    # Antes de todo: la de la mañana.
-    r = _proxima(cliente_simulacion, jefa, a_las(10))
-    assert datetime.fromisoformat(r.json()["inicio"]) == a_las(11)
-
-
-def test_proxima_franja_con_hueco_a_mitad_de_franja(
-    cliente, cliente_simulacion, crear_usuario, root, vacio
-):
-    jefa = _tokens(cliente, crear_usuario)["jefa"]
-    almuerzo = comida_id("almuerzo")
-    fijar(a_las(9))
-    base = guardar(cliente, root, almuerzo, "11:00:00", "15:00:00", None).json()["horario_id"]
-    fijar(a_las(13))
-    assert guardar(cliente, root, almuerzo, "14:00:00", "15:00:00", base).status_code == 201
-    # Ventanas de hoy: 11:00-13:00 y 14:00-15:00. Mañana rige la versión
-    # nueva completa (14:00-15:00).
-    for desde, esperado in (
-        (a_las(10), a_las(11)),
-        (a_las(12), a_las(14)),  # dentro de la primera: la siguiente es la de las 14
-        (a_las(13, 30), a_las(14)),  # en el hueco
-        (a_las(14), a_las(14, dia=MANANA)),  # estrictamente posterior
-    ):
-        r = _proxima(cliente_simulacion, jefa, desde)
-        assert r.status_code == 200, r.text
-        assert datetime.fromisoformat(r.json()["inicio"]) == esperado, desde
-
-
-def test_proxima_franja_con_cruce_de_medianoche(
-    cliente, cliente_simulacion, crear_usuario, root, vacio
-):
-    jefa = _tokens(cliente, crear_usuario)["jefa"]
-    cena = comida_id("cena")
-    fijar(a_las(9))
-    base = guardar(cliente, root, cena, "22:00:00", "02:00:00", None).json()["horario_id"]
-    fijar(a_las(0, 30, dia=MANANA))
-    assert guardar(cliente, root, cena, "23:00:00", "01:00:00", base).status_code == 201
-    # El tramo 22:00-00:30 + 00:30-01:00 es una sola ventana: el corte no
-    # genera una franja nueva a las 00:30.
-    for desde, esperado in (
-        (a_las(21), a_las(22)),
-        (a_las(23), a_las(23, dia=MANANA)),
-        (a_las(0, 10, dia=MANANA), a_las(23, dia=MANANA)),
-    ):
-        r = _proxima(cliente_simulacion, jefa, desde)
-        assert r.status_code == 200, r.text
-        assert datetime.fromisoformat(r.json()["inicio"]) == esperado, desde
-
-
-def test_proxima_franja_sin_ventanas_409(cliente, cliente_simulacion, crear_usuario, vacio):
-    jefa = _tokens(cliente, crear_usuario)["jefa"]
-    r = _proxima(cliente_simulacion, jefa, a_las(12))
-    assert r.status_code == 409
-    assert reloj.ahora() == a_las(12)

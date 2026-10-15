@@ -76,7 +76,7 @@ const filaApi = (origen, id, cambios = {}) => ({
   resultado: 'aceptada',
   motivo: null,
   valido: true,
-  dispositivo: origen === 'asistencia_manual' ? 'registro-manual' : 'simulador-navegador',
+  dispositivo: origen === 'asistencia_manual' ? 'registro-manual' : 'lector-comedor-01',
   origen,
   clave_evento: `${origen}:${id}`,
   ...cambios,
@@ -133,16 +133,16 @@ test('la respuesta del POST lleva la clave de su fila: lectura si hay lectura, m
   const persona = { id: 3, nombre: 'Persona 3', categoria: 'Médico', legajo: 'L-3' };
 
   grabar(() => json({ ...base, valido: true, lectura_id: 41, asistencia_id: 90 }));
-  let evento = await marcarAsistencia(3, { persona, metodo: 'biometrico' });
+  let evento = await marcarAsistencia(3, { persona });
   assert.equal(evento.claveEvento, 'lectura_biometrica:41', 'una asistencia ligada a lectura es la lectura');
   assert.equal(evento.origen, 'lectura_biometrica');
 
   grabar(() => json({ ...base, valido: true, lectura_id: null, asistencia_id: 41 }));
-  evento = await marcarAsistencia(3, { persona, metodo: 'manual' });
+  evento = await marcarAsistencia(3, { persona });
   assert.equal(evento.claveEvento, 'asistencia_manual:41');
 
   grabar(() => json({ ...base, valido: false, motivo: 'sin_derecho', lectura_id: null, asistencia_id: null }));
-  evento = await marcarAsistencia(3, { persona, metodo: 'manual' });
+  evento = await marcarAsistencia(3, { persona });
   assert.equal(evento.claveEvento, null, 'un rechazo manual no deja fila en cocina');
   assert.equal(evento.origen, null);
 });
@@ -237,7 +237,7 @@ test('el panel distingue carga, padrón vacío, error y lista; confirma mostrand
   const elegido = abrir({ personal: [ANA, LUIS], elegidoInicial: 99 });
   assert.match(elegido, /registro-manual__identidad"><strong>Ana Gomez<\/strong><span>Bioquímica · Legajo B-99<\/span>/);
   assert.match(elegido, /<span class="boton__texto">Confirmar registro<\/span>/);
-  assert.doesNotMatch(elegido, /autoriza|excepci/i, 'no simula una autorización excepcional');
+  assert.doesNotMatch(elegido, /autoriza|excepci/i, 'no finge una autorización excepcional');
 
   assert.deepEqual(filtrarPadron([ANA, LUIS], 'p-7'), [LUIS]);
   assert.deepEqual(filtrarPadron([ANA, LUIS], '  ana '), [ANA]);
@@ -576,13 +576,6 @@ test('ciclo: durante una marcación local no se anuncia nada; después, la exter
   c.llamadas[2].resolver([fila('asistencia_manual', 7), fila('lectura_biometrica', 2), fila('lectura_biometrica', 1)]);
   await vaciar();
   assert.equal(c.resultados[2].nueva.clave, 'asistencia_manual:7');
-
-  // Un cambio de reloj reinicia la referencia: lo que llegue no se anuncia.
-  c.control.reiniciarReferencia();
-  c.temporizador.disparar();
-  c.llamadas[3].resolver([fila('lectura_biometrica', 50)]);
-  await vaciar();
-  assert.equal(c.resultados[3].nueva, null);
   c.control.cancelar();
 });
 

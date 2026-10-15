@@ -141,18 +141,6 @@
   margin: 0;
 }
 
-.supervision__simulacion-aviso {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: var(--e-3);
-  padding: var(--e-2) var(--e-4);
-  background: var(--c-aviso-tenue);
-  border: 1px solid var(--c-aviso);
-  border-radius: var(--r-md);
-  color: var(--c-texto);
-  font-size: var(--t-sm);
-}
 
 /* -------------------------------------------------------------
    Pestañas: "Todas" + una por comida del día

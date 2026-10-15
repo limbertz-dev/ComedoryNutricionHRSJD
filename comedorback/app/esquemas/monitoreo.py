@@ -17,8 +17,6 @@ Int0 = Annotated[int, Field(ge=0)]
 class RelojNegocio(BaseModel):
     ahora: datetime = Field(description="reloj.ahora(): la hora del negocio")
     fecha: date = Field(description="Fecha de `ahora`: el día de los contadores")
-    simulado: bool
-    congelado: bool
 
 
 class EstadoBase(BaseModel):
@@ -36,8 +34,7 @@ class EstadoBase(BaseModel):
 
 class EstadoLector(BaseModel):
     """Sin telemetría del lector no hay cómo saber si está conectado: la
-    actividad registrada no lo prueba, y la simulación tampoco prueba que
-    falte el hardware."""
+    actividad registrada no lo prueba."""
 
     estado: Literal["desconocido"]
     razon: Literal["sin_telemetria"]
@@ -72,7 +69,7 @@ class Actividad(BaseModel):
 
 class EstadoMonitoreo(BaseModel):
     momento_real: datetime = Field(description="reloj.real(): la hora del servidor")
-    entorno: Literal["produccion", "desarrollo", "simulacion"]
+    entorno: Literal["produccion", "desarrollo"]
     reloj_negocio: RelojNegocio
     base: EstadoBase
     lector: EstadoLector

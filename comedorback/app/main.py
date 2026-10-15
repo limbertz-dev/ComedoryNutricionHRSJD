@@ -18,9 +18,7 @@ from app.api import (
     personal,
     reglas,
     reportes,
-    simulacion,
 )
-from app.core import reloj
 from app.core.autorizacion import ErrorAuth, requiere_rol
 from app.core.config import config
 from app.core.db import Base, SesionDep
@@ -74,7 +72,6 @@ def salud(sesion: SesionDep, entorno: EntornoDep):
         "estado": "incompleta" if faltan else "ok",
         "base_de_datos": "conectada",
         "entorno": entorno,
-        "reloj": _reloj_para_salud(),
         "base_datos": config.db_name,
         "base_turnos": config.db_name_turnos,
         "motor": f"MySQL {version}",
@@ -86,24 +83,13 @@ def salud(sesion: SesionDep, entorno: EntornoDep):
     return JSONResponse(cuerpo, status_code=503 if faltan else 200)
 
 
-def _reloj_para_salud() -> dict:
-    estado = reloj.estado()
-    return {
-        "ahora": estado.ahora.isoformat(),
-        "real": estado.real.isoformat(),
-        "simulado": estado.simulado,
-    }
-
-
 def crear_app(entorno: str = config.entorno) -> FastAPI:
     """Arma la API para `entorno`. Los tests lo pasan explícito para probar
-    los tres entornos en un mismo proceso.
+    los entornos en un mismo proceso.
 
-    El entorno queda fijo en `app.state.entorno` y es la ÚNICA fuente de las
-    decisiones por entorno de esta app: el montaje de /simulacion/*, el
-    `entorno` de /salud y /monitoreo/estado y quién puede declarar una
-    marcación biométrica (ver app/core/entorno.py). `config.entorno` es solo
-    el valor por omisión de este argumento.
+    El entorno queda fijo en `app.state.entorno` y es la fuente del `entorno`
+    que informan /salud y /monitoreo/estado (ver app/core/entorno.py).
+    `config.entorno` es solo el valor por omisión de este argumento.
     """
     entorno = validar_entorno(entorno)
     app = FastAPI(title=config.nombre_app, version="0.1.0")
@@ -141,9 +127,6 @@ def crear_app(entorno: str = config.entorno) -> FastAPI:
         (monitoreo, "monitoreo"),
         (intervenciones, "intervenciones"),
     ]
-    # Solo en simulación: en producción y desarrollo /simulacion/* da 404.
-    if entorno == "simulacion":
-        routers.append((simulacion, "simulacion"))
     for modulo, recurso in routers:
         regla = ACCESO[recurso]
         app.include_router(

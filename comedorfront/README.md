@@ -15,8 +15,8 @@ npm.cmd test
 ```
 
 La URL de la API sale de src/config.js: por omisión http://127.0.0.1:8000, o la
-de la variable VITE_API_URL si se define (por ejemplo, para el backend de
-simulación en otro puerto):
+de la variable VITE_API_URL si se define (por ejemplo, para una API en otro
+puerto):
 
 ```powershell
 $env:VITE_API_URL = 'http://127.0.0.1:8001'; npm.cmd run dev
@@ -48,7 +48,7 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | programarHorario | POST /reglas/horarios | Programa un horario nuevo, cierra el anterior (201) |
 | eliminarHorarioProgramado | DELETE /reglas/horarios/{horario_id} | Borra un horario programado, reabre el anterior (204) |
 | obtenerPersonal | GET /personal | Reúne páginas de 200 comensales para el selector |
-| marcarAsistencia | GET /personal/{id} + POST /asistencias | metodo biometrico desde el simulador del lector, manual desde el registro a mano |
+| marcarAsistencia | GET /personal/{id} + POST /asistencias | registro a mano (metodo manual) |
 | autorizarMarcacionManual | POST /asistencias | Registro manual independiente de jefatura: {usuario_id, metodo: 'manual'} sin momento; muestra la respuesta del servidor |
 | identificarLectura | POST /asistencias/lecturas/{id}/identificar | Solo cocinera: identifica una huella no reconocida y confirma la entrega. Cabecera Idempotency-Key (UUID v4), cuerpo {usuario_id}; devuelve registrada, rechazada, conflicto, en_curso, incierto o error |
 | obtenerLecturasPorIdentificar | GET /pantalla/lecturas-por-identificar | Solo cocinera: huellas identificables ahora en el servicio actual, aunque sean de ayer (servicio nocturno) |
@@ -60,12 +60,6 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | obtenerHistorialDiarioPersonal | GET /historial/diario | Historial diario, 50 registros por página |
 | obtenerHistorialMensualPersonal | GET /historial/mensual | Totales mensuales, 50 registros por página |
 | obtenerInformeRaciones | GET /reportes/informe | Informe de Estadística por rango de fechas (Reportes) |
-| obtenerSalud | GET /salud | Entorno de la API y, en simulación, la hora del servidor |
-| obtenerReloj | GET /simulacion/reloj | Hora del sistema y si está congelada (solo simulación, jefatura) |
-| fijarReloj | PUT /simulacion/reloj | Fija fecha y hora, corriendo o congelada |
-| avanzarReloj | POST /simulacion/reloj/avanzar | Adelanta el reloj (el simulador usa +15 min) |
-| saltarAProximaFranja | POST /simulacion/reloj/proxima-franja | Salta al inicio de la próxima comida; 409 se muestra como mensaje |
-| volverARelojReal | DELETE /simulacion/reloj | Devuelve el sistema a la hora real |
 
 Supervisión (jefa) muestra una pestaña por comida con su estado, raciones
 servidas y rechazos, y una tabla en vivo con las últimas 100 marcaciones.
@@ -92,23 +86,8 @@ lista las versiones (turno mínimo, novedades que anulan, enfermería) con la
 vigente marcada. Solo se puede eliminar lo programado, con confirmación; el
 pasado nunca se edita ni se borra.
 
-## Modo simulación
-
-Solo cuando GET /salud responde `entorno: "simulacion"`. En cualquier otro
-entorno no se dibuja nada de esto y nunca se llama a /simulacion/*.
-
-- El header muestra la franja SIMULACIÓN con la hora del servidor (jefa y
-  sistemas; la cocinera no tiene header en su pantalla completa).
-- Jefa y sistemas tienen además el reloj en el header de Supervisión: fijar
-  fecha y hora, +15 min, próxima franja y volver a la hora real. Ya no está en
-  Control Biométrico, que ahora solo ve la cocinera; el backend reserva
-  /simulacion/* a jefatura.
-- La fecha del header y el "hoy" de Control Biométrico, Historial y Reportes
-  salen del reloj del servidor, nunca de la PC. Fuera de simulación siguen
-  como siempre.
-
-Adaptadores con pruebas pero sin pantalla que los use hoy: simularMarcacion
-(alias de marcarAsistencia), obtenerPeriodos (GET /reportes/periodos),
+Adaptadores con pruebas pero sin pantalla que los use hoy: marcarAsistencia,
+obtenerPeriodos (GET /reportes/periodos),
 obtenerRegistroDiario (GET /reportes/registro-diario), obtenerInformeMensual
 (GET /reportes/mensual) y obtenerResumenGestion (GET /reportes/gestion).
 
@@ -150,9 +129,8 @@ solo olvida los tokens.
 
 La cocinera no tiene sidebar ni header: Control Biométrico ocupa toda la
 ventana. Un botón flotante abajo a la derecha abre su panel de sesión: usuario
-y rol, el simulador del lector, «Pantalla completa» (si el navegador la
-soporta) y «Cerrar sesión». El «Modo manual» vive en Control Biométrico y
-sigue oculto para ella. Ella sí identifica las huellas no reconocidas
+y rol, «Pantalla completa» (si el navegador la soporta) y «Cerrar sesión».
+No registra raciones a mano. Ella sí identifica las huellas no reconocidas
 («Huellas por identificar», ver Intervenciones de cocina); la jefa solo las
 consulta.
 
@@ -220,6 +198,10 @@ decisión de producto, no un cambio de presentación.
 pequeñas, una tarjeta por cuenta. Administración de cuentas (sistemas) no se tocó.
 
 ## Intervenciones de cocina
+
+El panel de identificacion no se monta en la vista de cocina de `develop`.
+El componente y el contrato descritos abajo permanecen disponibles internamente,
+pero la aplicacion no activa su consulta periodica ni sus acciones.
 
 Contrato: `comedorback` en `feat/jefa-intervenciones-back` (bfcacb3).
 

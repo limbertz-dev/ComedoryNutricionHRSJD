@@ -182,10 +182,6 @@ export function programarCicloCocina({
     registrarPropia(clave) {
       if (clave) propias.add(clave);
     },
-    /** La próxima respuesta solo fija la referencia (p. ej. el reloj cambió). */
-    reiniciarReferencia() {
-      conocidas = null;
-    },
     cancelar() {
       cancelado = true;
       detenerEspera();

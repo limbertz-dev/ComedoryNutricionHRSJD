@@ -16,6 +16,7 @@ from app.core.db import SesionLocal
 from app.modelos.comedor import HorarioComida
 from app.modelos.heredados import Comensal, ComidaPorTurno
 from app.semillas import horarios
+import reloj_prueba
 from conftest import encabezado, ingresar
 
 DIA = date(2026, 9, 24)
@@ -36,9 +37,9 @@ CLAVES_FILA = {
 
 @pytest.fixture(autouse=True)
 def reloj_real():
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
     yield
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
 
 
 @pytest.fixture
@@ -185,7 +186,7 @@ def test_servidas_y_manuales(cliente, tokens):
 
 @pytest.mark.usefixtures("con_horarios")
 def test_estado_con_reloj_congelado(cliente, tokens):
-    reloj.fijar(datetime(2026, 9, 24, 12, 30), congelar=True)
+    reloj_prueba.fijar(datetime(2026, 9, 24, 12, 30))
     r = cliente.get(
         RUTA, params={"fecha": DIA.isoformat()}, headers=tokens["cocinera"]
     )
@@ -199,7 +200,7 @@ def test_estado_con_reloj_congelado(cliente, tokens):
 
 @pytest.mark.usefixtures("con_horarios")
 def test_fechas_pasadas_y_futuras(cliente, tokens):
-    reloj.fijar(datetime(2026, 9, 24, 12, 30), congelar=True)
+    reloj_prueba.fijar(datetime(2026, 9, 24, 12, 30))
     jefa = tokens["jefa"]
     r = cliente.get(RUTA, params={"fecha": "2026-09-20"}, headers=jefa)
     assert r.status_code == 200, r.text
@@ -210,19 +211,13 @@ def test_fechas_pasadas_y_futuras(cliente, tokens):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_duplicado_resuelto_a_su_comida(cliente, cliente_simulacion, tokens):
+def test_duplicado_resuelto_a_su_comida(cliente, lector, tokens):
     usuario_id, fecha, comida_id = _derecho_reciente()
     momento = datetime.combine(fecha, _mitad_franja(comida_id))
     _manual(cliente, tokens["jefa"], usuario_id, momento)
-    reloj.fijar(momento, congelar=True)
-    # Biométrico desde una sesión: solo en simulación.
-    r = cliente_simulacion.post(
-        "/asistencias",
-        json={"usuario_id": usuario_id, "metodo": "biometrico"},
-        headers=tokens["cocinera"],
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["valido"] is False and r.json()["motivo"] == "duplicado"
+    reloj_prueba.fijar(momento)
+    lectura = lector.leer(usuario_id=usuario_id)
+    assert lectura["valido"] is False and lectura["motivo"] == "duplicado"
     r = cliente.get(RUTA, params={"fecha": fecha.isoformat()}, headers=tokens["jefa"])
     cuerpo = r.json()
     fila = {f["comida_id"]: f for f in cuerpo["comidas"]}[comida_id]
@@ -235,25 +230,20 @@ def test_duplicado_resuelto_a_su_comida(cliente, cliente_simulacion, tokens):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_rechazos_del_dia_y_sin_comida(cliente, cliente_simulacion, tokens):
-    coci, jefa = tokens["cocinera"], tokens["jefa"]
-    # Las lecturas se generan en simulación; las consultas, en la app normal.
-    sim = cliente_simulacion
-    reloj.fijar(datetime(2026, 9, 24, 12, 30), congelar=True)
-    r = sim.post("/asistencias", json={"metodo": "biometrico"}, headers=coci)
-    assert r.json()["motivo"] == "no_identificado", r.text
+def test_rechazos_del_dia_y_sin_comida(cliente, lector, tokens):
+    jefa = tokens["jefa"]
+    # Las lecturas las registra el lector de prueba; las consultas, la API.
+    reloj_prueba.fijar(datetime(2026, 9, 24, 12, 30))
+    lectura = lector.leer()
+    assert lectura["motivo"] == "no_identificado", lectura
     with SesionLocal() as sesion:
         mayor = sesion.execute(select(func.max(Comensal.usuario_id))).scalar() or 0
-    r = sim.post(
-        "/asistencias",
-        json={"usuario_id": mayor + 1000, "metodo": "biometrico"},
-        headers=coci,
-    )
-    assert r.json()["motivo"] == "sin_derecho", r.text
+    lectura = lector.leer(usuario_id=mayor + 1000)
+    assert lectura["motivo"] == "sin_derecho", lectura
     # La semilla deja 10:00-11:00 sin cubrir a propósito.
-    reloj.fijar(datetime(2026, 9, 24, 10, 30), congelar=True)
-    r = sim.post("/asistencias", json={"metodo": "biometrico"}, headers=coci)
-    assert r.json()["motivo"] == "fuera_horario", r.text
+    reloj_prueba.fijar(datetime(2026, 9, 24, 10, 30))
+    lectura = lector.leer()
+    assert lectura["motivo"] == "fuera_horario", lectura
 
     r = cliente.get(RUTA, params={"fecha": DIA.isoformat()}, headers=jefa)
     cuerpo = r.json()

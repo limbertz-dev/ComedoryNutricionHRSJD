@@ -1,7 +1,7 @@
 /*
  * URL de la API. Por omisión, la de siempre (http://127.0.0.1:8000); se
- * cambia por entorno con VITE_API_URL, por ejemplo para apuntar el front al
- * backend de simulación, que corre en otro puerto:
+ * cambia por entorno con VITE_API_URL, por ejemplo para apuntar el front a
+ * una API que corre en otro puerto:
  *
  *   VITE_API_URL=http://127.0.0.1:8001 npm run dev
  *

@@ -11,8 +11,8 @@ Contrato compartido con el front:
   · Orden: fecha_hora e id descendentes y `origen` como último desempate.
   · Ventana de hasta 100 filas, no un cursor.
 
-Las marcaciones se generan por la API: biométricas con la app de simulación,
-manuales con jefatura y el reloj del servidor. La colisión de id entre tablas
+Las lecturas biométricas las registra el lector de prueba (tests/lector_prueba.py);
+las manuales, la jefatura por la API con el reloj del servidor. La colisión de id entre tablas
 no se puede provocar por la API sin depender de AUTO_INCREMENT, así que se
 prueba aparte, sobre la composición de la consulta con filas sintéticas
 (SELECT de literales, sin escribir nada).
@@ -25,11 +25,12 @@ import pytest
 from sqlalchemy import DateTime, cast, literal, select, text
 
 from app.consultas import pantalla
-from app.core import reloj
 from app.core.db import SesionLocal
 from app.semillas import horarios
+import reloj_prueba
 from conftest import encabezado, ingresar
-from test_simulacion import _candidato_almuerzo
+from lector_prueba import DISPOSITIVO
+from soporte_derecho import candidato_almuerzo
 
 RUTA = "/pantalla/ultimas-marcaciones"
 ROLES = ("jefa", "cocinera", "sistemas")
@@ -54,9 +55,9 @@ FORMA_CLAVE = re.compile(r"(lectura_biometrica|asistencia_manual):[1-9]\d*")
 
 @pytest.fixture(autouse=True)
 def reloj_real():
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
     yield
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
 
 
 @pytest.fixture
@@ -84,18 +85,16 @@ def con_horarios():
     _vaciar()
 
 
-def _biometrico(sim, headers, momento: datetime, **cuerpo) -> dict:
-    """Marcación biométrica por la API de simulación, con el reloj en `momento`."""
-    reloj.fijar(momento, congelar=True)
-    r = sim.post("/asistencias", json={"metodo": "biometrico", **cuerpo}, headers=headers)
-    assert r.status_code == 200, r.text
-    return r.json()
+def _biometrico(lector, momento: datetime, **cuerpo) -> dict:
+    """Lectura biométrica del lector de prueba, con el reloj en `momento`."""
+    reloj_prueba.fijar(momento)
+    return lector.leer(**cuerpo)
 
 
 def _manual(cliente, headers, usuario_id: int, momento: datetime) -> dict:
     """Registro manual con el contrato B1: sin momento ni dispositivo; la hora
     la pone el reloj del servidor."""
-    reloj.fijar(momento, congelar=True)
+    reloj_prueba.fijar(momento)
     r = cliente.post(
         "/asistencias", json={"usuario_id": usuario_id, "metodo": "manual"}, headers=headers
     )
@@ -139,7 +138,7 @@ def test_limite_fuera_de_rango_422(cliente, tokens, limite):
 
 @pytest.mark.usefixtures("con_horarios")
 def test_manual_sale_como_asistencia_manual(cliente, tokens):
-    usuario_id, fecha = _candidato_almuerzo()
+    usuario_id, fecha = candidato_almuerzo()
     momento = datetime.combine(fecha, DIA.time())
     marcada = _manual(cliente, tokens["jefa"], usuario_id, momento)
     assert marcada["valido"] is True, marcada
@@ -161,13 +160,10 @@ def test_manual_sale_como_asistencia_manual(cliente, tokens):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_biometrico_aceptado_aparece_una_sola_vez(cliente, cliente_simulacion, tokens):
+def test_biometrico_aceptado_aparece_una_sola_vez(cliente, lector, tokens):
     """La asistencia ligada a la lectura no entra por la rama manual."""
-    usuario_id, fecha = _candidato_almuerzo()
-    marcada = _biometrico(
-        cliente_simulacion, tokens["cocinera"], datetime.combine(fecha, DIA.time()),
-        usuario_id=usuario_id,
-    )
+    usuario_id, fecha = candidato_almuerzo()
+    marcada = _biometrico(lector, datetime.combine(fecha, DIA.time()), usuario_id=usuario_id)
     assert marcada["valido"] is True, marcada
     assert marcada["lectura_id"] and marcada["asistencia_id"]
 
@@ -183,19 +179,17 @@ def test_biometrico_aceptado_aparece_una_sola_vez(cliente, cliente_simulacion, t
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_claves_unicas_estables_y_en_orden(cliente, cliente_simulacion, tokens):
+def test_claves_unicas_estables_y_en_orden(cliente, lector, tokens):
     """Lecturas y una manual en el mismo día: cada clave es única, coincide
     con origen e id, y no cambia entre consultas sucesivas."""
-    sim, coci, jefa = cliente_simulacion, tokens["cocinera"], tokens["jefa"]
-    usuario_id, fecha = _candidato_almuerzo()
+    coci, jefa = tokens["cocinera"], tokens["jefa"]
+    usuario_id, fecha = candidato_almuerzo()
     base = datetime.combine(fecha, DIA.time())
 
-    no_identificada = _biometrico(sim, coci, base)
-    sin_derecho = _biometrico(
-        sim, coci, base + timedelta(minutes=1), usuario_id=USUARIO_INEXISTENTE
-    )
+    no_identificada = _biometrico(lector, base)
+    sin_derecho = _biometrico(lector, base + timedelta(minutes=1), usuario_id=USUARIO_INEXISTENTE)
     manual = _manual(cliente, jefa, usuario_id, base + timedelta(minutes=2))
-    duplicada = _biometrico(sim, coci, base + timedelta(minutes=3), usuario_id=usuario_id)
+    duplicada = _biometrico(lector, base + timedelta(minutes=3), usuario_id=usuario_id)
     assert no_identificada["motivo"] == "no_identificado"
     assert sin_derecho["motivo"] == "sin_derecho"
     assert manual["valido"] is True, manual
@@ -216,17 +210,17 @@ def test_claves_unicas_estables_y_en_orden(cliente, cliente_simulacion, tokens):
         assert fila["origen"] in ORIGENES
         assert fila["clave_evento"] == f"{fila['origen']}:{fila['id']}"
         assert FORMA_CLAVE.fullmatch(fila["clave_evento"])
-    # Las lecturas del simulador dicen su dispositivo; el origen no sale de ahí.
+    # Las lecturas dicen su dispositivo; el origen no sale de ahí.
     assert {f["dispositivo"] for f in primera if f["origen"] == "lectura_biometrica"} == {
-        "simulador-navegador"
+        DISPOSITIVO
     }
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_filtros_por_fecha_comida_y_limite(cliente, cliente_simulacion, tokens):
-    sim, coci, jefa = cliente_simulacion, tokens["cocinera"], tokens["jefa"]
-    hoy = [_biometrico(sim, coci, DIA + timedelta(minutes=m)) for m in range(3)]
-    ayer = _biometrico(sim, coci, DIA - timedelta(days=1))
+def test_filtros_por_fecha_comida_y_limite(cliente, lector, tokens):
+    jefa = tokens["jefa"]
+    hoy = [_biometrico(lector, DIA + timedelta(minutes=m)) for m in range(3)]
+    ayer = _biometrico(lector, DIA - timedelta(days=1))
     almuerzo = hoy[0]["comida_id"]
     assert almuerzo is not None
 
@@ -244,14 +238,14 @@ def test_filtros_por_fecha_comida_y_limite(cliente, cliente_simulacion, tokens):
         del_dia
     )[:2]
     # Sin fecha, el día del reloj del servidor.
-    reloj.fijar(DIA, congelar=True)
+    reloj_prueba.fijar(DIA)
     assert _claves(_lista(cliente, jefa)) == _claves(del_dia)
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_sin_datos_personales_nuevos(cliente, cliente_simulacion, tokens):
+def test_sin_datos_personales_nuevos(cliente, lector, tokens):
     """Los dos campos nuevos no traen nada de la persona: solo origen e id."""
-    _biometrico(cliente_simulacion, tokens["cocinera"], DIA, usuario_id=USUARIO_INEXISTENTE)
+    _biometrico(lector, DIA, usuario_id=USUARIO_INEXISTENTE)
     for rol in ROLES:
         for fila in _lista(cliente, tokens[rol], fecha=DIA.date().isoformat()):
             assert set(fila) == CAMPOS

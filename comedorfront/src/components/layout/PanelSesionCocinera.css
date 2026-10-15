@@ -3,8 +3,8 @@
  *
  * La cocinera no tiene sidebar ni header: este flotante (abajo a la derecha,
  * para no tapar el contador de "Marcaciones del turno" ni la etiqueta de
- * raciones del día) abre su usuario y rol, el simulador del lector, la
- * pantalla completa y el cierre de sesión. Paleta de tokens.css.
+ * raciones del día) abre su usuario y rol, la pantalla completa y el cierre
+ * de sesión. Paleta de tokens.css.
  */
 
 .panel-sesion {
@@ -69,22 +69,4 @@
 .panel-sesion__usuario-rol {
   color: var(--c-texto-2);
   font-size: var(--t-sm);
-}
-
-/*
- * El simulador se dibuja en una sola fila para el header; dentro del panel
- * se le permite envolverse, solo con esta clase contenedora y sin tocar
- * SimuladorLector.jsx ni SimuladorLector.css.
- */
-.panel-sesion__simulador .simulador-header {
-  flex-wrap: wrap;
-  row-gap: var(--e-3);
-}
-
-.panel-sesion__simulador .simulador-header__campo {
-  flex: 1 1 220px;
-}
-
-.panel-sesion__simulador .simulador-header__campo select {
-  max-width: none;
 }

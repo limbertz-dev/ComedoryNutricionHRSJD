@@ -8,9 +8,8 @@
  *
  * - La base sale del servidor, nunca se inventa. Si el listado trae la
  *   versión abierta ('vigente'), esa es la base. Si trae otra (el reloj del
- *   sistema puede estar atrasado en simulación y devolver una versión
- *   'anterior'), se consulta el historial de esa comida para encontrar la
- *   abierta. Si el historial falla, esa comida no se puede guardar: no se
+ *   sistema puede estar atrasado y devolver una versión 'anterior'), se
+ *   consulta el historial de esa comida para encontrar la abierta. Si el historial falla, esa comida no se puede guardar: no se
  *   manda null solo porque la consulta falló.
  * - Un envío a la vez y sin reintentos automáticos.
  * - Ante un resultado incierto (red, tiempo agotado, 5xx) no se afirma que no

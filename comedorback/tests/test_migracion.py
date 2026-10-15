@@ -23,7 +23,7 @@ from app.core.config import config
 from app.core.db import SesionLocal, motor
 from app.modelos.comedor import CERROJO_HORARIOS
 from app.semillas import horarios
-from conftest import config_alembic, encabezado, ingresar
+from conftest import config_alembic
 from soporte_horarios import (  # noqa: F401  fixtures y ayudas compartidas
     a_las,
     abierta,
@@ -220,17 +220,12 @@ def test_reversion_bloqueada_con_horas_intradia(cliente, root, en_head):
     _estado_de_head_intacto(antes)
 
 
-def test_reversion_bloqueada_con_microsegundos_en_lecturas(
-    cliente, cliente_simulacion, crear_usuario, en_head
-):
+def test_reversion_bloqueada_con_microsegundos_en_lecturas(lector, en_head):
     horarios.sembrar()
-    crear_usuario("coci", rol="cocinera")
-    coci = encabezado(ingresar(cliente, "coci")["access"])
     fijar(a_las(11, 30, 0, 500000))
-    r = cliente_simulacion.post("/asistencias", json={"metodo": "biometrico"}, headers=coci)
-    assert r.status_code == 200, r.text
+    lectura = lector.leer()
     assert _filas(
-        "SELECT fecha_hora FROM lecturas_biometricas WHERE id = :i", i=r.json()["lectura_id"]
+        "SELECT fecha_hora FROM lecturas_biometricas WHERE id = :i", i=lectura["lectura_id"]
     ) == [(a_las(11, 30, 0, 500000),)]
     antes = _snapshot_horarios()
 
@@ -358,7 +353,7 @@ def _interrumpir(parche, fragmento: str, metodo: str) -> None:
         except Exception:  # noqa: BLE001  sentencias que no compilan con el dialecto por defecto
             texto = ""
         if fragmento in texto:
-            raise RuntimeError(f"fallo simulado en: {fragmento}")
+            raise RuntimeError(f"fallo forzado en: {fragmento}")
         return original(self, sentencia, *args, **kwargs)
 
     parche.setattr(Connection, metodo, con_fallo)
@@ -367,7 +362,7 @@ def _interrumpir(parche, fragmento: str, metodo: str) -> None:
 def _interrumpir_downgrade(monkeypatch, fragmento: str, metodo: str) -> None:
     with monkeypatch.context() as parche:
         _interrumpir(parche, fragmento, metodo)
-        with pytest.raises(RuntimeError, match="fallo simulado"):
+        with pytest.raises(RuntimeError, match="fallo forzado"):
             command.downgrade(config_alembic(), REV_ANTERIOR)
     # Fuera del `with`, `Connection` vuelve a ser la de siempre.
 

@@ -252,7 +252,6 @@ function pieDePagina(doc, margen) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...RGB_TEXTO_2);
-  doc.text('Datos simulados — mockup de validación', margen, alto - 30);
   doc.text(`Página ${pagina}`, ancho - margen, alto - 30, { align: 'right' });
 }
 

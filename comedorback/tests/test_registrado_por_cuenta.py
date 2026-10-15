@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.consultas.derecho import aplicar_reglas
-from app.core import reloj
+import reloj_prueba
 from app.core.db import SesionLocal
 from app.modelos.comedor import Asistencia, HorarioComida
 from app.modelos.heredados import ComidaPorTurno
@@ -21,9 +21,9 @@ from conftest import encabezado, ingresar
 
 @pytest.fixture(autouse=True)
 def reloj_real():
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
     yield
-    reloj.volver_a_real()
+    reloj_prueba.liberar()
 
 
 @pytest.fixture
@@ -152,19 +152,13 @@ def test_el_cuerpo_no_puede_suplantar_la_cuenta(cliente, cuentas):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_biometrico_no_guarda_cuenta(cliente_simulacion, cuentas):
-    """Biométrico desde una sesión: solo en simulación."""
-    _, jefa = cuentas["jefa"]
+def test_biometrico_no_guarda_cuenta(lector):
+    """Una lectura del lector no la registra ninguna cuenta."""
     usuario_id, fecha, comida_id = _derecho_reciente()
-    reloj.fijar(datetime.combine(fecha, _mitad_franja(comida_id)), congelar=True)
-    r = cliente_simulacion.post(
-        "/asistencias",
-        json={"usuario_id": usuario_id, "metodo": "biometrico"},
-        headers=jefa,
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["valido"] is True, r.text
-    fila = _asistencia_guardada(r.json()["asistencia_id"])
+    reloj_prueba.fijar(datetime.combine(fecha, _mitad_franja(comida_id)))
+    lectura = lector.leer(usuario_id=usuario_id)
+    assert lectura["valido"] is True, lectura
+    fila = _asistencia_guardada(lectura["asistencia_id"])
     assert fila.metodo == "biometrico"
     assert fila.registrado_por_cuenta is None
     assert fila.registrado_por is None

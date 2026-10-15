@@ -13,7 +13,7 @@ Supervisión resuelven igual (`_comida_por_lectura`):
   · sin candidatos: la lectura sigue, sin comida.
 
 Los horarios se preparan por POST /reglas/horarios y con la semilla, dentro de
-fixtures y sobre la base de tests. Las marcaciones, por la API de simulación.
+fixtures y sobre la base de tests. Las lecturas, con el lector de prueba.
 Lo heredado que no se puede preparar por API se prueba sobre la subconsulta con
 filas sintéticas (SELECT de literales), sin escribir nada.
 """
@@ -24,10 +24,10 @@ import pytest
 from sqlalchemy import Time, cast, literal, null, select, text, union_all
 
 from app.consultas import pantalla
-from app.core import reloj
 from app.core.db import SesionLocal
 from app.modelos.comedor import INSTANTE
 from app.semillas import horarios
+import reloj_prueba
 from conftest import encabezado, ingresar
 from soporte_horarios import (  # noqa: F401  fixtures y ayudas compartidas
     DIA,
@@ -39,7 +39,7 @@ from soporte_horarios import (  # noqa: F401  fixtures y ayudas compartidas
     reloj_libre,
     vacio,
 )
-from test_simulacion import _candidato_almuerzo
+from soporte_derecho import candidato_almuerzo
 
 RUTA = "/pantalla/ultimas-marcaciones"
 SUPERVISION = "/pantalla/comidas-del-dia"
@@ -85,13 +85,9 @@ def _filas_por_comida(codigo: str) -> int:
         ).scalar_one()
 
 
-def _marcar(sim, tokens, momento: datetime, **cuerpo) -> dict:
-    reloj.fijar(momento, congelar=True)
-    r = sim.post(
-        "/asistencias", json={"metodo": "biometrico", **cuerpo}, headers=tokens["cocinera"]
-    )
-    assert r.status_code == 200, r.text
-    return r.json()
+def _marcar(lector, momento: datetime, **cuerpo) -> dict:
+    reloj_prueba.fijar(momento)
+    return lector.leer(**cuerpo)
 
 
 def _lista(cliente, tokens, dia: date, **params) -> list[dict]:
@@ -158,7 +154,7 @@ def test_la_semilla_respeta_lo_que_root_ya_cambio(cliente, tokens, vacio):
 
 
 def test_una_fila_por_lectura_y_resolucion_por_horario(
-    cliente, cliente_simulacion, tokens, vacio
+    cliente, lector, tokens, vacio
 ):
     """Té 14-16 por la API y la semilla alrededor:
 
@@ -170,7 +166,7 @@ def test_una_fila_por_lectura_y_resolucion_por_horario(
     _configurar(cliente, tokens, ("te", "14:00:00", "16:00:00", a_las(9)))
     almuerzo, te = comida_id("almuerzo"), comida_id("te")
     esperado = {a_las(12, 30): None, a_las(14, 30): te, a_las(15, 30): te, a_las(10, 30): None}
-    marcadas = {momento: _marcar(cliente_simulacion, tokens, momento) for momento in esperado}
+    marcadas = {momento: _marcar(lector, momento) for momento in esperado}
 
     primera = _lista(cliente, tokens, DIA)
     filas = _por_lectura(primera)
@@ -197,12 +193,12 @@ def test_una_fila_por_lectura_y_resolucion_por_horario(
     assert sum(rechazos.values()) + cuerpo["rechazos_sin_comida"] == len(marcadas)
 
 
-def test_filtros_y_limite_despues_de_resolver(cliente, cliente_simulacion, tokens, vacio):
+def test_filtros_y_limite_despues_de_resolver(cliente, lector, tokens, vacio):
     _configurar(cliente, tokens, ("te", "14:00:00", "16:00:00", a_las(9)))
     almuerzo, te = comida_id("almuerzo"), comida_id("te")
     horas = [time(12, 30), time(14, 30), time(14, 31), time(14, 32), time(15, 30)]
     ids = {
-        hora: _marcar(cliente_simulacion, tokens, datetime.combine(DIA, hora))["lectura_id"]
+        hora: _marcar(lector, datetime.combine(DIA, hora))["lectura_id"]
         for hora in horas
     }
 
@@ -226,14 +222,14 @@ def test_filtros_y_limite_despues_de_resolver(cliente, cliente_simulacion, token
 # --- lectura aceptada: manda la comida persistida ---------------------------------
 
 
-def test_aceptada_conserva_la_comida_persistida(cliente, cliente_simulacion, tokens, vacio):
-    usuario_id, fecha = _candidato_almuerzo()
+def test_aceptada_conserva_la_comida_persistida(cliente, lector, tokens, vacio):
+    usuario_id, fecha = candidato_almuerzo()
     if fecha <= horarios.VIGENTE_DESDE:
         pytest.skip("el almuerzo candidato es anterior a la semilla")
     almuerzo = comida_id("almuerzo")
     horarios.sembrar()
     aceptada = _marcar(
-        cliente_simulacion, tokens, datetime.combine(fecha, time(12, 30)), usuario_id=usuario_id
+        lector, datetime.combine(fecha, time(12, 30)), usuario_id=usuario_id
     )
     assert aceptada["valido"] is True, aceptada
     assert aceptada["comida_id"] == almuerzo
@@ -246,7 +242,7 @@ def test_aceptada_conserva_la_comida_persistida(cliente, cliente_simulacion, tok
         guardar(cliente, tokens["sistemas"], almuerzo, "11:00:00", "12:00:00", base).status_code
         == 201
     )
-    rechazo = _marcar(cliente_simulacion, tokens, datetime.combine(fecha, time(13, 10)))
+    rechazo = _marcar(lector, datetime.combine(fecha, time(13, 10)))
     assert rechazo["motivo"] == "fuera_horario"
 
     filas = _por_lectura(_lista(cliente, tokens, fecha))

@@ -30,10 +30,9 @@ La referencia de endpoints, adaptadores y reglas de presentación es `README.md`
 Secciones del sidebar (`src/navegacion.js`):
 
 1. **Control Biométrico** — marcaciones en vivo, solo para la cocinera, en
-   pantalla completa sin sidebar ni header. El simulador del lector vive en su
-   panel flotante y envía la misma marcación que el lector real
-   (`POST /asistencias`, `metodo: 'biometrico'`); el registro a mano usa
-   `metodo: 'manual'`. «Huellas por identificar» (solo cocinera) sigue el
+   pantalla completa sin sidebar ni header. Las lecturas las registra el
+   lector autorizado; el navegador nunca declara una marcación biométrica.
+   «Huellas por identificar» (solo cocinera) sigue el
    servicio actual con `GET /pantalla/lecturas-por-identificar` y confirma la
    entrega con `POST /asistencias/lecturas/{id}/identificar` e
    `Idempotency-Key` (`src/identificacion.js`), sin nota ni motivo.
@@ -44,8 +43,7 @@ Secciones del sidebar (`src/navegacion.js`):
    Sin «Autorizar» sobre las filas: la huella no reconocida la identifica la
    cocinera; aquí se ve su resultado final y, al pie, la consulta de
    intervenciones de cocina (`GET /intervenciones-cocina`), sin aprobaciones.
-   Solo lectura: ningún control registra, autoriza ni modifica raciones. En
-   simulación, su header lleva los controles del reloj.
+   Solo lectura: ningún control registra, autoriza ni modifica raciones.
 3. **Resumen** — cupo del turno, raciones del día por categoría y lecturas del
    lector, cada conteo con su período (`GET /pantalla/estado`, `src/resumen.js`).
 4. **Historial de comidas** — historial diario y mensual por comensal, paginado.
@@ -66,9 +64,8 @@ El acceso es real (`POST /auth/login`, `GET /auth/yo`, `POST /auth/cambio-passwo
 sesión vive en `src/sesion.js` + `src/hooks/useSesion.js`, `api.js` firma cada petición con
 `Authorization: Bearer` y convierte 401 en «Sesión expirada», 403 en «Sin permiso» y 428 en
 cambio obligatorio de contraseña. Qué ve cada rol está solo en `src/permisos.js`: la
-cocinera ve solo Control Biométrico, sin el «Modo manual», en pantalla completa con su
-panel flotante de sesión (usuario, rol, simulador del lector, pantalla completa y cierre
-de sesión); la jefa ve Supervisión, Resumen, Historial, Reportes y Cuentas (solo
+cocinera ve solo Control Biométrico, en pantalla completa con su panel flotante de
+sesión (usuario, rol, pantalla completa y cierre de sesión); la jefa ve Supervisión, Resumen, Historial, Reportes y Cuentas (solo
 lectura); sistemas ve Supervisión, Resumen, Historial, Reportes, Reglas del
 sistema y Administración de cuentas; nadie ve Control Biométrico salvo la
 cocinera, y un rol desconocido no ve nada. Ninguna sección se monta sin pasar

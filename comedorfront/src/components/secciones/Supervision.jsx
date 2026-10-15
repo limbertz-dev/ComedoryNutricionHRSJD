@@ -45,7 +45,7 @@ const FORMATO_HORA = new Intl.DateTimeFormat('es-BO', {
   hour12: false,
 });
 
-/** "Actualizado HH:MM:SS": en simulación, la hora del reloj del servidor. */
+/** "Actualizado HH:MM:SS": hora de la ultima actualizacion. */
 function horaCorta(fecha) {
   return FORMATO_HORA.format(fecha);
 }
@@ -180,9 +180,7 @@ export function programarRefrescoSupervision({ cargarDatos, intervaloMs = 30000 
  */
 export default function Supervision({
   fecha,
-  simulacion = null,
   puedeConsultarIntervenciones = false,
-  versionReloj = 0,
   cargandoInicial = true,
   errorInicial = null,
   comidasIniciales = null,
@@ -259,7 +257,7 @@ export default function Supervision({
       cargarDatos,
       intervaloMs: 30000,
     });
-  }, [cargarDatos, versionReloj]);
+  }, [cargarDatos]);
 
   function manejarPestana(comidaId) {
     pestanaTocada.current = true;
@@ -329,9 +327,7 @@ export default function Supervision({
   }
 
   const hayFiltros = filtroResultado !== 'todas' || busqueda.trim() !== '';
-  const textoActualizado = simulacion
-    ? `Actualizado ${horaCorta(simulacion.ahora)}`
-    : actualizado ? `Actualizado ${horaCorta(actualizado)}` : 'Actualizado —';
+  const textoActualizado = actualizado ? `Actualizado ${horaCorta(actualizado)}` : 'Actualizado —';
   const resumen = resumenDePestana(dia, pestana);
   const limpiarFiltros = () => {
     setFiltroResultado('todas');
@@ -340,12 +336,6 @@ export default function Supervision({
 
   return (
     <div className="supervision">
-      {simulacion ? (
-        <aside className="supervision__simulacion-aviso" role="status">
-          <Etiqueta tono="aviso">Modo simulación</Etiqueta>
-          <span>Supervisión basada en el reloj del servidor.</span>
-        </aside>
-      ) : null}
 
       {avisos}
 

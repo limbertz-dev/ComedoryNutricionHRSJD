@@ -169,8 +169,7 @@ export function filasConPropia(marcaciones, evento) {
     valido: evento.valido,
     titulo: evento.titulo,
     hora: evento.hora,
-    // evento.tiempo y evento.comida_id vienen de la misma respuesta de
-    // marcarAsistencia que ya usa el resto de la pantalla.
+    // evento.tiempo y evento.comida_id vienen de la respuesta de la marcación.
     comida: evento.tiempo ?? null,
     comidaId: evento.comida_id ?? null,
     persona: {
@@ -189,16 +188,9 @@ export function filasConPropia(marcaciones, evento) {
  * cambio, salen del servidor: son las lecturas ya guardadas de hoy, y por eso
  * sobreviven a un F5.
  *
- * El simulador del lector no vive acá: se monta en el header (ver App.jsx),
- * para que "Apoyar huella" quede siempre visible sin importar el scroll.
- *
  * Este puesto de control opera siempre sobre el turno en vivo de hoy: no
  * hay selector de fecha, ni falta hace, porque acá lo que importa es lo que
  * está pasando ahora mismo frente al lector.
- *
- * En simulación, `fechaServidor` es el día del reloj del servidor
- * ("YYYY-MM-DD") y `versionReloj` cambia cada vez que alguien mueve ese
- * reloj; fuera de simulación no llegan y todo sigue como siempre.
  *
  * La lista y el estado del comedor (`recargarEstado`, de App) se releen en
  * ciclos de 3 s (`programarCicloCocina`): así llega a cocina lo registrado
@@ -207,13 +199,8 @@ export function filasConPropia(marcaciones, evento) {
  */
 export default function PantallaEnVivo({
   evento,
-  leyendo,
   pantalla,
   turno,
-  personaSeleccionada,
-  onMarcarManual,
-  fechaServidor,
-  versionReloj = 0,
   recargarEstado,
   puedeIdentificar = false,
   personal = [],
@@ -232,7 +219,7 @@ export default function PantallaEnVivo({
 
   /* El flash es la reacción a una marcación en vivo, nunca a elegir una
      fila de la lista. */
-  const mostrarFlash = !leyendo && enVivo?.flash === true;
+  const mostrarFlash = enVivo?.flash === true;
 
   /* Fila de la lista elegida a mano (por su clave): mientras haya una, manda
      sobre la marcación en vivo en el escenario y en la barra de comidas. */
@@ -282,11 +269,11 @@ export default function PantallaEnVivo({
 
   const idEvento = evento?.id ?? null;
   const eventoRecargado = useRef(idEvento);
-  /* Mientras se lee una huella o App trae un evento que esta pantalla todavía
-     no registró como propio, el ciclo no anuncia novedades: la marcación
-     propia no debe aparecer dos veces como «recién llegada». */
+  /* Mientras App trae un evento que esta pantalla todavía no registró como
+     propio, el ciclo no anuncia novedades: la marcación propia no debe
+     aparecer dos veces como «recién llegada». */
   const deteccionEnPausa = useRef(false);
-  deteccionEnPausa.current = leyendo || idEvento !== eventoRecargado.current;
+  deteccionEnPausa.current = idEvento !== eventoRecargado.current;
   const recargarEstadoRef = useRef(recargarEstado);
   recargarEstadoRef.current = recargarEstado;
   const ciclo = useRef(null);
@@ -354,22 +341,12 @@ export default function PantallaEnVivo({
   useEffect(() => {
     if (idEvento === null || eventoRecargado.current === idEvento) return;
     eventoRecargado.current = idEvento;
-    deteccionEnPausa.current = leyendo;
+    deteccionEnPausa.current = false;
     ciclo.current?.registrarPropia(evento.claveEvento);
     setEnVivo({ llave: `local-${idEvento}`, evento, flash: true });
     setClaveSeleccionada(null);
     ciclo.current?.solicitar();
-  }, [idEvento, evento, leyendo]);
-
-  /* Mover el reloj de simulación cambia el día o la franja: la lista se
-     vuelve a pedir y lo que traiga no se anuncia como recién ocurrido. */
-  const versionRecargada = useRef(versionReloj);
-  useEffect(() => {
-    if (versionRecargada.current === versionReloj) return;
-    versionRecargada.current = versionReloj;
-    ciclo.current?.reiniciarReferencia();
-    ciclo.current?.solicitar();
-  }, [versionReloj]);
+  }, [idEvento, evento]);
 
   /*
    * Mientras el ciclo no trae la fila guardada, la marcación recién enviada
@@ -413,16 +390,16 @@ export default function PantallaEnVivo({
     ? (pendientes?.lecturas ?? []).find((lectura) => lectura.clave === claveMostrada) ?? null
     : null;
   const origenMostrado = etiquetaDeOrigen(eventoMostrado?.origen);
-  const mostrarResultado = !leyendo && eventoMostrado !== null;
+  const mostrarResultado = eventoMostrado !== null;
   const personaMostrada = eventoMostrado?.persona;
 
   /* Comidas del día de hoy del comensal mostrado. */
   const usuarioIdConsultar = personaMostrada?.id;
   const consultarDia = useCallback(
     (signal) => usuarioIdConsultar
-      ? obtenerDiaPersonal(usuarioIdConsultar, { fecha: fechaServidor, signal })
+      ? obtenerDiaPersonal(usuarioIdConsultar, { signal })
       : Promise.resolve(null),
-    [usuarioIdConsultar, fechaServidor],
+    [usuarioIdConsultar],
   );
   const { datos: dia, cargando: cargandoDia, error: errorDia, recargar: recargarDia } = useConsultaApi(consultarDia);
 
@@ -471,40 +448,10 @@ export default function PantallaEnVivo({
                   fueraDeHorario={pantalla?.fuera_de_horario}
                   turno={turno}
                 />
-
-                {/* Autoriza una ración sin pasar por el lector: mismas reglas
-                    de turno y derecho, aplicadas por el servidor. Sin
-                    `onMarcarManual` (rol cocinera) el bloque no existe. */}
-                {onMarcarManual ? (
-                  <div className="escenario__manual">
-                    <span className="escenario__manual-etiqueta">Modo manual</span>
-                    <p className="escenario__manual-nombre">
-                      {personaSeleccionada ? personaSeleccionada.nombre : 'Seleccione comensal en barra'}
-                    </p>
-                    <Boton
-                      variante="secundario"
-                      anchoCompleto
-                      onClick={() => onMarcarManual(personaSeleccionada.id)}
-                      disabled={!personaSeleccionada || leyendo}
-                    >
-                      Aceptar ración manual
-                    </Boton>
-                  </div>
-                ) : null}
               </div>
 
               <div className="escenario__principal">
-                {leyendo ? (
-                  <div className="escenario__estado escenario__estado--leyendo">
-                    <span className="escenario__huella escenario__huella--activa">
-                      <IconoHuella tamano={104} />
-                    </span>
-                    <p className="escenario__titulo-estado">Registrando asistencia…</p>
-                    <p className="escenario__ayuda">Validando la marcación contra el padrón del turno.</p>
-                  </div>
-                ) : null}
-
-                {!leyendo && eventoMostrado === null ? (
+                {eventoMostrado === null ? (
                   <div className="escenario__estado">
                     <span className="escenario__huella">
                       <IconoHuella tamano={104} />

@@ -227,9 +227,9 @@ test('un rechazo sin_derecho o no_identificado no ofrece Autorizar ni hace petic
 });
 
 // -------------------------------------------------------------
-// 5. Render de Supervisión en carga, vacío, error y simulación
+// 5. Render de Supervisión en carga, vacío y error
 // -------------------------------------------------------------
-test('render de Supervisión en carga, vacío, error y simulación', () => {
+test('render de Supervisión en carga, vacío y error', () => {
   // Estado CARGA
   const htmlCarga = renderToStaticMarkup(
     h(Supervision, { cargandoInicial: true })
@@ -260,35 +260,6 @@ test('render de Supervisión en carga, vacío, error y simulación', () => {
   assert.match(htmlError, /role="alert"/);
   assert.match(htmlError, /Fallo de conexión con el servidor/);
   assert.match(htmlError, /Reintentar supervisión/);
-
-  // Estado SIMULACIÓN
-  const reloj = {
-    ahora: new Date(2020, 1, 3, 12, 30),
-    real: new Date(2026, 8, 28, 9, 0),
-    simulado: true,
-    congelado: false,
-  };
-  const htmlSim = renderToStaticMarkup(
-    h(Supervision, {
-      cargandoInicial: false,
-      simulacion: reloj,
-      comidasIniciales: diaFixture(),
-      marcacionesIniciales: [],
-    })
-  );
-  assert.match(htmlSim, /Modo simulación/);
-  assert.match(htmlSim, /Supervisión basada en el reloj del servidor/);
-
-  // Fuera de simulación
-  const htmlSinSim = renderToStaticMarkup(
-    h(Supervision, {
-      cargandoInicial: false,
-      simulacion: null,
-      comidasIniciales: diaFixture(),
-      marcacionesIniciales: [],
-    })
-  );
-  assert.doesNotMatch(htmlSinSim, /Modo simulación/);
 });
 
 // -------------------------------------------------------------
@@ -511,65 +482,19 @@ test('una huella que identificó cocina muestra el rechazo original y la entrega
 });
 
 // -------------------------------------------------------------
-// 10. Actualizado: hora del servidor en simulación
+// 10. Header: título, turno y fecha de este equipo
 // -------------------------------------------------------------
-test('en simulación Actualizado usa la hora del reloj del servidor', () => {
-  const reloj = {
-    ahora: new Date(2020, 1, 3, 12, 30, 45),
-    real: new Date(2026, 8, 28, 9, 0),
-    simulado: true,
-    congelado: false,
-  };
-  const html = renderToStaticMarkup(
-    h(Supervision, {
-      cargandoInicial: false,
-      simulacion: reloj,
-      comidasIniciales: diaFixture(),
-      marcacionesIniciales: [marcacionFixture({})],
-    })
-  );
-  assert.match(html, /Actualizado 12:30:45/);
+test('el header muestra el título de la sección, el turno y la fecha', () => {
+  const seccion = { id: 'supervision', titulo: 'Supervisión del comedor', descripcion: 'Control y supervisión del comedor' };
+  const html = renderToStaticMarkup(h(Header, { seccion, turno: 'Almuerzo' }));
+  assert.match(html, /Supervisión del comedor/);
+  assert.match(html, /header__pastilla--turno/);
+  assert.match(html, /Turno Almuerzo/);
+  assert.match(html, new RegExp(String(new Date().getFullYear())));
 });
 
 // -------------------------------------------------------------
-// 11. Header en vivo (cocinera) intacto vs en supervisión
-// -------------------------------------------------------------
-test('el header de vivo de la cocinera se dibuja igual que antes, y en supervision unifica fecha y hora del servidor', () => {
-  const reloj = {
-    ahora: new Date(2020, 1, 3, 12, 5),
-    real: new Date(2026, 8, 28, 9, 0),
-    simulado: true,
-    congelado: false,
-  };
-
-  // Header en 'vivo' (la cocinera): se dibuja igual que antes
-  const seccionVivo = { id: 'vivo', titulo: 'Control Biométrico', descripcion: 'Marcaciones en vivo' };
-  const htmlVivo = renderToStaticMarkup(
-    h(Header, { seccion: seccionVivo, turno: 'Almuerzo', simulacion: reloj })
-  );
-  assert.match(htmlVivo, /Control Biométrico/);
-  assert.match(htmlVivo, /header__pastilla--simulacion/);
-  assert.match(htmlVivo, /<strong>Simulación<\/strong>.*12:05/);
-  assert.match(htmlVivo, /header__pastilla--turno/);
-  assert.match(htmlVivo, /Turno Almuerzo/);
-  // En vivo conserva la pastilla separada con fecha y año
-  assert.match(htmlVivo, /03 feb.*2020/);
-
-  // Header en 'supervision': un solo indicador de fecha y hora del servidor (sin pastilla separada de fecha)
-  const seccionSupervision = { id: 'supervision', titulo: 'Supervisión del comedor', descripcion: 'Control y supervisión del comedor' };
-  const htmlSupervision = renderToStaticMarkup(
-    h(Header, { seccion: seccionSupervision, turno: 'Almuerzo', simulacion: reloj })
-  );
-  assert.match(htmlSupervision, /Supervisión del comedor/);
-  assert.match(htmlSupervision, /header__pastilla--simulacion/);
-  assert.match(htmlSupervision, /<strong>Simulación<\/strong>.*12:05/);
-  assert.match(htmlSupervision, /Turno Almuerzo/);
-  // No renderiza la pastilla separada de fecha de calendario (no repite la fecha)
-  assert.doesNotMatch(htmlSupervision, /2020/);
-});
-
-// -------------------------------------------------------------
-// 12. Avisos: solo el de un refresco fallido (no hay acciones de escritura)
+// 11. Avisos: solo el de un refresco fallido (no hay acciones de escritura)
 // -------------------------------------------------------------
 test('Supervisión no muestra avisos de acciones: solo el de un refresco que falló', () => {
   const html = renderToStaticMarkup(
@@ -590,7 +515,7 @@ test('Supervisión no muestra avisos de acciones: solo el de un refresco que fal
 });
 
 // -------------------------------------------------------------
-// 13. Refresco automático y botón Actualizar
+// 12. Refresco automático y botón Actualizar
 // -------------------------------------------------------------
 test('refresco automático cada 30s programa carga inicial, refrescos y cancela al desmontar', () => {
   const llamadas = [];

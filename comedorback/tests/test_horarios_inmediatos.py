@@ -1,6 +1,6 @@
 """Horarios con efecto inmediato: POST /reglas/horarios y sus consultas.
 
-Todo por API con el reloj de simulación congelado (cada guardado rige desde
+Todo por API con el reloj fijado (cada guardado rige desde
 ESE instante) y la semilla como punto de partida. Cubre: varios cambios el
 mismo día, el corte exacto, la auditoría automática, el contrato estricto
 (campos retirados, `base_horario_id` obligatorio), el reloj que no avanza y
@@ -297,7 +297,7 @@ def test_mismo_instante_y_reloj_retrocedido_dan_409(cliente, root, con_horarios)
     assert (r.status_code, r.json()["motivo"]) == (409, "instante_no_posterior")
     assert "2026-09-24T10:00:00" in r.json()["detail"]
 
-    # Reloj simulado hacia atrás: tampoco.
+    # Reloj hacia atrás: tampoco.
     fijar(a_las(9, 59, 59, 999999))
     r = guardar(cliente, root, almuerzo, "12:00:00", "14:00:00", nueva)
     assert (r.status_code, r.json()["motivo"]) == (409, "instante_no_posterior")

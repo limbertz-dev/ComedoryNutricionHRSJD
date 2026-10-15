@@ -41,8 +41,8 @@
   z-index: 1;
   display: grid;
   justify-items: center;
-  gap: clamp(24px, 4vh, 38px);
-  width: min(100%, 620px);
+  gap: clamp(22px, 3vh, 30px);
+  width: min(100%, 540px);
 }
 
 .login__marca {
@@ -53,8 +53,8 @@
 
 .login__marca-icono {
   display: grid;
-  width: 76px;
-  height: 76px;
+  width: 64px;
+  height: 64px;
   flex: none;
   place-items: center;
   color: var(--c-acento-fuerte);
@@ -72,7 +72,7 @@
 
 .login__marca-texto strong,
 .login__marca-texto span {
-  font-size: clamp(25px, 3.1vw, 37px);
+  font-size: clamp(25px, 2.8vw, 32px);
   font-weight: 800;
   letter-spacing: -0.035em;
 }
@@ -87,7 +87,7 @@
 
 .login__tarjeta {
   width: 100%;
-  padding: clamp(32px, 5vw, 46px) clamp(26px, 5vw, 48px) 36px;
+  padding: clamp(28px, 4vw, 36px) clamp(24px, 4vw, 38px) 28px;
   background: color-mix(in srgb, var(--c-superficie) 96%, transparent);
   border: 1px solid var(--c-borde-suave);
   border-radius: 20px;
@@ -103,7 +103,7 @@
 
 .login__cabecera h1 {
   color: var(--c-acento-oscuro);
-  font-size: clamp(31px, 4vw, 39px);
+  font-size: clamp(28px, 3.5vw, 34px);
   line-height: 1.15;
   letter-spacing: -0.035em;
   text-wrap: balance;
@@ -119,8 +119,8 @@
 
 .login__formulario {
   display: grid;
-  gap: 22px;
-  margin-top: 36px;
+  gap: 18px;
+  margin-top: 28px;
 }
 
 .login__grupo {
@@ -134,7 +134,7 @@
 .login__campo {
   display: flex;
   align-items: center;
-  min-height: 58px;
+  min-height: 50px;
   padding: 0 17px;
   color: var(--c-acento-fuerte);
   background: var(--c-superficie-2);
@@ -157,7 +157,7 @@
 .login__campo input {
   width: 100%;
   min-width: 0;
-  min-height: 56px;
+  min-height: 48px;
   padding: 0 14px;
   color: var(--c-texto);
   font-size: var(--t-base);
@@ -191,7 +191,7 @@
 }
 
 .login__ingresar {
-  min-height: 58px;
+  min-height: 50px;
   margin-top: 6px;
   padding: 12px 22px;
   color: var(--c-superficie);
@@ -279,7 +279,7 @@
 .login__hospital {
   display: grid;
   justify-items: center;
-  margin-top: 30px;
+  margin-top: 24px;
   text-align: center;
 }
 

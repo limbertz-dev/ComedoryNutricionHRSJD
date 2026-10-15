@@ -682,23 +682,10 @@ function horaLegible(fecha) {
 }
 
 /**
- * POST /asistencias: el servidor resuelve todas las reglas de la marcación.
- * `personaId` siempre corresponde a users.id (usuario_id en la API), salvo
- * con `metodo: 'biometrico'`: ahí puede ser `null`, que es como el simulador
- * imita una huella que el lector no llegó a reconocer contra nadie del
- * padrón (a diferencia de "sin derecho", que sí identifica a la persona).
- *
- * `metodo` distingue quién originó la marcación y el backend lo usa: con
- * 'biometrico' guarda además la lectura del lector en su bitácora, con
- * 'manual' solo la asistencia. El simulador del lector manda 'biometrico'
- * justamente para recorrer el mismo camino que recorrerá el hardware; el
- * registro a mano de una ración se queda en 'manual', que es el valor por
- * omisión aquí.
- *
- * Fuera de simulación el servidor rechaza 'biometrico' desde el navegador
- * con 403 `biometrico_solo_lector`: ese rechazo no es «Sin permiso» de la
- * sección, así que vuelve como ErrorApi con el `detail` del servidor
- * (ver `esRechazoBiometricoSoloLector`) y nunca se reintenta como manual.
+ * POST /asistencias con `metodo: 'manual'`: el servidor resuelve todas las
+ * reglas de la marcación. `personaId` corresponde a users.id (usuario_id en
+ * la API). Desde el navegador solo se registra a mano: la marcación
+ * biométrica la registra el lector autorizado.
  *
  * La respuesta suma `origen` y `claveEvento`, la misma clave con que la fila
  * aparece en GET /pantalla/ultimas-marcaciones: con `lectura_id` es la
@@ -707,22 +694,18 @@ function horaLegible(fecha) {
  * deja fila). Un fallo conserva su causa en `cause`: sin ErrorApi no hubo
  * respuesta del servidor y el resultado es incierto.
  */
-export async function marcarAsistencia(personaId, { persona, metodo = 'manual', ahora = new Date(), signal } = {}) {
+export async function marcarAsistencia(personaId, { persona, ahora = new Date(), signal } = {}) {
   try {
-    const fallaBiometrica = personaId === null && metodo === 'biometrico';
-    if (!fallaBiometrica && (!Number.isInteger(personaId) || personaId <= 0)) {
+    if (!Number.isInteger(personaId) || personaId <= 0) {
       throw new Error('Seleccione un comensal del padrón.');
     }
-    const ficha = fallaBiometrica
-      ? null
-      : persona?.id === personaId
-        ? persona
-        : adaptarPersona(await solicitarApi(`/personal/${personaId}`, { signal }));
+    const ficha = persona?.id === personaId
+      ? persona
+      : adaptarPersona(await solicitarApi(`/personal/${personaId}`, { signal }));
     const respuesta = await solicitarApi('/asistencias', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usuario_id: personaId, metodo }),
-      motivosLocales: metodo === 'biometrico' ? [MOTIVO_BIOMETRICO_SOLO_LECTOR] : [],
+      body: JSON.stringify({ usuario_id: personaId, metodo: 'manual' }),
       signal,
     });
     if (typeof respuesta?.valido !== 'boolean' || typeof respuesta.titulo !== 'string'
@@ -738,48 +721,20 @@ export async function marcarAsistencia(personaId, { persona, metodo = 'manual', 
       origen,
       claveEvento: origen === null ? null
         : claveDeEvento(origen, origen === 'lectura_biometrica' ? respuesta.lectura_id : respuesta.asistencia_id),
-      // La respuesta actual no trae hora: esta es la hora de recepción local,
-      // o la del reloj del servidor cuando App la conoce (simulación).
+      // La respuesta actual no trae hora: esta es la hora de recepción local.
       hora: horaLegible(ahora),
-      persona: ficha
-        ? { ...ficha, nombre: respuesta.nombre || ficha.nombre }
-        : { id: null, nombre: 'Huella no reconocida', categoria: 'Sin identificar', legajo: '—' },
+      persona: { ...ficha, nombre: respuesta.nombre || ficha.nombre },
       tiempo: respuesta.comida,
       motivo: respuesta.valido ? MOTIVOS.OK
         : respuesta.motivo === 'duplicado' ? MOTIVOS.YA_MARCO : respuesta.motivo,
     };
   } catch (error) {
     if (signal?.aborted) throw error;
-    if (metodo === 'biometrico' && esRechazoBiometricoSoloLector(error)) {
-      throw new ErrorApi(
-        detalleDe(error.datos, 'La marcación biométrica requiere un lector autorizado fuera de simulación.'),
-        403,
-        error.datos,
-      );
-    }
     throw new Error(
       `No se pudo confirmar la marcación. ${error.message} Verifique el registro antes de volver a enviarla.`,
       { cause: error },
     );
   }
-}
-
-/** Motivo del 403 de POST /asistencias con 'biometrico' fuera de simulación. */
-export const MOTIVO_BIOMETRICO_SOLO_LECTOR = 'biometrico_solo_lector';
-
-/** true si `error` es el rechazo de una marcación biométrica fuera de simulación. */
-export function esRechazoBiometricoSoloLector(error) {
-  return error instanceof ErrorApi && error.status === 403
-    && error.datos?.motivo === MOTIVO_BIOMETRICO_SOLO_LECTOR;
-}
-
-/** Nombre conservado para compatibilidad; ahora exige una persona explícita. */
-export async function simularMarcacion({ personal, personaId, signal }) {
-  const persona = personal.find(({ id }) => id === personaId);
-  if (!persona) {
-    throw new Error('Seleccione un comensal del padrón antes de registrar.');
-  }
-  return marcarAsistencia(personaId, { persona, signal });
 }
 
 /** Fecha compacta para el nombre del archivo exportado: "2026-09-03". */
@@ -1729,23 +1684,7 @@ export async function obtenerDiaPersonal(usuarioId, { fecha, signal } = {}) {
   }
 }
 
-/*
- * --- Simulación (contrato real comedorback/app/api/simulacion.py) ---
- * GET  /salud → {entorno, reloj: {ahora, real, simulado}, ...}; sin token.
- *               Responde 503 con el mismo cuerpo si la base está incompleta.
- * Solo con ENTORNO=simulacion y rol de jefatura (en otro entorno, 404):
- * GET    /simulacion/reloj                → EstadoReloj
- * PUT    /simulacion/reloj {momento, congelar} → EstadoReloj
- * POST   /simulacion/reloj/avanzar {dias?, horas?, minutos?} → EstadoReloj
- * POST   /simulacion/reloj/proxima-franja → {comida_id, comida, inicio, reloj}
- *                                          | 409 si no hay franja hoy ni mañana
- * DELETE /simulacion/reloj                → EstadoReloj (vuelve a la hora real)
- * EstadoReloj = {ahora, real, simulado, congelado}
- *
- * Las horas del servidor son locales y sin zona. Se leen como hora de pared
- * (año, mes, día, hora…) y nunca se convierten de zona: lo que se muestra es
- * exactamente la hora que ve el servidor.
- */
+/** Fechas del servidor en hora local. */
 const FECHA_HORA_SERVIDOR = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/;
 
 /** "2026-08-10T12:05:30.123" → Date local con esa misma hora de pared. */
@@ -1762,68 +1701,6 @@ export function fechaHoraDelServidor(texto) {
 export function valorFechaHoraLocal(momento) {
   const dos = (numero) => String(numero).padStart(2, '0');
   return `${fechaArchivo(momento)}T${dos(momento.getHours())}:${dos(momento.getMinutes())}`;
-}
-
-function adaptarReloj(dato, { conCongelado = true } = {}) {
-  const ahora = fechaHoraDelServidor(dato?.ahora);
-  const real = fechaHoraDelServidor(dato?.real);
-  if (!ahora || !real || typeof dato.simulado !== 'boolean'
-    || (conCongelado && typeof dato.congelado !== 'boolean')) {
-    throw new Error('La API devolvió un reloj inválido.');
-  }
-  return {
-    ahora,
-    real,
-    simulado: dato.simulado,
-    // /salud no informa si el reloj está congelado: null es "no se sabe".
-    congelado: typeof dato.congelado === 'boolean' ? dato.congelado : null,
-  };
-}
-
-/**
- * GET /salud: en qué entorno corre la API y qué hora ve. `simulacion` es
- * true solo con entorno 'simulacion'; en cualquier otro caso (o si la API
- * todavía no informa el entorno) no hay nada de simulación que mostrar.
- * `reloj` es null fuera de simulación.
- */
-export async function obtenerSalud({ signal } = {}) {
-  const { entorno, simulacion, reloj } = await leerSalud({ signal });
-  return { entorno, simulacion, reloj };
-}
-
-/**
- * GET /salud como confirmación del entorno. Igual que `obtenerSalud`, más
- * `confirmaSimulacion`: true solo si la API respondió 200 con entorno
- * 'simulacion' y un reloj válido. Un 503 deja ver el reloj, pero no confirma
- * nada; un error o una respuesta inválida se lanzan.
- */
-export async function confirmarEntornoSalud({ signal } = {}) {
-  const { entorno, simulacion, reloj, degradada } = await leerSalud({ signal });
-  return { entorno, simulacion, reloj, confirmaSimulacion: simulacion && !degradada };
-}
-
-async function leerSalud({ signal }) {
-  let datos;
-  let degradada = false;
-  try {
-    datos = await solicitarApi('/salud', { signal, manejoPropio: true });
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    // Con 503 la API responde igual, solo avisa que a la base le falta algo.
-    if (error.status !== 503 || !error.datos) {
-      throw new Error(`No se pudo consultar el estado de la API. ${error.message}`);
-    }
-    datos = error.datos;
-    degradada = true;
-  }
-  const entorno = typeof datos?.entorno === 'string' ? datos.entorno : null;
-  const simulacion = entorno === 'simulacion';
-  return {
-    entorno,
-    simulacion,
-    reloj: simulacion ? adaptarReloj(datos.reloj, { conCongelado: false }) : null,
-    degradada,
-  };
 }
 
 /*
@@ -1885,80 +1762,6 @@ export async function obtenerEstadoMonitoreo({ signal } = {}) {
     if (signal?.aborted) throw error;
     throw new Error(`No se pudo consultar el lector biométrico. ${error.message}`, { cause: error });
   }
-}
-
-async function operarReloj(ruta, opciones, accion) {
-  try {
-    return adaptarReloj(await solicitarApi(ruta, opciones));
-  } catch (error) {
-    if (opciones.signal?.aborted) throw error;
-    throw new Error(`No se pudo ${accion}. ${error.message}`);
-  }
-}
-
-const cuerpoJson = (datos) => ({
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(datos),
-});
-
-/** GET /simulacion/reloj: la hora que ve el sistema, con `congelado`. */
-export function obtenerReloj({ signal } = {}) {
-  return operarReloj('/simulacion/reloj', { signal }, 'consultar el reloj');
-}
-
-/**
- * PUT /simulacion/reloj. `momento` es el valor de un datetime-local
- * ("2026-08-10T12:05"): hora local del servidor, sin zona.
- */
-export async function fijarReloj({ momento, congelar = false, signal } = {}) {
-  if (typeof momento !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(momento)) {
-    throw new Error('Indique la fecha y la hora a fijar.');
-  }
-  return operarReloj('/simulacion/reloj', {
-    method: 'PUT', ...cuerpoJson({ momento: `${momento}:00`, congelar: congelar === true }), signal,
-  }, 'fijar el reloj');
-}
-
-/** POST /simulacion/reloj/avanzar: al menos uno de días, horas o minutos. */
-export async function avanzarReloj({ dias = 0, horas = 0, minutos = 0, signal } = {}) {
-  const cuanto = { dias, horas, minutos };
-  if (Object.values(cuanto).some((valor) => !Number.isInteger(valor) || valor < 0)
-    || Object.values(cuanto).every((valor) => valor === 0)) {
-    throw new Error('Indique cuánto avanzar el reloj.');
-  }
-  const cuerpo = Object.fromEntries(Object.entries(cuanto).filter(([, valor]) => valor > 0));
-  return operarReloj('/simulacion/reloj/avanzar', { method: 'POST', ...cuerpoJson(cuerpo), signal },
-    'avanzar el reloj');
-}
-
-/**
- * POST /simulacion/reloj/proxima-franja. El 409 no es una falla: es la
- * respuesta a "no hay ninguna franja hoy ni mañana", y se devuelve como
- * `{ tipo: 'sin_franja', detalle }` para que la pantalla lo muestre como
- * mensaje. Lo demás llega como `{ tipo: 'ok', comidaId, comida, inicio, reloj }`.
- */
-export async function saltarAProximaFranja({ signal } = {}) {
-  let datos;
-  try {
-    datos = await solicitarApi('/simulacion/reloj/proxima-franja', { method: 'POST', signal });
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    if (error.status === 409) {
-      return { tipo: 'sin_franja', detalle: detalleDe(error.datos, 'No hay ninguna franja de comida hoy ni mañana.') };
-    }
-    throw new Error(`No se pudo saltar a la próxima franja. ${error.message}`);
-  }
-  const inicio = fechaHoraDelServidor(datos?.inicio);
-  if (!Number.isInteger(datos?.comida_id) || typeof datos.comida !== 'string' || !inicio) {
-    throw new Error('No se pudo saltar a la próxima franja. La API devolvió una franja inválida.');
-  }
-  let reloj;
-  try {
-    reloj = adaptarReloj(datos.reloj);
-  } catch (error) {
-    throw new Error(`No se pudo saltar a la próxima franja. ${error.message}`);
-  }
-  return { tipo: 'ok', comidaId: datos.comida_id, comida: datos.comida, inicio, reloj };
 }
 
 /* ------------------------------------------------------------------ *
@@ -2173,10 +1976,6 @@ export async function reiniciarClaveCuenta(id, { signal } = {}) {
   }
 }
 
-/** DELETE /simulacion/reloj: el sistema vuelve a la hora real. */
-export function volverARelojReal({ signal } = {}) {
-  return operarReloj('/simulacion/reloj', { method: 'DELETE', signal }, 'volver a la hora real');
-}
 
 /* ------------------------------------------------------------------ *
  * Reglas del sistema: horarios de comida (solo sistemas)
@@ -2350,7 +2149,7 @@ const MOTIVOS_GUARDADO = {
   sin_cambios: { texto: 'El horario guardado ya es ese: no hay nada que cambiar.' },
   solapa_con_otra_comida: { texto: 'Esa franja se superpone con la de otra comida. Elija horas que no se crucen.' },
   instante_no_posterior: {
-    texto: 'El reloj del sistema no es posterior a la última versión guardada de los horarios, por eso el cambio no se aplicó. Si el reloj está en simulación, debe estar más adelante que ese último cambio.',
+    texto: 'El reloj del sistema no es posterior a la última versión guardada de los horarios, por eso el cambio no se aplicó. Revise la hora del servidor.',
   },
   cambio_en_curso: { texto: 'Hay otro cambio de horarios en curso. Espere unos segundos y vuelva a intentarlo.' },
   versiones_abiertas_multiples: {

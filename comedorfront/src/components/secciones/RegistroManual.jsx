@@ -120,7 +120,7 @@ export function crearRegistroManual({
  * comensal del padrón, ver su identidad y confirmar. Envía solo
  * { usuario_id, metodo: 'manual' } y el servidor decide, con su hora actual,
  * la comida vigente y si corresponde la ración. No necesita una lectura
- * previa ni simula una autorización excepcional.
+ * previa ni finge una autorización excepcional.
  */
 export default function RegistroManual({
   personal = [],

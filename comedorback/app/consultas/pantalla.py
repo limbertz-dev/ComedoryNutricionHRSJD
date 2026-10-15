@@ -227,7 +227,7 @@ def estado(
     hora: time | None = None,
     momento: datetime | None = None,
 ) -> Estado:
-    """Estado de pantalla para una fecha u hora simulada.
+    """Estado de pantalla para una fecha u hora dadas.
 
     Si no se recibe una parte del reloj, se conserva esa parte del momento
     actual. `momento` se conserva como punto de inyección para consultas

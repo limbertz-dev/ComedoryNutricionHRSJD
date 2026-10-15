@@ -13,21 +13,7 @@ import PanelSesionCocinera, {
   admitePantallaCompleta,
   alternarPantallaCompleta,
 } from '../src/components/layout/PanelSesionCocinera.jsx';
-import SimuladorLector from '../src/components/secciones/SimuladorLector.jsx';
 
-const personal = [{ id: 3, nombre: 'Persona 3', categoria: 'Médico', legajo: 'ITEM-3' }];
-const simulador = (props) => h(SimuladorLector, {
-  personal,
-  seleccionado: '',
-  onSeleccionar() {},
-  onMarcar() {},
-  onSimularFalla() {},
-  leyendo: false,
-  error: '',
-  reloj: null,
-  onCambioReloj() {},
-  ...props,
-});
 const conSesion = (elemento) => h(ProveedorSesion, null, elemento);
 
 test('con rol cocinera no hay sidebar ni header y Control Biométrico ocupa toda la ventana', () => {
@@ -60,7 +46,7 @@ test('con rol jefa siguen el sidebar y el header, sin pantalla completa ni flota
   assert.doesNotMatch(html, /Menú de sesión/);
 });
 
-test('el panel flotante contiene usuario, rol, simulador y Cerrar sesión', () => {
+test('el panel flotante contiene usuario, rol y Cerrar sesión', () => {
   const html = renderToStaticMarkup(
     h(CajaSesionCocinera, {
       cajaRef: { current: null },
@@ -68,35 +54,28 @@ test('el panel flotante contiene usuario, rol, simulador y Cerrar sesión', () =
       onAlternar() {},
       usuario: 'maria.cocina',
       rol: 'cocinera',
-      simulador: simulador(),
       onCerrarSesion() {},
     })
   );
 
   assert.match(html, /maria\.cocina/);
   assert.match(html, /Cocinera/);
-  assert.match(html, /Modo pruebas/);
-  assert.match(html, /Apoyar huella/);
-  assert.match(html, /Falla biométrica/);
   assert.match(html, /<span class="boton__texto">Cerrar sesión<\/span>/);
 });
 
 test('el panel abre cerrado y se abre con abiertoInicial', () => {
   const htmlCerrado = renderToStaticMarkup(
-    conSesion(h(PanelSesionCocinera, { simulador: simulador() }))
+    conSesion(h(PanelSesionCocinera))
   );
   assert.match(htmlCerrado, /aria-label="Menú de sesión"/);
   assert.match(htmlCerrado, /aria-expanded="false"/);
   assert.doesNotMatch(htmlCerrado, /Cerrar sesión/);
-  assert.doesNotMatch(htmlCerrado, /Apoyar huella/);
 
   const htmlAbierto = renderToStaticMarkup(
-    conSesion(h(PanelSesionCocinera, { simulador: simulador(), abiertoInicial: true }))
+    conSesion(h(PanelSesionCocinera, { abiertoInicial: true }))
   );
   assert.match(htmlAbierto, /aria-expanded="true"/);
   assert.match(htmlAbierto, /Cerrar sesión/);
-  assert.match(htmlAbierto, /Modo pruebas/);
-  assert.match(htmlAbierto, /Apoyar huella/);
 });
 
 test('Pantalla completa se oculta si el navegador no la soporta', async () => {
@@ -110,7 +89,6 @@ test('Pantalla completa se oculta si el navegador no la soporta', async () => {
       onAlternar() {},
       usuario: 'maria.cocina',
       rol: 'cocinera',
-      simulador: simulador(),
       onCerrarSesion() {},
     })
   );
@@ -132,8 +110,7 @@ test('Pantalla completa se oculta si el navegador no la soporta', async () => {
         onAlternar() {},
         usuario: 'maria.cocina',
         rol: 'cocinera',
-        simulador: simulador(),
-        onCerrarSesion() {},
+          onCerrarSesion() {},
       })
     );
     assert.match(htmlConSoporte, /<span class="boton__texto">Pantalla completa<\/span>/);
