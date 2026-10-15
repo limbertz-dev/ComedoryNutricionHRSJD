@@ -32,7 +32,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.consultas import pantalla as consultas_pantalla
-from app.consultas.derecho import aplicar_reglas
+from app.consultas.derecho import Derecho, aplicar_reglas
 from app.core import reloj
 from app.core.config import config
 from app.core.db import SesionLocal, motor
@@ -226,22 +226,6 @@ def _id_de_cuenta(username: str) -> int:
     return _filas("SELECT id FROM usuarios_sistema WHERE username = :u", u=username)[0][0]
 
 
-def _con_derecho(fecha: date, cantidad: int) -> list[int]:
-    with SesionLocal() as sesion:
-        almuerzo = sesion.execute(select(Comida.id).where(Comida.codigo == "almuerzo")).scalar_one()
-        filas = sesion.execute(
-            aplicar_reglas(
-                select(ComidaPorTurno.usuario_id).where(
-                    ComidaPorTurno.comida_id == almuerzo, ComidaPorTurno.fecha_comida == fecha
-                )
-            )
-        ).scalars().all()
-    unicos = sorted(set(filas))
-    if len(unicos) < cantidad:
-        pytest.skip("la base de turnos no tiene suficientes personas con derecho a ese almuerzo")
-    return unicos[:cantidad]
-
-
 def _sin_derecho(fecha: date) -> int:
     """Alguien del padrón SIN derecho al almuerzo de `fecha` (solo SELECT)."""
     with SesionLocal() as sesion:
@@ -259,11 +243,80 @@ def _sin_derecho(fecha: date) -> int:
     return persona
 
 
-def _dos_con_derecho(e: Escenario) -> tuple[int, int]:
-    otros = [u for u in _con_derecho(e.fecha, 3) if u != e.usuario_id]
-    if not otros:
-        pytest.skip("hace falta una segunda persona con derecho")
-    return e.usuario_id, otros[0]
+# --- personas sintéticas: dos o tres con derecho, sin depender de turnos ---------------------
+
+# Lejos de cualquier users.id real. Una prueba comprueba que ninguno existe en el
+# padrón, y que lo que no es sintético sigue yendo a las consultas reales.
+SINTETICO_BASE = 2_000_000_000
+
+
+@dataclass
+class Sintetico:
+    """El mismo escenario del almuerzo, con N personas que TIENEN derecho y están
+    en el padrón porque la prueba lo dice, no porque turnos tenga a tanta gente."""
+
+    comida_id: int
+    fecha: date
+    momento: datetime  # 12:30, dentro del almuerzo de la semilla
+    personas: list[int]
+
+    @property
+    def usuario_id(self) -> int:
+        return self.personas[0]
+
+
+@pytest.fixture
+def sintetico(con_horarios, monkeypatch) -> Sintetico:
+    """Sustituye, SOLO en las pruebas, las dos consultas que lee el padrón y el
+    derecho: `buscar_derecho` y `nombre_en_padron`, que la operación llama por su
+    nombre en `app.logica.intervencion`.
+
+    Qué es real y qué es sintético:
+      · sintético: que estas personas existan en el padrón y tengan derecho al
+        almuerzo de `fecha`. Es un DATO DE ENTRADA, como lo sería una fila de
+        turnos; la operación no sabe si viene de turnos.
+      · real: todo lo que la operación decide y escribe: la elegibilidad de la
+        lectura, el servicio efectivo (horarios de la base `_test`), el duplicado,
+        las transacciones, el bloqueo FOR UPDATE, el SAVEPOINT, las restricciones
+        únicas, la asistencia y la auditoría. Nada del resultado ni de los
+        conflictos se simula.
+      · real también: cualquier persona que no sea sintética va a la consulta
+        real de turnos (solo SELECT), y el reemplazo es global al proceso, así que
+        lo ven todas las sesiones y los hilos de la prueba. `monkeypatch` lo
+        restaura al terminar.
+    No se escribe en turnos ni se toca ninguna configuración.
+    """
+    with SesionLocal() as sesion:
+        almuerzo, nombre_almuerzo = sesion.execute(
+            select(Comida.id, Comida.nombre).where(Comida.codigo == "almuerzo")
+        ).one()
+    fecha = date(2026, 9, 24)  # dentro de la vigencia de la semilla (desde 2026-01-01)
+    personas = [SINTETICO_BASE + k for k in range(1, 6)]
+    derecho_real = intervencion.buscar_derecho
+    padron_real = intervencion.nombre_en_padron
+
+    def derecho(sesion, usuario_id, comida_id, fecha_comida):
+        if usuario_id in personas and comida_id == almuerzo and fecha_comida == fecha:
+            return Derecho(
+                comida_id=almuerzo,
+                comida=nombre_almuerzo,
+                fecha_comida=fecha,
+                turno_asignado_id=usuario_id,
+                servicio_id=usuario_id,
+                turno="Turno sintético",
+                fecha_turno=fecha,
+                dia_relativo=0,
+            )
+        return derecho_real(sesion, usuario_id, comida_id, fecha_comida)
+
+    def padron(sesion, usuario_id):
+        if usuario_id in personas:
+            return (f"Persona sintética {usuario_id - SINTETICO_BASE}",)
+        return padron_real(sesion, usuario_id)
+
+    monkeypatch.setattr(intervencion, "buscar_derecho", derecho)
+    monkeypatch.setattr(intervencion, "nombre_en_padron", padron)
+    return Sintetico(almuerzo, fecha, datetime.combine(fecha, time(12, 30)), personas)
 
 
 def _lista(cliente, headers, fecha: date) -> list[dict]:
@@ -497,10 +550,10 @@ def test_duplicado_es_un_intento_rechazado(cliente, cliente_simulacion, tokens, 
 
 
 def test_lectura_ya_resuelta_por_otra_cuenta_no_se_atribuye_a_quien_repite(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, cliente_simulacion, tokens, sintetico
 ):
-    e = escenario
-    a, b = _dos_con_derecho(e)
+    e = sintetico
+    a, b = e.personas[:2]
     lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
     assert _identificar(cliente, tokens["cocinera"], lectura, a, ahora=e.momento).status_code == 200
 
@@ -713,10 +766,10 @@ def test_un_reintento_de_un_rechazo_devuelve_lo_mismo_sin_otra_fila(
 
 
 def test_la_misma_clave_con_otro_contenido_es_un_conflicto(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, cliente_simulacion, tokens, sintetico
 ):
-    e = escenario
-    a, b = _dos_con_derecho(e)
+    e = sintetico
+    a, b = e.personas[:2]
     lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
     clave = _clave()
     assert _identificar(cliente, tokens["cocinera"], lectura, a, clave=clave, ahora=e.momento).status_code == 200
@@ -870,10 +923,10 @@ def test_la_misma_clave_a_la_vez_deja_una_sola_entrega(
 
 
 def test_dos_personas_a_la_vez_sobre_la_misma_lectura_dan_una_sola_racion(
-    cliente, cliente_simulacion, tokens, escenario, aislamiento
+    cliente, cliente_simulacion, tokens, sintetico, aislamiento
 ):
-    e = escenario
-    a, b = _dos_con_derecho(e)
+    e = sintetico
+    a, b = e.personas[:2]
     lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
     reloj.fijar(e.momento, congelar=True)
     resultados: dict = {}
@@ -1277,13 +1330,13 @@ def test_un_fallo_de_integridad_ajeno_en_la_racion_no_se_clasifica_como_duplicad
 
 
 def test_un_duplicado_que_no_es_de_la_clave_ni_de_la_racion_se_propaga(
-    cliente, cliente_simulacion, tokens, escenario, monkeypatch
+    cliente, cliente_simulacion, tokens, sintetico, monkeypatch
 ):
     """Un 1062 sobre la auditoría cuando la clave NO existe (aquí, el UNIQUE de
     `asistencia_id`) no es la carrera reconocida: tampoco se disfraza."""
-    e = escenario
+    e = sintetico
     coci = tokens["cocinera"]
-    a, b = _dos_con_derecho(e)
+    a, b = e.personas[:2]
     primera = _lectura(cliente_simulacion, coci, e.momento)
     segunda = _lectura(cliente_simulacion, coci, e.momento + timedelta(minutes=1))
     assert _identificar(cliente, coci, primera, a, ahora=e.momento + timedelta(minutes=2)).status_code == 200
@@ -1341,10 +1394,10 @@ def test_la_base_no_impide_una_registrada_sin_asistencia_pero_la_comprobacion_la
 
 
 def test_varias_personas_a_la_vez_dejan_una_registrada_y_el_resto_rechazadas(
-    cliente, cliente_simulacion, tokens, escenario, aislamiento
+    cliente, cliente_simulacion, tokens, sintetico, aislamiento
 ):
-    e = escenario
-    personas = _con_derecho(e.fecha, 3)
+    e = sintetico
+    personas = e.personas[:3]
     lectura = _lectura(cliente_simulacion, tokens["cocinera"], e.momento)
     reloj.fijar(e.momento, congelar=True)
     resultados: dict = {}
@@ -1380,11 +1433,11 @@ def test_lecturas_por_identificar_es_solo_de_la_cocinera(cliente, tokens, con_ho
 
 
 def test_lecturas_por_identificar_trae_solo_las_del_servicio_actual_y_pendientes(
-    cliente, cliente_simulacion, tokens, escenario
+    cliente, cliente_simulacion, tokens, sintetico
 ):
-    e = escenario
+    e = sintetico
     coci = tokens["cocinera"]
-    a, b = _dos_con_derecho(e)
+    a, b = e.personas[:2]
     temprana = _lectura(cliente_simulacion, coci, datetime.combine(e.fecha, time(11, 5)))
     resuelta = _lectura(cliente_simulacion, coci, datetime.combine(e.fecha, time(11, 10)))
     con_usuario = _lectura(
@@ -1512,3 +1565,23 @@ def test_una_lectura_de_ayer_en_un_servicio_nocturno_se_recupera_y_se_sigue(
     assert (vacia["servicio"], vacia["lecturas"]) == (None, [])
     tarde = _identificar(cliente, coci, otra, persona)
     assert tarde.status_code == 409 and tarde.json()["motivo"] == "servicio_distinto"
+
+
+def test_los_reemplazos_sinteticos_solo_cubren_a_las_personas_sinteticas(sintetico):
+    """Los ids sintéticos no existen en el padrón real, el reemplazo solo habla de
+    ellas y todo lo demás llega a las consultas reales (solo SELECT)."""
+    e = sintetico
+    with SesionLocal() as sesion:
+        reales = sesion.execute(select(Comensal.usuario_id).where(Comensal.usuario_id.in_(e.personas))).all()
+        assert reales == []  # ninguna colisiona con una persona real
+
+        for persona in e.personas:
+            derecho = intervencion.buscar_derecho(sesion, persona, e.comida_id, e.fecha)
+            assert derecho is not None and derecho.fecha_comida == e.fecha and derecho.comida_id == e.comida_id
+            assert intervencion.nombre_en_padron(sesion, persona)[0].startswith("Persona sintética")
+        # Otra fecha u otra comida de la misma persona: no hay derecho (consulta real).
+        assert intervencion.buscar_derecho(sesion, e.personas[0], e.comida_id, e.fecha + timedelta(days=1)) is None
+        assert intervencion.buscar_derecho(sesion, e.personas[0], e.comida_id + 10_000, e.fecha) is None
+        # Quien no es sintético sigue yendo a las consultas reales.
+        assert intervencion.nombre_en_padron(sesion, USUARIO_INEXISTENTE) is None
+        assert intervencion.buscar_derecho(sesion, USUARIO_INEXISTENTE, e.comida_id, e.fecha) is None
