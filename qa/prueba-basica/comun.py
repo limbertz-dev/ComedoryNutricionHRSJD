@@ -27,6 +27,7 @@ DISPOSITIVO = "lector-prueba-qa"
 CUENTAS = ("cocinera2", "cocinera3")
 CORRIDA = CARPETA / "corrida.json"
 REQUERIDAS = ("DB_NAME", "DB_NAME_TURNOS", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD")
+RELOJ_POR_DEFECTO = "2026-10-15T11:30:00"
 
 
 class Abortado(RuntimeError):
@@ -327,12 +328,81 @@ def ejecutar(main):
         raise SystemExit(1) from None
 
 
+def argumento_reloj(valor):
+    """Hora de pared local, sin zona: el mismo contrato que app.core.reloj."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", valor):
+        raise argparse.ArgumentTypeError("Usar AAAA-MM-DDTHH:MM:SS, sin zona horaria")
+    try:
+        return datetime.fromisoformat(valor)
+    except ValueError:
+        raise argparse.ArgumentTypeError("Fecha u hora de laboratorio inválida") from None
+
+
+def crear_ancla_reloj(lab):
+    return {'lab': lab.isoformat(), 'real': datetime.now().isoformat()}
+
+
+def desfase_reloj(datos):
+    try:
+        ancla = datos['reloj']
+        lab = datetime.fromisoformat(ancla['lab'])
+        real = datetime.fromisoformat(ancla['real'])
+        if lab.tzinfo is not None or real.tzinfo is not None:
+            raise ValueError
+        return lab - real
+    except (KeyError, TypeError, ValueError):
+        raise Abortado("Ancla de laboratorio ausente o inválida; limpiar y abrir una corrida nueva") from None
+
+
+def mostrar_reloj(lab, real):
+    print(f"Reloj de laboratorio: {lab.isoformat()} (real: {real.isoformat()})")
+
+
+@contextmanager
+def reloj_laboratorio(datos):
+    """Usar dentro de app_sin_dotenv. Solo cambia ahora, durante este proceso.
+
+    El desfase sale SIEMPRE del diario; arrancar otro proceso no reinicia la
+    ventana. real/real_utc, tokens e inicio real de la corrida quedan intactos.
+    """
+    from app.core import reloj
+    desfase = desfase_reloj(datos)
+    real = reloj.real()
+    mostrar_reloj(real + desfase, real)
+    with patch.object(reloj, 'ahora', lambda: reloj.real() + desfase):
+        yield reloj
+
+
+def fecha_para_operar(datos, momento, *, permitir_lectura=False):
+    """Valida el estado sin adelantarlo: habilitar cuentas/API no crea lectura."""
+    estado = datos['estado']
+    permitidos = {'iniciada', 'refechada'}
+    if permitir_lectura:
+        permitidos.add('lectura_creada')
+    if (estado not in permitidos
+            or (estado != 'lectura_creada' and datos.get('lectura_id') is not None)
+            or (estado == 'lectura_creada' and datos.get('lectura_id') is None)):
+        raise Abortado("Corrida pendiente/anterior: no repetir lectura; limpiar primero")
+    destino = datos.get('fecha_destino')
+    if (estado == 'iniciada' and destino is not None) or (estado == 'refechada' and destino is None):
+        raise Abortado("Estado/fecha destino incoherentes en corrida.json")
+    fecha = date.fromisoformat(destino or datos['fecha_original'])
+    if momento.date() != fecha:
+        raise Abortado("Fecha del laboratorio distinta de la asignación: refechar si está iniciada; "
+                       "si la corrida venció, limpiar y abrir una corrida nueva con otra ancla")
+    return fecha
+
+
 def main():
     parser = argparse.ArgumentParser(description="Huella protegida y registro inicial/final")
     grupo = parser.add_mutually_exclusive_group(required=True)
     grupo.add_argument('--huella-base', action='store_true')
     grupo.add_argument('--huella-final', action='store_true')
+    parser.add_argument('--reloj', type=argumento_reloj,
+                        help=f"Ancla local de negocio para --huella-base (omisión: {RELOJ_POR_DEFECTO})")
     args = parser.parse_args()
+    if args.huella_final and args.reloj is not None:
+        parser.error('--reloj solo se usa con --huella-base')
     with bloqueo_corrida(), entorno_seguro() as (motor, huella, servidor):
         if args.huella_final:
             datos = leer_corrida(servidor)
@@ -359,7 +429,9 @@ def main():
             sesiones = contrato_sesiones(conn)
             max_sesion = (conn.execute(text("SELECT COALESCE(MAX(id),0) FROM sesiones")).scalar_one()
                           if sesiones else None)
-        guardar_corrida({'version': 1, 'servidor': servidor, 'bases': [SIM, DEMO],
+        ancla = crear_ancla_reloj(args.reloj or argumento_reloj(RELOJ_POR_DEFECTO))
+        mostrar_reloj(datetime.fromisoformat(ancla['lab']), datetime.fromisoformat(ancla['real']))
+        guardar_corrida({'version': 1, 'servidor': servidor, 'bases': [SIM, DEMO], 'reloj': ancla,
                          'usuario_id': USUARIO, 'asignacion_id': ASIGNACION,
                          'inicio': datetime.now().replace(microsecond=0).isoformat(),
                          'fecha_original': fila['fecha'].isoformat(), 'fecha_destino': None,

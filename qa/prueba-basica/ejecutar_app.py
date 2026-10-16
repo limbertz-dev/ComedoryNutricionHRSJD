@@ -21,11 +21,15 @@ def main():
     if args.modo == 'api':
         permitidas |= c.permisos(*((c.SIM, t, 'INSERT') for t in (
             'intentos_login', 'intervenciones_lectura', 'asistencias')))
-    with c.entorno_seguro(permitidas) as (_, huella, servidor), c.app_sin_dotenv():
+    with c.entorno_seguro(permitidas) as (_, huella, servidor):
         datos = c.leer_corrida(servidor)
         c.comprobar_base(datos, huella)
-        if datos['estado'] not in ('refechada', 'lectura_creada'):
-            raise c.Abortado("Refechar antes de habilitar cuentas/arrancar API")
+        iniciar(args, datos)
+
+
+def iniciar(args, datos):
+    with c.app_sin_dotenv(), c.reloj_laboratorio(datos) as reloj:
+        c.fecha_para_operar(datos, reloj.ahora(), permitir_lectura=True)
         if args.modo == 'admin':
             if (c.CARPETA / 'api.activa').exists():
                 raise c.Abortado("Detener API antes de resetear cuentas")

@@ -10,17 +10,20 @@ import comun as c
 def main():
     with c.bloqueo_corrida(), c.entorno_seguro(c.permisos(
         (c.SIM, 'lecturas_biometricas', 'INSERT')
-    )) as (motor, huella, servidor), c.app_sin_dotenv():
-        from app.core import reloj
+    )) as (motor, huella, servidor):
+        datos = c.leer_corrida(servidor)
+        c.comprobar_base(datos, huella)
+        leer(motor, datos)
+
+
+def leer(motor, datos):
+    with c.app_sin_dotenv(), c.reloj_laboratorio(datos) as reloj:
         from app.consultas.derecho import buscar_derecho
         from app.consultas.servicio import VentanasDelDia, evaluar_servicio
         from app.esquemas.marcacion import RespuestaMarcacion
         from app.logica.marcacion import registrar_marcacion, resolver_comida_en_curso, ya_comio
         from app.modelos.comedor import LecturaBiometrica
-        datos = c.leer_corrida(servidor)
-        c.comprobar_base(datos, huella)
-        if datos['estado'] != 'refechada' or datos.get('lectura_id') is not None:
-            raise c.Abortado("Corrida pendiente/anterior: no repetir lectura; limpiar primero")
+        fecha = c.fecha_para_operar(datos, reloj.ahora())
         with Session(motor, expire_on_commit=False) as sesion:
             # Incluye lecturas resueltas: no se inicia otra corrida sin limpiar la anterior.
             if sesion.execute(text("SELECT COUNT(*) FROM lecturas_biometricas WHERE dispositivo=:d"),
@@ -29,8 +32,9 @@ def main():
             momento = reloj.ahora()
             comida = resolver_comida_en_curso(sesion, momento)
             if comida is None or comida.comida_id != c.COMIDA:
-                raise c.Abortado("No está en curso el almuerzo (11:00 <= hora < 15:00)")
-            if comida.fecha_comida.isoformat() != datos['fecha_destino']:
+                raise c.Abortado("El laboratorio está fuera del almuerzo; "
+                                 "limpiar y abrir una corrida nueva con otra ancla")
+            if comida.fecha_comida != fecha:
                 raise c.Abortado("La asignación no corresponde al almuerzo actual")
             derecho = buscar_derecho(sesion, c.USUARIO, comida.comida_id, comida.fecha_comida)
             if derecho is None or derecho.turno_asignado_id != c.ASIGNACION or ya_comio(sesion, c.USUARIO, comida):
