@@ -1,0 +1,152 @@
+{
+  "info": {
+    "name": "QA básica - huella no reconocida / cocinera2",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Ejecutar manualmente y en orden, con la API QA en 127.0.0.1:8001. Claves solo en Postman Vault: qa-cocinera2-actual y qa-cocinera2-nueva. Habilitar acceso del script al Vault. Si el navegador ya cambió la clave, el paso 2 se omite automáticamente. No exportar tokens ni el estado de ejecución. Consultar GUION.md."
+  },
+  "variable": [
+    {"key": "base", "value": "http://127.0.0.1:8001"},
+    {"key": "token", "value": ""},
+    {"key": "lectura_id", "value": ""},
+    {"key": "clave_idempotencia", "value": ""},
+    {"key": "clave_lectura", "value": ""},
+    {"key": "cambio_pendiente", "value": "false"},
+    {"key": "asistencia_id", "value": ""},
+    {"key": "intervencion_id", "value": ""}
+  ],
+  "auth": {"type": "bearer", "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]},
+  "event": [{"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+    "try {",
+    "  const salud = await pm.sendRequest({ url: String(pm.variables.get('base')).replace(/\\/$/, '') + '/salud', method: 'GET' });",
+    "  const datos = salud.json();",
+    "  if (salud.code !== 200 || datos.estado !== 'ok' || datos.entorno !== 'desarrollo' || datos.base_datos !== 'bd_nutricion_escenario_sim' || datos.base_turnos !== 'bd_turnos_escenario_demo' || datos.revision_alembic !== 'e1a7c3b9d5f2') {",
+    "    throw new Error('La API no declara el escenario esperado');",
+    "  }",
+    "} catch (error) {",
+    "  pm.execution.skipRequest();",
+    "  throw new Error('Petición cancelada: verificar API QA y /salud');",
+    "}"
+  ]}}],
+  "item": [
+    {
+      "name": "1 - Login cocinera2",
+      "event": [
+        {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+          "const clave = await pm.vault.get('qa-cocinera2-actual');",
+          "if (!clave) { throw new Error('Falta qa-cocinera2-actual en Vault'); }",
+          "pm.request.body.update(JSON.stringify({ username: 'cocinera2', password: clave }));"
+        ]}},
+        {"listen": "test", "script": {"type": "text/javascript", "exec": [
+          "pm.test('Login 200 o cambio obligatorio 428', () => pm.expect(pm.response.code).to.be.oneOf([200, 428]));",
+          "pm.collectionVariables.set('token', '');",
+          "const cuerpo = pm.response.json();",
+          "if (pm.response.code === 200) {",
+          "  pm.expect(cuerpo.rol).to.eql('cocinera');",
+          "  pm.collectionVariables.set('token', cuerpo.access);",
+          "  pm.collectionVariables.set('cambio_pendiente', 'false');",
+          "} else if (pm.response.code === 428) {",
+          "  pm.collectionVariables.set('token', cuerpo.temporal);",
+          "  pm.collectionVariables.set('cambio_pendiente', 'true');",
+          "}"
+        ]}}
+      ],
+      "request": {"method": "POST", "auth": {"type": "noauth"}, "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{}"}, "url": "{{base}}/auth/login"}
+    },
+    {
+      "name": "2 - Cambio de clave (solo si login devuelve 428)",
+      "event": [
+        {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+          "if (pm.collectionVariables.get('cambio_pendiente') !== 'true') {",
+          "  pm.execution.skipRequest();",
+          "} else {",
+          "  const nueva = await pm.vault.get('qa-cocinera2-nueva');",
+          "  if (!nueva) { throw new Error('Falta qa-cocinera2-nueva en Vault'); }",
+          "  pm.request.body.update(JSON.stringify({ password_nueva: nueva }));",
+          "}"
+        ]}},
+        {"listen": "test", "script": {"type": "text/javascript", "exec": [
+          "pm.test('Cambio exitoso', () => pm.response.to.have.status(200));",
+          "if (pm.response.code === 200) {",
+          "  const cuerpo = pm.response.json();",
+          "  pm.expect(cuerpo.debe_cambiar).to.eql(false);",
+          "  pm.collectionVariables.set('token', cuerpo.access);",
+          "  pm.collectionVariables.set('cambio_pendiente', 'false');",
+          "  await pm.vault.set('qa-cocinera2-actual', await pm.vault.get('qa-cocinera2-nueva'));",
+          "}"
+        ]}}
+      ],
+      "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{}"}, "url": "{{base}}/auth/cambio-password"}
+    },
+    {
+      "name": "3 - Identificar y confirmar entrega de 900001",
+      "event": [
+        {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+          "const lectura = String(pm.variables.get('lectura_id') || '');",
+          "if (!/^[1-9][0-9]*$/.test(lectura)) { throw new Error('Copiar lectura_id de huella.py'); }",
+          "if (!pm.collectionVariables.get('clave_idempotencia') || pm.collectionVariables.get('clave_lectura') !== lectura) {",
+          "  const clave = pm.variables.replaceIn('{{$guid}}').toLowerCase();",
+          "  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(clave)) { throw new Error('UUID no v4'); }",
+          "  pm.collectionVariables.set('clave_idempotencia', clave);",
+          "  pm.collectionVariables.set('clave_lectura', lectura);",
+          "  pm.collectionVariables.set('asistencia_id', '');",
+          "  pm.collectionVariables.set('intervencion_id', '');",
+          "}",
+          "pm.request.headers.upsert({ key: 'Idempotency-Key', value: pm.collectionVariables.get('clave_idempotencia') });"
+        ]}},
+        {"listen": "test", "script": {"type": "text/javascript", "exec": [
+          "pm.test('Entrega registrada', () => {",
+          "  pm.response.to.have.status(200);",
+          "  const cuerpo = pm.response.json();",
+          "  pm.expect(cuerpo.valido).to.eql(true);",
+          "  pm.expect(cuerpo.resultado).to.eql('registrada');",
+          "  pm.expect(cuerpo.usuario_id).to.eql(900001);",
+          "  pm.expect(cuerpo.lectura_id).to.eql(Number(pm.variables.get('lectura_id')));",
+          "  pm.collectionVariables.set('asistencia_id', String(cuerpo.asistencia_id));",
+          "  pm.collectionVariables.set('intervencion_id', String(cuerpo.intervencion_id));",
+          "});"
+        ]}}
+      ],
+      "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Idempotency-Key", "value": "{{clave_idempotencia}}"}], "body": {"mode": "raw", "raw": "{\"usuario_id\": 900001}"}, "url": "{{base}}/asistencias/lecturas/{{lectura_id}}/identificar"}
+    },
+    {
+      "name": "4 - Reintento con MISMA clave y persona",
+      "event": [
+        {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+          "if (!pm.collectionVariables.get('clave_idempotencia') || pm.collectionVariables.get('clave_lectura') !== String(pm.variables.get('lectura_id'))) { throw new Error('Falta la clave original de esta lectura; no generar otra'); }",
+          "pm.request.headers.upsert({ key: 'Idempotency-Key', value: pm.collectionVariables.get('clave_idempotencia') });"
+        ]}},
+        {"listen": "test", "script": {"type": "text/javascript", "exec": [
+          "pm.test('Replay exitoso sin otra ración', () => {",
+          "  pm.response.to.have.status(200);",
+          "  const cuerpo = pm.response.json();",
+          "  pm.expect(cuerpo.reintento).to.eql(true);",
+          "  pm.expect(cuerpo.valido).to.eql(true);",
+          "  pm.expect(cuerpo.resultado).to.eql('registrada');",
+          "  for (const campo of ['asistencia_id', 'intervencion_id']) {",
+          "    const previo = pm.collectionVariables.get(campo);",
+          "    if (previo) { pm.expect(String(cuerpo[campo])).to.eql(previo); }",
+          "  }",
+          "});"
+        ]}}
+      ],
+      "request": {"method": "POST", "header": [{"key": "Content-Type", "value": "application/json"}, {"key": "Idempotency-Key", "value": "{{clave_idempotencia}}"}], "body": {"mode": "raw", "raw": "{\"usuario_id\": 900001}"}, "url": "{{base}}/asistencias/lecturas/{{lectura_id}}/identificar"}
+    },
+    {
+      "name": "5 - Pantalla de cocinera2: ración servida",
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('Lectura original y entrega manual visibles', () => {",
+        "  pm.response.to.have.status(200);",
+        "  const clave = 'lectura_biometrica:' + pm.variables.get('lectura_id');",
+        "  const fila = pm.response.json().find((evento) => evento.clave_evento === clave);",
+        "  pm.expect(fila, 'Lectura presente').to.be.an('object');",
+        "  pm.expect(fila.decision_original.motivo).to.eql('no_identificado');",
+        "  pm.expect(fila.estado_final).to.eql('racion_servida');",
+        "  pm.expect(fila.resultado_final.via).to.eql('identificacion_manual');",
+        "  pm.expect(fila.resultado_final.comensal.usuario_id).to.eql(900001);",
+        "  pm.expect(fila.intervencion.resuelta_por_mi).to.eql(true);",
+        "});"
+      ]}}],
+      "request": {"method": "GET", "url": "{{base}}/pantalla/ultimas-marcaciones?comida_id=2&limite=100"}
+    }
+  ]
+}

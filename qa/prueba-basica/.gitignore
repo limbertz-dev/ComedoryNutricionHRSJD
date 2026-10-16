@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+corrida.json
+corrida.json.tmp
+corrida.lock
+api.activa
+evidencias/
