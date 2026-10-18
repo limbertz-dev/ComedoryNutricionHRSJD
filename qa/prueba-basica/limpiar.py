@@ -7,7 +7,7 @@ from sqlalchemy import text
 import comun as c
 
 
-def objetivos(conn, datos):
+def objetivos(conn, datos, actuales=None):
     params = {'lectura': datos['lectura_id'], 'inicio': datetime.fromisoformat(datos['inicio']),
               'max_intento': datos['max_intento_inicial'], 'max_sesion': datos['max_sesion_inicial']}
     filtros = [('intervenciones_lectura', 'lectura_id=:lectura'),
@@ -17,13 +17,20 @@ def objetivos(conn, datos):
         if contrato != datos['contrato_sesiones'] or params['max_sesion'] is None:
             raise c.Abortado("El contrato de sesiones cambió desde el inicio")
         cuenta, fecha = contrato['cuenta'], contrato['fecha']
-        valores = list(c.CUENTAS) if cuenta == 'username' else [datos['cuentas'][n] for n in c.CUENTAS]
-        params.update(cuenta2=valores[0], cuenta3=valores[1])
-        filtros.append(('sesiones', f"`{cuenta}` IN (:cuenta2,:cuenta3) AND `{fecha}`>=:inicio AND id>:max_sesion"))
+        if cuenta == 'username':
+            valores = list(c.CUENTAS)
+        else:
+            ids = list((actuales or datos['cuentas']).values())
+            valores = ids + [ids[0]] * (4 - len(ids))
+        params.update(cuenta1=valores[0], cuenta2=valores[1], cuenta3=valores[2], cuenta4=valores[3])
+        filtros.append(('sesiones', f"`{cuenta}` IN (:cuenta1,:cuenta2,:cuenta3,:cuenta4) AND `{fecha}`>=:inicio AND id>:max_sesion"))
     if c.existe_tabla(conn, 'intentos_login'):
         if params['max_intento'] is None:
             raise c.Abortado("intentos_login apareció después del inicio")
-        filtros.append(('intentos_login', "username IN ('cocinera2','cocinera3') AND fecha_hora>=:inicio AND id>:max_intento"))
+        filtros.append((
+            'intentos_login',
+            "username IN ('cocinera1','cocinera2','cocinera3','jefa') AND fecha_hora>=:inicio AND id>:max_intento",
+        ))
     return filtros, params
 
 
@@ -39,10 +46,11 @@ def comprobar_propiedad(conn, datos, aplicar):
     if fila['fecha'].isoformat() not in {datos['fecha_original'], datos['fecha_destino']}:
         raise c.Abortado("Fecha modificada fuera de la corrida: no se restaura")
     cuentas = conn.execute(text(
-        "SELECT id, username, rol, usuario_turnos_id FROM usuarios_sistema WHERE username IN ('cocinera2','cocinera3')"
+        "SELECT id, username, rol, usuario_turnos_id FROM usuarios_sistema "
+        "WHERE username IN ('cocinera1','cocinera2','cocinera3','jefa')"
     )).mappings().all()
-    if ({r['username']: r['id'] for r in cuentas} != datos['cuentas']
-            or any(r['rol'] != 'cocinera' or r['usuario_turnos_id'] is not None for r in cuentas)):
+    actuales = c.validar_cuentas_limpieza(cuentas, datos.get('cuentas'))
+    if not set(datos.get('verificacion_cuentas') or ()) <= set(actuales):
         raise c.Abortado("Las cuentas cambiaron de identidad")
     lecturas = conn.execute(text(
         "SELECT id, usuario_id, dispositivo, fecha_hora, resultado, motivo FROM lecturas_biometricas "
@@ -54,7 +62,7 @@ def comprobar_propiedad(conn, datos, aplicar):
                 or lectura['resultado'] != 'rechazada'
                 or lectura['fecha_hora'].isoformat() != datos.get('momento_lectura')):
             raise c.Abortado("Lectura ajena o alterada: no se borra")
-    propias = set(datos['cuentas'].values())
+    propias = set(actuales.values())
     intentos = conn.execute(text(
         "SELECT cuenta_id, usuario_id FROM intervenciones_lectura WHERE lectura_id=:id"
     ), {'id': datos['lectura_id']}).all()
@@ -66,7 +74,7 @@ def comprobar_propiedad(conn, datos, aplicar):
     if any(uid != c.USUARIO or comida != c.COMIDA or asignacion != c.ASIGNACION or cuenta not in propias
            for uid, comida, asignacion, cuenta in asistencias):
         raise c.Abortado("Asistencia ajena a la corrida")
-    return fila['fecha']
+    return fila['fecha'], actuales
 
 
 def main():
@@ -84,8 +92,8 @@ def main():
         c.comprobar_base(datos, huella)
         # Una conexión / UNA transacción cubre los DELETE y el UPDATE entre bases.
         with motor.begin() as conn:
-            actual = comprobar_propiedad(conn, datos, args.aplicar)
-            filtros, params = objetivos(conn, datos)
+            actual, actuales = comprobar_propiedad(conn, datos, args.aplicar)
+            filtros, params = objetivos(conn, datos, actuales)
             antes = contar(conn, filtros, params)
             print(f"Conteos antes (selección y total): {antes}")
             print(f"Asignación {c.ASIGNACION}: {actual} -> {datos['fecha_original']}")

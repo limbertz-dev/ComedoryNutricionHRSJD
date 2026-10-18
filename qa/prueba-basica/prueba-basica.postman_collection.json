@@ -1,8 +1,8 @@
 {
   "info": {
-    "name": "QA básica - huella no reconocida / cocinera2",
+    "name": "QA básica - huella no reconocida / cocinera2 y registro de la jefa",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Ejecutar manualmente y en orden, con la API QA en 127.0.0.1:8001. Claves solo en Postman Vault: qa-cocinera2-actual y qa-cocinera2-nueva. Habilitar acceso del script al Vault. Si el navegador ya cambió la clave, el paso 2 se omite automáticamente. No exportar tokens ni el estado de ejecución. Consultar GUION.md."
+    "description": "Ejecutar manualmente y en orden, con la API QA en 127.0.0.1:8001. Claves solo en Postman Vault: qa-cocinera2-actual, qa-cocinera2-nueva y qa-jefa-actual. Habilitar acceso del script al Vault. Si el navegador o cuentas.py ya cambió la clave, el paso 2 se omite automáticamente. No exportar tokens ni el estado de ejecución. Consultar GUION.md."
   },
   "variable": [
     {"key": "base", "value": "http://127.0.0.1:8001"},
@@ -147,6 +147,48 @@
         "});"
       ]}}],
       "request": {"method": "GET", "url": "{{base}}/pantalla/ultimas-marcaciones?comida_id=2&limite=100"}
+    },
+    {
+      "name": "6 - Login jefa",
+      "event": [
+        {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+          "const clave = await pm.vault.get('qa-jefa-actual');",
+          "if (!clave) { throw new Error('Falta qa-jefa-actual en Vault'); }",
+          "pm.request.body.update(JSON.stringify({ username: 'jefa', password: clave }));"
+        ]}},
+        {"listen": "test", "script": {"type": "text/javascript", "exec": [
+          "pm.collectionVariables.set('token', '');",
+          "pm.test('Login jefa 200', () => {",
+          "  pm.response.to.have.status(200);",
+          "  const cuerpo = pm.response.json();",
+          "  pm.expect(cuerpo.rol).to.eql('jefa');",
+          "  pm.expect(cuerpo.debe_cambiar).to.eql(false);",
+          "  pm.collectionVariables.set('token', cuerpo.access);",
+          "});"
+        ]}}
+      ],
+      "request": {"method": "POST", "auth": {"type": "noauth"}, "header": [{"key": "Content-Type", "value": "application/json"}], "body": {"mode": "raw", "raw": "{}"}, "url": "{{base}}/auth/login"}
+    },
+    {
+      "name": "7 - Registro de la jefa",
+      "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+        "pm.test('Intervención registrada de la lectura por cocinera2', () => {",
+        "  pm.response.to.have.status(200);",
+        "  const cuerpo = pm.response.json();",
+        "  const lecturaId = Number(pm.variables.get('lectura_id'));",
+        "  pm.expect(Number.isSafeInteger(lecturaId) && lecturaId > 0, 'lectura_id entero positivo').to.eql(true);",
+        "  pm.expect(cuerpo.datos, 'Lista de intervenciones').to.be.an('array');",
+        "  const fila = cuerpo.datos.find((item) =>",
+        "    item.resultado === 'registrada' &&",
+        "    item.decision_original &&",
+        "    item.decision_original.lectura_id === lecturaId &&",
+        "    item.cuenta &&",
+        "    item.cuenta.usuario === 'cocinera2'",
+        "  );",
+        "  pm.expect(fila, 'Fila registrada de la lectura por cocinera2').to.be.an('object');",
+        "});"
+      ]}}],
+      "request": {"method": "GET", "url": "{{base}}/intervenciones-cocina?usuario_id=900001"}
     }
   ]
 }

@@ -1,10 +1,38 @@
 """Lanzador QA de semilla/API: guardas, auditor y configuración sin dotenv."""
 import argparse
+from contextlib import redirect_stdout
+import getpass
+import io
 import os
-import runpy
-import sys
+from unittest.mock import patch
 
 import comun as c
+
+
+def permisos_modo(modo):
+    if modo == 'admin':
+        return c.permisos(
+            (c.SIM, 'usuarios_sistema', 'INSERT'),
+            (c.SIM, 'usuarios_sistema', 'UPDATE'),
+        )
+    if modo == 'api':
+        return c.permisos(
+            (c.SIM, 'usuarios_sistema', 'UPDATE'),
+            *((c.SIM, t, 'INSERT') for t in (
+                'intentos_login', 'intervenciones_lectura', 'asistencias')),
+        )
+    raise c.Abortado("Modo inválido")
+
+
+def pedir_clave_temporal(username, lector=None):
+    lector = getpass.getpass if lector is None else lector
+    clave = lector(f"[{username}] Clave temporal: ")
+    confirmacion = lector(f"[{username}] Confirmar clave temporal: ")
+    if not clave:
+        raise c.Abortado(f"Se requiere clave temporal para {username}")
+    if clave != confirmacion:
+        raise c.Abortado(f"La confirmación de clave temporal no coincide para {username}")
+    return clave
 
 
 def main():
@@ -17,25 +45,31 @@ def main():
     args = parser.parse_args()
     if os.environ.get('ENTORNO') != 'desarrollo':
         raise c.Abortado('ENTORNO')
-    permitidas = c.permisos((c.SIM, 'usuarios_sistema', 'UPDATE'))
-    if args.modo == 'api':
-        permitidas |= c.permisos(*((c.SIM, t, 'INSERT') for t in (
-            'intentos_login', 'intervenciones_lectura', 'asistencias')))
-    with c.entorno_seguro(permitidas) as (_, huella, servidor):
+    permitidas = permisos_modo(args.modo)
+    with c.entorno_seguro(permitidas) as (motor, huella, servidor):
         datos = c.leer_corrida(servidor)
         c.comprobar_base(datos, huella)
-        iniciar(args, datos)
+        iniciar(args, datos, motor)
 
 
-def iniciar(args, datos):
+def iniciar(args, datos, motor):
     with c.app_sin_dotenv(), c.reloj_laboratorio(datos) as reloj:
         c.fecha_para_operar(datos, reloj.ahora(), permitir_lectura=True)
         if args.modo == 'admin':
             if (c.CARPETA / 'api.activa').exists():
                 raise c.Abortado("Detener API antes de resetear cuentas")
+            rol = c.rol_cuenta(args.username)
             with c.bloqueo_corrida():
-                sys.argv = ['app.semillas.admin', '--username', args.username, '--rol', 'cocinera', '--resetear']
-                runpy.run_module('app.semillas.admin', run_name='__main__')
+                with motor.connect() as conn:
+                    c.validar_cuenta_admin(conn, args.username)
+                clave = pedir_clave_temporal(args.username)
+                from app.semillas import admin as semilla_admin
+                with (
+                    patch.object(semilla_admin, 'clave_temporal', lambda *a, **kw: clave),
+                    redirect_stdout(io.StringIO()),
+                ):
+                    semilla_admin.sembrar(args.username, rol=rol, resetear=True)
+                print(f"Cuenta '{args.username}' preparada (rol {rol}, cambio de clave pendiente).")
         else:
             marca = c.CARPETA / 'api.activa'
             try:

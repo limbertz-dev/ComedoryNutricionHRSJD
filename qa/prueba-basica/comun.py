@@ -24,7 +24,17 @@ USUARIO = 900001
 ASIGNACION = 91739904
 COMIDA = 2
 DISPOSITIVO = "lector-prueba-qa"
-CUENTAS = ("cocinera2", "cocinera3")
+CUENTAS = {
+    "cocinera1": "cocinera",
+    "cocinera2": "cocinera",
+    "cocinera3": "cocinera",
+    "jefa": "jefa",
+}
+CUENTAS_BASE = ("cocinera2", "cocinera3")
+CAMPOS_SECRETOS = frozenset({
+    "password", "password_nueva", "password_actual", "password_hash",
+    "clave", "clave_temporal", "clave_nueva", "access", "refresh", "temporal", "token",
+})
 CORRIDA = CARPETA / "corrida.json"
 REQUERIDAS = ("DB_NAME", "DB_NAME_TURNOS", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD")
 RELOJ_POR_DEFECTO = "2026-10-15T11:30:00"
@@ -244,7 +254,19 @@ def bloqueo_corrida():
         ruta.unlink()
 
 
+def _sin_secretos(valor):
+    if isinstance(valor, dict):
+        for clave, contenido in valor.items():
+            if str(clave).lower() in CAMPOS_SECRETOS:
+                raise Abortado("Prohibido guardar claves o tokens en corrida.json")
+            _sin_secretos(contenido)
+    elif isinstance(valor, list):
+        for item in valor:
+            _sin_secretos(item)
+
+
 def guardar_corrida(datos):
+    _sin_secretos(datos)
     temporal = CORRIDA.with_suffix('.json.tmp')
     with temporal.open('w', encoding='utf-8') as archivo:
         json.dump(datos, archivo, ensure_ascii=False, indent=2)
@@ -269,6 +291,70 @@ def leer_corrida(servidor):
     if datos.get('lectura_id') is not None and (type(datos['lectura_id']) is not int or datos['lectura_id'] <= 0):
         raise Abortado("lectura_id inválido en corrida.json")
     return datos
+
+
+def leer_corrida_local():
+    if not CORRIDA.exists():
+        raise Abortado("Falta corrida.json; ejecutar primero comun.py --huella-base")
+    datos = json.loads(CORRIDA.read_text(encoding='utf-8'))
+    if (datos.get('version') != 1 or not datos.get('servidor')
+            or datos.get('bases') != [SIM, DEMO] or datos.get('usuario_id') != USUARIO
+            or datos.get('asignacion_id') != ASIGNACION):
+        raise Abortado("corrida.json no corresponde a este escenario")
+    datetime.fromisoformat(datos['inicio'])
+    if datos.get('estado') not in {'iniciada', 'refechada', 'lectura_creada'}:
+        raise Abortado("La corrida no está en un estado operativo para verificar cuentas")
+    return datos
+
+
+def rol_cuenta(username):
+    rol = CUENTAS.get(username)
+    if rol not in {"cocinera", "jefa"}:
+        raise Abortado(f"Cuenta fuera del escenario QA: {username}")
+    return rol
+
+
+def validar_cuentas_iniciales(filas):
+    por_nombre = {}
+    for c in filas:
+        nombre = c['username']
+        if (nombre not in CUENTAS or nombre in por_nombre
+                or c['rol'] != CUENTAS[nombre] or c['usuario_turnos_id'] is not None
+                or type(c['id']) is not int or c['id'] <= 0):
+            raise Abortado("Cuenta del escenario con rol, vínculo o identidad incompatible")
+        por_nombre[nombre] = c['id']
+    if not set(CUENTAS_BASE) <= set(por_nombre):
+        raise Abortado("Se requieren las dos cocineras sintéticas existentes y sin vínculo")
+    return por_nombre
+
+
+def validar_cuenta_admin(conn, username):
+    esperado = rol_cuenta(username)
+    fila = conn.execute(text(
+        "SELECT id, username, rol, usuario_turnos_id FROM usuarios_sistema "
+        "WHERE username=:username"
+    ), {'username': username}).mappings().one_or_none()
+    if fila is not None and (fila['rol'] != esperado or fila['usuario_turnos_id'] is not None):
+        raise Abortado(f"La cuenta {username} existe con otro rol o con vínculo")
+    return esperado
+
+
+def validar_cuentas_limpieza(filas, iniciales):
+    if (not isinstance(iniciales, dict)
+            or not set(CUENTAS_BASE) <= set(iniciales)
+            or not set(iniciales) <= set(CUENTAS)):
+        raise Abortado("Las cuentas cambiaron de identidad")
+    actuales = {}
+    for r in filas:
+        nombre = r['username']
+        if (nombre not in CUENTAS or nombre in actuales
+                or r['rol'] != CUENTAS[nombre] or r['usuario_turnos_id'] is not None
+                or type(r['id']) is not int or r['id'] <= 0):
+            raise Abortado("Las cuentas cambiaron de identidad")
+        actuales[nombre] = r['id']
+    if any(actuales.get(nombre) != id_inicial for nombre, id_inicial in iniciales.items()):
+        raise Abortado("Las cuentas cambiaron de identidad")
+    return actuales
 
 
 def comprobar_base(datos, huella):
@@ -415,12 +501,10 @@ def main():
             raise Abortado("Ya existe corrida.json; conservar la evidencia y revisar GUION")
         with motor.connect() as conn:
             fila = fila_asignacion(conn)
-            cuentas = conn.execute(text(
+            cuentas = validar_cuentas_iniciales(conn.execute(text(
                 "SELECT id, username, rol, usuario_turnos_id FROM usuarios_sistema "
-                "WHERE username IN ('cocinera2','cocinera3')"
-            )).mappings().all()
-            if len(cuentas) != 2 or any(c['rol'] != 'cocinera' or c['usuario_turnos_id'] is not None for c in cuentas):
-                raise Abortado("Se requieren las dos cocineras sintéticas existentes y sin vínculo")
+                "WHERE username IN ('cocinera1','cocinera2','cocinera3','jefa')"
+            )).mappings().all())
             if conn.execute(text("SELECT COUNT(*) FROM lecturas_biometricas WHERE dispositivo=:d"),
                             {'d': DISPOSITIVO}).scalar_one():
                 raise Abortado("Hay lecturas QA anteriores; recuperar su corrida antes de continuar")
@@ -435,7 +519,7 @@ def main():
                          'usuario_id': USUARIO, 'asignacion_id': ASIGNACION,
                          'inicio': datetime.now().replace(microsecond=0).isoformat(),
                          'fecha_original': fila['fecha'].isoformat(), 'fecha_destino': None,
-                         'cuentas': {c['username']: c['id'] for c in cuentas},
+                         'cuentas': cuentas,
                          'max_intento_inicial': max_intento,
                          'contrato_sesiones': sesiones, 'max_sesion_inicial': max_sesion,
                          'huella_base': huella, 'estado': 'iniciada', 'lectura_id': None})
