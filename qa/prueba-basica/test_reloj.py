@@ -227,7 +227,6 @@ def test_lanzador_acepta_iniciada_y_aplica_reloj_antes_de_logica(datos, reloj_co
         with c.app_sin_dotenv():
             from app.semillas import admin as semilla_admin
             monkeypatch.setattr(semilla_admin, 'sembrar', logica)
-        monkeypatch.setattr(ejecutar_app.getpass, 'getpass', lambda prompt: 'TEMP-fija-123')
     else:
         import uvicorn
         monkeypatch.setattr(uvicorn, 'run', logica)
@@ -259,7 +258,6 @@ def test_admin_usa_rol_fijo_por_cuenta_nunca_sistemas(datos, reloj_controlado, m
             'sembrar',
             lambda user, rol='sistemas', resetear=False: llamadas_semilla.append((user, rol, resetear)),
         )
-    monkeypatch.setattr(ejecutar_app.getpass, 'getpass', lambda prompt: 'TEMP-fija-123')
     ejecutar_app.iniciar(SimpleNamespace(modo='admin', username=username, port=8001), datos, motor)
     assert llamadas_semilla == [(username, rol_esperado, True)]
     assert llamadas_semilla[0][1] != 'sistemas'
@@ -268,13 +266,18 @@ def test_admin_usa_rol_fijo_por_cuenta_nunca_sistemas(datos, reloj_controlado, m
             c.rol_cuenta(ajena)
 
 
-def test_admin_usa_temporal_de_getpass_sin_imprimirla_y_restaura_ante_error(
+def test_admin_genera_temporal_automaticamente_la_muestra_una_vez_y_no_la_guarda_en_diario(
     datos, reloj_controlado, monkeypatch, tmp_path, capsys
 ):
+    import getpass
+
     monkeypatch.setattr(c, 'CARPETA', tmp_path)
     diario = tmp_path / 'corrida.json'
-    diario.write_text(json.dumps(datos), encoding='utf-8')
+    contenido_diario = json.dumps(datos)
+    diario.write_text(contenido_diario, encoding='utf-8')
     monkeypatch.setattr(c, 'CORRIDA', diario)
+    no_getpass = Mock(side_effect=AssertionError('admin no debe solicitar clave con getpass'))
+    monkeypatch.setattr(getpass, 'getpass', no_getpass)
 
     motor = MagicMock()
     motor.connect.return_value.__enter__.return_value.execute.return_value.mappings.return_value.one_or_none.return_value = None
@@ -289,54 +292,31 @@ def test_admin_usa_temporal_de_getpass_sin_imprimirla_y_restaura_ante_error(
         fijadas = []
 
         def fijar_espia(sesion, usuario, clave, *, temporal):
-            usuario.debe_cambiar = temporal
+            usuario.debe_cambiar = 1 if temporal else 0
             fijadas.append((usuario.username, usuario.rol, usuario.debe_cambiar, clave))
 
         monkeypatch.setattr(semilla_admin, 'fijar_clave', fijar_espia)
-
-        secreto = 'CLAVE-TEMPORAL-OPERADOR-8492'
-        entradas = iter([secreto, secreto])
-        monkeypatch.setattr(ejecutar_app.getpass, 'getpass', lambda prompt: next(entradas))
-
         generador_original = semilla_admin.clave_temporal
-        stdout_original = sys.stdout
 
         ejecutar_app.iniciar(SimpleNamespace(modo='admin', username='jefa', port=8001), datos, motor)
 
-        assert fijadas == [('jefa', 'jefa', True, secreto)]
+        no_getpass.assert_not_called()
         assert semilla_admin.clave_temporal is generador_original
-        assert sys.stdout is stdout_original
+        assert len(fijadas) == 1
+        username_fijado, rol_fijado, debe_cambiar_fijado, clave_generada = fijadas[0]
+        assert (username_fijado, rol_fijado, debe_cambiar_fijado) == ('jefa', 'jefa', 1)
+        assert len(clave_generada) == 12
+        assert all(ch in semilla_admin.ALFABETO for ch in clave_generada)
 
         salida = capsys.readouterr()
         texto_diario = diario.read_text(encoding='utf-8')
-        assert secreto not in salida.out
-        assert secreto not in salida.err
-        assert secreto not in texto_diario
-        assert "Cuenta 'jefa' preparada" in salida.out
-
-        # Confirmación desigual o vacía aborta sin llamar a sembrar.
-        desigual = iter([secreto, 'OTRA-CLAVE'])
-        monkeypatch.setattr(ejecutar_app.getpass, 'getpass', lambda prompt: next(desigual))
-        with pytest.raises(c.Abortado, match='confirmación'):
-            ejecutar_app.iniciar(SimpleNamespace(modo='admin', username='jefa', port=8001), datos, motor)
-        assert len(fijadas) == 1
-
-        # Si sembrar lanza excepción después de imprimir la clave, se restauran stdout y clave_temporal.
-        def fallar_tras_usar_clave(*args, **kwargs):
-            generada = semilla_admin.clave_temporal()
-            print(f"  Clave temporal: {generada}")
-            raise RuntimeError('fallo simulado en semilla')
-
-        monkeypatch.setattr(semilla_admin, 'sembrar', fallar_tras_usar_clave)
-        entradas_error = iter([secreto, secreto])
-        monkeypatch.setattr(ejecutar_app.getpass, 'getpass', lambda prompt: next(entradas_error))
-        with pytest.raises(RuntimeError):
-            ejecutar_app.iniciar(SimpleNamespace(modo='admin', username='jefa', port=8001), datos, motor)
-        assert semilla_admin.clave_temporal is generador_original
-        assert sys.stdout is stdout_original
-        salida_err = capsys.readouterr()
-        assert secreto not in salida_err.out
-        assert secreto not in salida_err.err
+        assert f"  Clave temporal: {clave_generada}" in salida.out
+        assert salida.out.count(clave_generada) == 1
+        assert clave_generada not in salida.err
+        assert clave_generada not in texto_diario
+        assert texto_diario == contenido_diario
+        assert clave_generada not in json.dumps(datos)
+        assert [p.name for p in tmp_path.iterdir()] == ['corrida.json']
 
 
 @pytest.mark.parametrize('username,fila_invalida', [
@@ -353,11 +333,13 @@ def test_admin_aborta_ante_rol_distinto_o_vinculo(datos, reloj_controlado, monke
     motor = MagicMock()
     conn = motor.connect.return_value.__enter__.return_value
     conn.execute.return_value.mappings.return_value.one_or_none.return_value = fila_invalida
-    pedir = Mock(side_effect=AssertionError('No debe pedir clave ni ejecutar semilla ante cuenta incompatible'))
-    monkeypatch.setattr(ejecutar_app.getpass, 'getpass', pedir)
+    sembrar = Mock(side_effect=AssertionError('No debe ejecutar semilla ante cuenta incompatible'))
+    with c.app_sin_dotenv():
+        from app.semillas import admin as semilla_admin
+        monkeypatch.setattr(semilla_admin, 'sembrar', sembrar)
     with pytest.raises(c.Abortado, match='otro rol o con vínculo'):
         ejecutar_app.iniciar(SimpleNamespace(modo='admin', username=username, port=8001), datos, motor)
-    pedir.assert_not_called()
+    sembrar.assert_not_called()
 
 
 def test_permisos_auditor_insert_usuarios_solo_en_modo_admin():

@@ -1,10 +1,6 @@
 """Lanzador QA de semilla/API: guardas, auditor y configuración sin dotenv."""
 import argparse
-from contextlib import redirect_stdout
-import getpass
-import io
 import os
-from unittest.mock import patch
 
 import comun as c
 
@@ -22,17 +18,6 @@ def permisos_modo(modo):
                 'intentos_login', 'intervenciones_lectura', 'asistencias')),
         )
     raise c.Abortado("Modo inválido")
-
-
-def pedir_clave_temporal(username, lector=None):
-    lector = getpass.getpass if lector is None else lector
-    clave = lector(f"[{username}] Clave temporal: ")
-    confirmacion = lector(f"[{username}] Confirmar clave temporal: ")
-    if not clave:
-        raise c.Abortado(f"Se requiere clave temporal para {username}")
-    if clave != confirmacion:
-        raise c.Abortado(f"La confirmación de clave temporal no coincide para {username}")
-    return clave
 
 
 def main():
@@ -62,14 +47,8 @@ def iniciar(args, datos, motor):
             with c.bloqueo_corrida():
                 with motor.connect() as conn:
                     c.validar_cuenta_admin(conn, args.username)
-                clave = pedir_clave_temporal(args.username)
                 from app.semillas import admin as semilla_admin
-                with (
-                    patch.object(semilla_admin, 'clave_temporal', lambda *a, **kw: clave),
-                    redirect_stdout(io.StringIO()),
-                ):
-                    semilla_admin.sembrar(args.username, rol=rol, resetear=True)
-                print(f"Cuenta '{args.username}' preparada (rol {rol}, cambio de clave pendiente).")
+                semilla_admin.sembrar(args.username, rol=rol, resetear=True)
         else:
             marca = c.CARPETA / 'api.activa'
             try:
