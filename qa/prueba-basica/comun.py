@@ -8,6 +8,7 @@ import re
 import sys
 from contextlib import contextmanager
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -35,6 +36,7 @@ CAMPOS_SECRETOS = frozenset({
     "password", "password_nueva", "password_actual", "password_hash",
     "clave", "clave_temporal", "clave_nueva", "access", "refresh", "temporal", "token",
 })
+CONTADORES_DIARIO = ("max_intento_inicial", "max_sesion_inicial")
 CORRIDA = CARPETA / "corrida.json"
 REQUERIDAS = ("DB_NAME", "DB_NAME_TURNOS", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD")
 RELOJ_POR_DEFECTO = "2026-10-15T11:30:00"
@@ -265,12 +267,38 @@ def _sin_secretos(valor):
             _sin_secretos(item)
 
 
+def normalizar_contador(valor, *, permitir_none=True):
+    if valor is None:
+        if permitir_none:
+            return None
+        raise Abortado("Contador del diario ausente")
+    if type(valor) is int:
+        if valor < 0:
+            raise Abortado("Contador del diario negativo")
+        return valor
+    if isinstance(valor, Decimal):
+        if not valor.is_finite() or valor < 0 or valor != int(valor):
+            raise Abortado("Contador Decimal inválido para el diario")
+        return int(valor)
+    raise Abortado("Tipo de contador inválido para el diario")
+
+
 def guardar_corrida(datos):
+    if not isinstance(datos, dict):
+        raise Abortado("El diario debe ser un objeto JSON")
     _sin_secretos(datos)
+    normalizados = {
+        campo: normalizar_contador(datos[campo], permitir_none=True)
+        for campo in CONTADORES_DIARIO
+        if campo in datos
+    }
+    documento = {**datos, **normalizados}
+    contenido = json.dumps(documento, ensure_ascii=False, indent=2, allow_nan=False) + '\n'
+    json.loads(contenido)
+    datos.update(normalizados)
     temporal = CORRIDA.with_suffix('.json.tmp')
     with temporal.open('w', encoding='utf-8') as archivo:
-        json.dump(datos, archivo, ensure_ascii=False, indent=2)
-        archivo.write('\n')
+        archivo.write(contenido)
         archivo.flush()
         os.fsync(archivo.fileno())
     os.replace(temporal, CORRIDA)
@@ -508,11 +536,23 @@ def main():
             if conn.execute(text("SELECT COUNT(*) FROM lecturas_biometricas WHERE dispositivo=:d"),
                             {'d': DISPOSITIVO}).scalar_one():
                 raise Abortado("Hay lecturas QA anteriores; recuperar su corrida antes de continuar")
-            max_intento = (conn.execute(text("SELECT COALESCE(MAX(id),0) FROM intentos_login")).scalar_one()
-                           if existe_tabla(conn, 'intentos_login') else None)
+            max_intento = (
+                normalizar_contador(
+                    conn.execute(text("SELECT COALESCE(MAX(id),0) FROM intentos_login")).scalar_one(),
+                    permitir_none=False,
+                )
+                if existe_tabla(conn, 'intentos_login')
+                else None
+            )
             sesiones = contrato_sesiones(conn)
-            max_sesion = (conn.execute(text("SELECT COALESCE(MAX(id),0) FROM sesiones")).scalar_one()
-                          if sesiones else None)
+            max_sesion = (
+                normalizar_contador(
+                    conn.execute(text("SELECT COALESCE(MAX(id),0) FROM sesiones")).scalar_one(),
+                    permitir_none=False,
+                )
+                if sesiones
+                else None
+            )
         ancla = crear_ancla_reloj(args.reloj or argumento_reloj(RELOJ_POR_DEFECTO))
         mostrar_reloj(datetime.fromisoformat(ancla['lab']), datetime.fromisoformat(ancla['real']))
         guardar_corrida({'version': 1, 'servidor': servidor, 'bases': [SIM, DEMO], 'reloj': ancla,

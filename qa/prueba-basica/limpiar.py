@@ -36,8 +36,14 @@ def objetivos(conn, datos, actuales=None):
 
 def contar(conn, filtros, params):
     return {tabla: {
-        'de_corrida': conn.execute(text(f"SELECT COUNT(*) FROM `{tabla}` WHERE {filtro}"), params).scalar_one(),
-        'total_tabla': conn.execute(text(f"SELECT COUNT(*) FROM `{tabla}`")).scalar_one(),
+        'de_corrida': c.normalizar_contador(
+            conn.execute(text(f"SELECT COUNT(*) FROM `{tabla}` WHERE {filtro}"), params).scalar_one(),
+            permitir_none=False,
+        ),
+        'total_tabla': c.normalizar_contador(
+            conn.execute(text(f"SELECT COUNT(*) FROM `{tabla}`")).scalar_one(),
+            permitir_none=False,
+        ),
     } for tabla, filtro in filtros}
 
 

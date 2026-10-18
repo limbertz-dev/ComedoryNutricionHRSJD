@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch
 
@@ -130,6 +131,44 @@ def test_ancla_default_y_cli_crean_diario_con_hora_real(monkeypatch, tmp_path, e
     assert datetime.fromisoformat(guardado['inicio']).date() == datetime.now().date()
     assert guardado['estado'] == 'iniciada' and guardado['fecha_destino'] is None
     assert guardado['cuentas'] == {'cocinera2': 2, 'cocinera3': 3}
+
+
+@pytest.mark.parametrize('max_intento,con_sesiones,max_sesion', [
+    (Decimal(0), False, None),
+    (Decimal(23), True, Decimal(7)),
+])
+def test_huella_base_normaliza_contadores_decimal_y_sin_sesiones(
+    monkeypatch, tmp_path, max_intento, con_sesiones, max_sesion
+):
+    monkeypatch.setattr(c, 'CORRIDA', tmp_path / 'corrida.json')
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    control = MagicMock()
+    motor = MagicMock()
+    control.__enter__.return_value = (motor, {'sha256': 'huella'}, 'servidor')
+    monkeypatch.setattr(c, 'entorno_seguro', Mock(return_value=control))
+    monkeypatch.setattr(c, 'fila_asignacion', Mock(return_value={'fecha': datetime(2026, 10, 15).date()}))
+    monkeypatch.setattr(
+        c,
+        'existe_tabla',
+        Mock(side_effect=lambda _conn, tabla: tabla == 'intentos_login' or (con_sesiones and tabla == 'sesiones')),
+    )
+    monkeypatch.setattr(c, 'contrato_sesiones', Mock(return_value='id' if con_sesiones else None))
+    conn = motor.connect.return_value.__enter__.return_value
+    conn.execute.return_value.mappings.return_value.all.return_value = [
+        {'username': n, 'id': i, 'rol': c.rol_cuenta(n), 'usuario_turnos_id': None}
+        for i, n in enumerate(c.CUENTAS_BASE, 2)
+    ]
+    escalares = [0, max_intento] + ([max_sesion] if con_sesiones else [])
+    conn.execute.return_value.scalar_one.side_effect = escalares
+    monkeypatch.setattr(sys, 'argv', ['comun.py', '--huella-base'])
+    c.main()
+    assert c.CORRIDA.exists()
+    assert not c.CORRIDA.with_suffix('.json.tmp').exists()
+    guardado = json.loads(c.CORRIDA.read_text(encoding='utf-8'))
+    assert guardado['max_intento_inicial'] == int(max_intento)
+    assert type(guardado['max_intento_inicial']) is int
+    assert guardado['contrato_sesiones'] == ('id' if con_sesiones else None)
+    assert guardado['max_sesion_inicial'] == (int(max_sesion) if con_sesiones else None)
 
 
 @pytest.mark.parametrize('ancla', [None, {}, {'lab': 'incorrecta', 'real': '2026-10-20T23:00:00'},

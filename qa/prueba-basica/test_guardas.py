@@ -1,6 +1,7 @@
 """Pruebas offline: sin app, sin credenciales y sin conexiones MySQL."""
 import json
 from datetime import datetime
+from decimal import Decimal
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -310,6 +311,99 @@ def test_diario_rechaza_claves_y_tokens(monkeypatch, tmp_path, campo_secreto):
     with pytest.raises(c.Abortado, match='claves o tokens'):
         c.guardar_corrida({'estado': 'iniciada', 'anidado': [{campo_secreto: 'valor-secreto'}]})
     assert not c.CORRIDA.exists()
+
+
+@pytest.mark.parametrize('intento,sesion,esperado_intento,esperado_sesion', [
+    (Decimal(0), None, 0, None),
+    (Decimal(17), Decimal(9), 17, 9),
+])
+def test_diario_normaliza_contadores_decimal_y_sin_tabla_sesiones(
+    monkeypatch, tmp_path, intento, sesion, esperado_intento, esperado_sesion
+):
+    monkeypatch.setattr(c, 'CORRIDA', tmp_path / 'corrida.json')
+    datos = {
+        'version': 1,
+        'servidor': 'servidor-falso',
+        'bases': [c.SIM, c.DEMO],
+        'usuario_id': c.USUARIO,
+        'asignacion_id': c.ASIGNACION,
+        'inicio': datetime(2026, 10, 16, 11).isoformat(),
+        'fecha_original': '2026-10-15',
+        'fecha_destino': None,
+        'max_intento_inicial': intento,
+        'contrato_sesiones': 'id' if sesion is not None else None,
+        'max_sesion_inicial': sesion,
+    }
+    c.guardar_corrida(datos)
+    assert not c.CORRIDA.with_suffix('.json.tmp').exists()
+    guardado = c.leer_corrida('servidor-falso')
+    assert guardado['max_intento_inicial'] == esperado_intento
+    assert type(guardado['max_intento_inicial']) is int
+    assert guardado['max_sesion_inicial'] == esperado_sesion
+    if esperado_sesion is not None:
+        assert type(guardado['max_sesion_inicial']) is int
+    assert datos['max_intento_inicial'] == esperado_intento
+    assert datos['max_sesion_inicial'] == esperado_sesion
+
+
+@pytest.mark.parametrize('invalido', [
+    Decimal('-1'),
+    Decimal('1.5'),
+    Decimal('NaN'),
+    Decimal('Infinity'),
+    -1,
+    True,
+    False,
+    '0',
+    0.0,
+    [0],
+])
+def test_normalizar_contador_rechaza_valores_invalidos(monkeypatch, tmp_path, invalido):
+    monkeypatch.setattr(c, 'CORRIDA', tmp_path / 'corrida.json')
+    with pytest.raises(c.Abortado):
+        c.normalizar_contador(invalido)
+    with pytest.raises(c.Abortado):
+        c.guardar_corrida({'estado': 'iniciada', 'max_intento_inicial': invalido})
+    assert not c.CORRIDA.exists()
+    assert not c.CORRIDA.with_suffix('.json.tmp').exists()
+
+
+def test_normalizar_contador_rechaza_none_cuando_no_se_permite():
+    with pytest.raises(c.Abortado, match='ausente'):
+        c.normalizar_contador(None, permitir_none=False)
+
+
+@pytest.mark.parametrize('cambio,excepcion', [
+    ({'no_serializable': object()}, TypeError),
+    ({'numero': float('nan')}, ValueError),
+    ({'max_intento_inicial': Decimal('1.5')}, c.Abortado),
+    ({'password': 'valor-secreto'}, c.Abortado),
+])
+def test_fallo_serializacion_conserva_diario_anterior_sin_temporal(
+    monkeypatch, tmp_path, cambio, excepcion
+):
+    monkeypatch.setattr(c, 'CORRIDA', tmp_path / 'corrida.json')
+    inicial = {
+        'version': 1,
+        'servidor': 'servidor-falso',
+        'bases': [c.SIM, c.DEMO],
+        'usuario_id': c.USUARIO,
+        'asignacion_id': c.ASIGNACION,
+        'inicio': datetime(2026, 10, 16, 11).isoformat(),
+        'fecha_original': '2026-10-15',
+        'fecha_destino': None,
+        'max_intento_inicial': 4,
+        'max_sesion_inicial': None,
+        'estado': 'iniciada',
+    }
+    c.guardar_corrida(inicial)
+    contenido_original = c.CORRIDA.read_text(encoding='utf-8')
+    candidato = {**inicial, 'max_intento_inicial': Decimal(12), **cambio}
+    with pytest.raises(excepcion):
+        c.guardar_corrida(candidato)
+    assert c.CORRIDA.read_text(encoding='utf-8') == contenido_original
+    assert c.leer_corrida('servidor-falso') == inicial
+    assert not c.CORRIDA.with_suffix('.json.tmp').exists()
 
 
 def test_cuentas_iniciales_acepta_cocinera1_y_jefa_ausentes_o_presentes():
