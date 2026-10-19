@@ -25,6 +25,74 @@ USUARIO = 900001
 ASIGNACION = 91739904
 COMIDA = 2
 DISPOSITIVO = "lector-prueba-qa"
+MANIFIESTO_COMENSALES = CARPETA / "manifiesto_comensales_qa.json"
+USUARIOS_HISTORICOS = frozenset(range(900001, 900008))
+CASOS_EJECUTABLES = ("qa01", "qa02")
+COMENSALES_QA = {
+    "qa01": {
+        "codigo": "qa01",
+        "etiqueta": "QA 01",
+        "rol_escenario": "registro_normal",
+        "usuario_id": 900101,
+        "asignacion_id": 191739904,
+        "login": "qa01_normal",
+        "nombre": "QA 01 NORMAL",
+        "legajo": "LEG-QA01",
+        "carnet_identidad": "SIM-900101",
+        "identificador_unico": "SIM-ID-900101",
+        "tipo_trabajador": "Eventual",
+        "categoria_id": 9001,
+        "servicio_id": 9001,
+        "turno_id": 9001,
+        "fecha_base": "2026-10-15",
+        "comida_id": COMIDA,
+        "ejecutable": True,
+        "modo_marcacion": "reconocida",
+        "cuenta_identificadora": None,
+    },
+    "qa02": {
+        "codigo": "qa02",
+        "etiqueta": "QA 02",
+        "rol_escenario": "identificacion",
+        "usuario_id": 900102,
+        "asignacion_id": 192739904,
+        "login": "qa02_identificacion",
+        "nombre": "QA 02 IDENTIFICACION",
+        "legajo": "LEG-QA02",
+        "carnet_identidad": "SIM-900102",
+        "identificador_unico": "SIM-ID-900102",
+        "tipo_trabajador": "Eventual",
+        "categoria_id": 9001,
+        "servicio_id": 9001,
+        "turno_id": 9001,
+        "fecha_base": "2026-10-15",
+        "comida_id": COMIDA,
+        "ejecutable": True,
+        "modo_marcacion": "no_reconocida",
+        "cuenta_identificadora": "cocinera2",
+    },
+    "qa03": {
+        "codigo": "qa03",
+        "etiqueta": "QA 03",
+        "rol_escenario": "reserva",
+        "usuario_id": 900103,
+        "asignacion_id": 193739904,
+        "login": "qa03_reserva",
+        "nombre": "QA 03 RESERVA",
+        "legajo": "LEG-QA03",
+        "carnet_identidad": "SIM-900103",
+        "identificador_unico": "SIM-ID-900103",
+        "tipo_trabajador": "Eventual",
+        "categoria_id": 9001,
+        "servicio_id": 9001,
+        "turno_id": 9001,
+        "fecha_base": "2026-10-15",
+        "comida_id": COMIDA,
+        "ejecutable": False,
+        "modo_marcacion": "reserva",
+        "cuenta_identificadora": None,
+    },
+}
 CUENTAS = {
     "cocinera1": "cocinera",
     "cocinera2": "cocinera",
@@ -304,20 +372,216 @@ def guardar_corrida(datos):
     os.replace(temporal, CORRIDA)
 
 
+def cargar_manifiesto_comensales(ruta=None):
+    objetivo = Path(ruta) if ruta is not None else MANIFIESTO_COMENSALES
+    if not objetivo.exists():
+        raise Abortado("Falta manifiesto_comensales_qa.json en qa/prueba-basica/")
+    try:
+        manifiesto = json.loads(objetivo.read_text(encoding="utf-8"))
+    except Exception:
+        raise Abortado("manifiesto_comensales_qa.json inválido") from None
+    if (
+        not isinstance(manifiesto, dict)
+        or manifiesto.get("version") != 1
+        or manifiesto.get("escenario") != "tres_comensales_qa"
+        or manifiesto.get("bases") != {"nutricion": SIM, "turnos": DEMO, "protegida": PROTEGIDA}
+    ):
+        raise Abortado("Encabezado incompatible en manifiesto_comensales_qa.json")
+    comensales = manifiesto.get("comensales")
+    if not isinstance(comensales, dict) or tuple(comensales) != tuple(COMENSALES_QA):
+        raise Abortado("El manifiesto debe definir exactamente qa01, qa02 y qa03")
+    vistos = {
+        "usuario_id": set(),
+        "asignacion_id": set(),
+        "login": set(),
+        "nombre": set(),
+        "legajo": set(),
+        "carnet_identidad": set(),
+        "identificador_unico": set(),
+    }
+    for codigo, esperado in COMENSALES_QA.items():
+        actual = comensales.get(codigo)
+        if not isinstance(actual, dict):
+            raise Abortado(f"Comensal inválido en manifiesto: {codigo}")
+        if actual.get("usuario_id") in USUARIOS_HISTORICOS:
+            raise Abortado(f"Colisión con comensales históricos en manifiesto: {codigo}")
+        for campo in (
+            "etiqueta",
+            "rol_escenario",
+            "usuario_id",
+            "asignacion_id",
+            "login",
+            "nombre",
+            "legajo",
+            "carnet_identidad",
+            "identificador_unico",
+            "tipo_trabajador",
+            "categoria_id",
+            "servicio_id",
+            "turno_id",
+            "fecha_base",
+            "comida_id",
+            "ejecutable",
+        ):
+            if actual.get(campo) != esperado[campo]:
+                raise Abortado(f"Atributo {campo} incompatible en manifiesto para {codigo}")
+        for campo_unico, conjunto in vistos.items():
+            valor = actual[campo_unico]
+            if valor in conjunto:
+                raise Abortado(f"Valor duplicado en manifiesto ({campo_unico}): {valor}")
+            conjunto.add(valor)
+    return manifiesto
+
+
+def resumen_comensales_diario():
+    return {
+        codigo: {
+            "codigo": info["codigo"],
+            "etiqueta": info["etiqueta"],
+            "rol_escenario": info["rol_escenario"],
+            "usuario_id": info["usuario_id"],
+            "asignacion_id": info["asignacion_id"],
+            "login": info["login"],
+            "nombre": info["nombre"],
+            "legajo": info["legajo"],
+            "carnet_identidad": info["carnet_identidad"],
+            "identificador_unico": info["identificador_unico"],
+            "comida_id": info["comida_id"],
+            "ejecutable": info["ejecutable"],
+        }
+        for codigo, info in COMENSALES_QA.items()
+    }
+
+
+def casos_iniciales_diario():
+    qa01 = COMENSALES_QA["qa01"]
+    qa02 = COMENSALES_QA["qa02"]
+    return {
+        "qa01": {
+            "tipo": "registro_normal",
+            "usuario_id": qa01["usuario_id"],
+            "comensal_previsto_id": qa01["usuario_id"],
+            "asignacion_id": qa01["asignacion_id"],
+            "comida_id": qa01["comida_id"],
+            "modo_marcacion": "reconocida",
+            "cuenta_identificadora": None,
+            "estado": "pendiente",
+            "momento_lectura": None,
+            "lectura_id": None,
+            "asistencia_id": None,
+            "intervencion_id": None,
+            "respuesta": None,
+            "verificado": False,
+        },
+        "qa02": {
+            "tipo": "identificacion",
+            "usuario_id": None,
+            "comensal_previsto_id": qa02["usuario_id"],
+            "asignacion_id": qa02["asignacion_id"],
+            "comida_id": qa02["comida_id"],
+            "modo_marcacion": "no_reconocida",
+            "cuenta_identificadora": qa02["cuenta_identificadora"],
+            "estado": "pendiente",
+            "momento_lectura": None,
+            "lectura_id": None,
+            "asistencia_id": None,
+            "intervencion_id": None,
+            "respuesta": None,
+            "verificado": False,
+        },
+    }
+
+
+def es_corrida_multi(datos):
+    return bool(isinstance(datos, dict) and "casos" in datos and "comensales" in datos)
+
+
+def _validar_id_opcional(valor, nombre_campo):
+    if valor is not None and (type(valor) is not int or valor <= 0):
+        raise Abortado(f"{nombre_campo} inválido en corrida.json")
+
+
+def validar_casos_diario(datos):
+    if datos.get("escenario") != "tres_comensales_qa":
+        raise Abortado("corrida.json no corresponde al escenario de tres comensales")
+    if datos.get("comensales") != resumen_comensales_diario():
+        raise Abortado("Definición de comensales alterada en corrida.json")
+    casos = datos.get("casos")
+    plantilla = casos_iniciales_diario()
+    if not isinstance(casos, dict) or set(casos) != set(plantilla):
+        raise Abortado("Estructura de casos inválida en corrida.json")
+    lecturas_vistas = set()
+    for codigo, base in plantilla.items():
+        actual = casos.get(codigo)
+        if not isinstance(actual, dict):
+            raise Abortado(f"Caso {codigo} inválido en corrida.json")
+        for fijo in (
+            "tipo",
+            "usuario_id",
+            "comensal_previsto_id",
+            "asignacion_id",
+            "comida_id",
+            "modo_marcacion",
+            "cuenta_identificadora",
+        ):
+            if actual.get(fijo) != base[fijo]:
+                raise Abortado(f"Atributo fijo {fijo} alterado en caso {codigo} de corrida.json")
+        if actual.get("estado") not in {
+            "pendiente",
+            "lectura_pendiente",
+            "lectura_creada",
+            "completado",
+        }:
+            raise Abortado(f"Estado inválido en caso {codigo} de corrida.json")
+        if actual.get("momento_lectura") is not None:
+            datetime.fromisoformat(actual["momento_lectura"])
+        for campo_id in ("lectura_id", "asistencia_id", "intervencion_id"):
+            _validar_id_opcional(actual.get(campo_id), f"{codigo}.{campo_id}")
+        lid = actual.get("lectura_id")
+        if lid is not None:
+            if lid in lecturas_vistas:
+                raise Abortado("lectura_id duplicado entre casos en corrida.json")
+            lecturas_vistas.add(lid)
+
+
+def _validar_cabecera_corrida(datos, servidor=None):
+    if not isinstance(datos, dict) or datos.get("bases") != [SIM, DEMO]:
+        raise Abortado(
+            "corrida.json no corresponde a este escenario/servidor"
+            if servidor is not None
+            else "corrida.json no corresponde a este escenario"
+        )
+    if servidor is not None and datos.get("servidor") != servidor:
+        raise Abortado("corrida.json no corresponde a este escenario/servidor")
+    if servidor is None and not datos.get("servidor"):
+        raise Abortado("corrida.json no corresponde a este escenario")
+    if es_corrida_multi(datos):
+        if datos.get("version") not in (1, 2):
+            raise Abortado("Versión de corrida.json no soportada")
+        validar_casos_diario(datos)
+    else:
+        if (
+            datos.get("version") != 1
+            or datos.get("usuario_id") != USUARIO
+            or datos.get("asignacion_id") != ASIGNACION
+        ):
+            raise Abortado(
+                "corrida.json no corresponde a este escenario/servidor"
+                if servidor is not None
+                else "corrida.json no corresponde a este escenario"
+            )
+        _validar_id_opcional(datos.get("lectura_id"), "lectura_id")
+    datetime.fromisoformat(datos["inicio"])
+    for campo in ("fecha_original", "fecha_destino"):
+        if datos.get(campo):
+            date.fromisoformat(datos[campo])
+
+
 def leer_corrida(servidor):
     if not CORRIDA.exists():
         raise Abortado("Falta corrida.json; ejecutar primero comun.py --huella-base")
     datos = json.loads(CORRIDA.read_text(encoding='utf-8'))
-    if (datos.get('version') != 1 or datos.get('servidor') != servidor
-            or datos.get('bases') != [SIM, DEMO] or datos.get('usuario_id') != USUARIO
-            or datos.get('asignacion_id') != ASIGNACION):
-        raise Abortado("corrida.json no corresponde a este escenario/servidor")
-    datetime.fromisoformat(datos['inicio'])
-    for campo in ('fecha_original', 'fecha_destino'):
-        if datos.get(campo):
-            date.fromisoformat(datos[campo])
-    if datos.get('lectura_id') is not None and (type(datos['lectura_id']) is not int or datos['lectura_id'] <= 0):
-        raise Abortado("lectura_id inválido en corrida.json")
+    _validar_cabecera_corrida(datos, servidor=servidor)
     return datos
 
 
@@ -325,12 +589,10 @@ def leer_corrida_local():
     if not CORRIDA.exists():
         raise Abortado("Falta corrida.json; ejecutar primero comun.py --huella-base")
     datos = json.loads(CORRIDA.read_text(encoding='utf-8'))
-    if (datos.get('version') != 1 or not datos.get('servidor')
-            or datos.get('bases') != [SIM, DEMO] or datos.get('usuario_id') != USUARIO
-            or datos.get('asignacion_id') != ASIGNACION):
-        raise Abortado("corrida.json no corresponde a este escenario")
-    datetime.fromisoformat(datos['inicio'])
-    if datos.get('estado') not in {'iniciada', 'refechada', 'lectura_creada'}:
+    _validar_cabecera_corrida(datos, servidor=None)
+    if datos.get('estado') not in {
+        'iniciada', 'refechada', 'lectura_creada', 'en_curso', 'casos_ejecutados'
+    }:
         raise Abortado("La corrida no está en un estado operativo para verificar cuentas")
     return datos
 
@@ -411,7 +673,7 @@ def contrato_sesiones(conn):
     return {'cuenta': cuenta, 'fecha': fecha}
 
 
-def fila_asignacion(conn, bloquear=False):
+def fila_asignacion_v1(conn, bloquear=False):
     fila = conn.execute(text(
         f"SELECT id, usuario_id, fecha, turno_id FROM `{DEMO}`.turnos_asignados "
         "WHERE id=:id" + (" FOR UPDATE" if bloquear else '')
@@ -421,13 +683,163 @@ def fila_asignacion(conn, bloquear=False):
     return fila
 
 
-def cambiar_fecha(conn, anterior, nueva):
+def filas_asignaciones_qa(conn, bloquear=False):
+    cargar_manifiesto_comensales()
+    filas = conn.execute(text(
+        f"SELECT id, usuario_id, fecha, turno_id FROM `{DEMO}`.turnos_asignados "
+        "WHERE id IN (:id1, :id2, :id3) ORDER BY id" + (" FOR UPDATE" if bloquear else "")
+    ), {
+        "id1": COMENSALES_QA["qa01"]["asignacion_id"],
+        "id2": COMENSALES_QA["qa02"]["asignacion_id"],
+        "id3": COMENSALES_QA["qa03"]["asignacion_id"],
+    }).mappings().all()
+    if len(filas) != 3:
+        raise Abortado(
+            "Asignaciones sintéticas QA ausentes o incompletas; "
+            "ejecutar primero preparar_comensales.py --aplicar"
+        )
+    por_id = {f["id"]: dict(f) for f in filas}
+    fechas = set()
+    por_codigo = {}
+    for codigo, spec in COMENSALES_QA.items():
+        fila = por_id.get(spec["asignacion_id"])
+        if (
+            not fila
+            or fila["usuario_id"] != spec["usuario_id"]
+            or fila["turno_id"] != spec["turno_id"]
+        ):
+            raise Abortado(f"Asignación sintética incompatible para {codigo}")
+        fechas.add(fila["fecha"])
+        por_codigo[codigo] = fila
+    if len(fechas) != 1:
+        raise Abortado("Las asignaciones de los tres comensales QA tienen fechas distintas")
+    if not bloquear:
+        padron = conn.execute(text(
+            "SELECT usuario_id, nombre_completo, numero_item, carnet_identidad, "
+            "categoria, tiene_ficha FROM v_comensales "
+            "WHERE usuario_id IN (:u1, :u2, :u3) ORDER BY usuario_id"
+        ), {
+            "u1": COMENSALES_QA["qa01"]["usuario_id"],
+            "u2": COMENSALES_QA["qa02"]["usuario_id"],
+            "u3": COMENSALES_QA["qa03"]["usuario_id"],
+        }).mappings().all()
+        por_uid = {f["usuario_id"]: dict(f) for f in padron}
+        for codigo, spec in COMENSALES_QA.items():
+            ficha = por_uid.get(spec["usuario_id"])
+            if (
+                not ficha
+                or ficha["nombre_completo"] != spec["nombre"]
+                or ficha["numero_item"] != spec["legajo"]
+                or ficha["carnet_identidad"] != spec["carnet_identidad"]
+                or ficha["categoria"] != "Administrativo"
+                or not bool(ficha["tiene_ficha"])
+            ):
+                raise Abortado(
+                    f"Comensal {codigo} ausente o incompatible en v_comensales; "
+                    "ejecutar preparar_comensales.py --aplicar"
+                )
+    return {"fecha": next(iter(fechas)), "asignaciones": por_codigo}
+
+
+def fila_asignacion(conn, bloquear=False):
+    return filas_asignaciones_qa(conn, bloquear=bloquear)
+
+
+_FILA_ASIGNACION_ORIGINAL = fila_asignacion
+
+
+def filas_asignaciones_corrida(conn, datos, bloquear=False):
+    if es_corrida_multi(datos) or fila_asignacion is not _FILA_ASIGNACION_ORIGINAL:
+        return fila_asignacion(conn, bloquear=bloquear)
+    return fila_asignacion_v1(conn, bloquear=bloquear)
+
+
+def cambiar_fecha_v1(conn, anterior, nueva):
     resultado = conn.execute(text(
         f"UPDATE `{DEMO}`.turnos_asignados SET fecha=:nueva "
         "WHERE id=:id AND usuario_id=:uid AND fecha=:anterior"
     ), {'nueva': nueva, 'id': ASIGNACION, 'uid': USUARIO, 'anterior': anterior})
     if resultado.rowcount != 1:
         raise Abortado("La asignación cambió concurrentemente")
+
+
+def cambiar_fechas_qa(conn, anterior, nueva):
+    for spec in COMENSALES_QA.values():
+        resultado = conn.execute(text(
+            f"UPDATE `{DEMO}`.turnos_asignados SET fecha=:nueva "
+            "WHERE id=:id AND usuario_id=:uid AND fecha=:anterior"
+        ), {
+            "nueva": nueva,
+            "id": spec["asignacion_id"],
+            "uid": spec["usuario_id"],
+            "anterior": anterior,
+        })
+        if resultado.rowcount != 1:
+            raise Abortado("La asignación cambió concurrentemente")
+
+
+def cambiar_fecha(conn, anterior, nueva):
+    cambiar_fechas_qa(conn, anterior, nueva)
+
+
+_CAMBIAR_FECHA_ORIGINAL = cambiar_fecha
+
+
+def cambiar_fecha_corrida(conn, datos, anterior, nueva):
+    if es_corrida_multi(datos) or cambiar_fecha is not _CAMBIAR_FECHA_ORIGINAL:
+        cambiar_fecha(conn, anterior, nueva)
+    else:
+        cambiar_fecha_v1(conn, anterior, nueva)
+
+
+def heredar_parte_a_aprobada(conn, ruta_archivo, cuentas_actuales, servidor):
+    ruta = Path(ruta_archivo)
+    if not ruta.exists():
+        raise Abortado(f"No existe el archivo de evidencia de Parte A: {ruta}")
+    try:
+        previa = json.loads(ruta.read_text(encoding="utf-8"))
+    except Exception:
+        raise Abortado("El archivo de evidencia de Parte A no es un JSON válido") from None
+    if (
+        not isinstance(previa, dict)
+        or previa.get("servidor") != servidor
+        or previa.get("bases") != [SIM, DEMO]
+        or previa.get("parte_a") != {"estado": "aprobada", "completa": True}
+    ):
+        raise Abortado("La evidencia indicada no contiene una Parte A aprobada de este escenario/servidor")
+    verif = previa.get("verificacion_cuentas")
+    if not isinstance(verif, dict) or set(verif) != set(CUENTAS):
+        raise Abortado("La evidencia indicada no tiene las 4 cuentas verificadas")
+    for nombre, rol_esperado in CUENTAS.items():
+        resumen = verif.get(nombre)
+        if (
+            not isinstance(resumen, dict)
+            or resumen.get("rol") != rol_esperado
+            or resumen.get("temporal_verificada") is not True
+            or resumen.get("cambio_frontend_completado") is not True
+            or resumen.get("resultado") != "PASA"
+            or not isinstance(resumen.get("controles"), list)
+            or not resumen["controles"]
+        ):
+            raise Abortado(f"Evidencia de Parte A incompleta o no aprobada para {nombre}")
+    if set(cuentas_actuales) != set(CUENTAS):
+        raise Abortado("Las 4 cuentas deben existir en usuarios_sistema para conservar Parte A")
+    cuentas_previas = previa.get("cuentas") or {}
+    for nombre, id_previo in cuentas_previas.items():
+        if cuentas_actuales.get(nombre) != id_previo:
+            raise Abortado("El id de una cuenta en usuarios_sistema cambió respecto a la evidencia")
+    estados_db = conn.execute(text(
+        "SELECT username, debe_cambiar, activo FROM usuarios_sistema "
+        "WHERE username IN ('cocinera1','cocinera2','cocinera3','jefa')"
+    )).mappings().all()
+    if len(estados_db) != 4 or any(
+        bool(f["debe_cambiar"]) or not bool(f["activo"]) for f in estados_db
+    ):
+        raise Abortado(
+            "Las cuentas en usuarios_sistema requieren cambio de clave o están inactivas; "
+            "no se puede heredar Parte A sin claves definitivas vigentes"
+        )
+    return verif, {"estado": "aprobada", "completa": True}
 
 
 def ejecutar(main):
@@ -487,16 +899,47 @@ def reloj_laboratorio(datos):
         yield reloj
 
 
-def fecha_para_operar(datos, momento, *, permitir_lectura=False):
+def fecha_para_operar(datos, momento, *, permitir_lectura=False, caso=None):
     """Valida el estado sin adelantarlo: habilitar cuentas/API no crea lectura."""
     estado = datos['estado']
-    permitidos = {'iniciada', 'refechada'}
-    if permitir_lectura:
-        permitidos.add('lectura_creada')
-    if (estado not in permitidos
-            or (estado != 'lectura_creada' and datos.get('lectura_id') is not None)
-            or (estado == 'lectura_creada' and datos.get('lectura_id') is None)):
-        raise Abortado("Corrida pendiente/anterior: no repetir lectura; limpiar primero")
+    if es_corrida_multi(datos):
+        validar_casos_diario(datos)
+        casos = datos['casos']
+        for info in casos.values():
+            if info['estado'] == 'lectura_pendiente':
+                raise Abortado("Corrida pendiente/anterior: no repetir lectura; limpiar primero")
+            if (info['estado'] == 'pendiente') != (info['lectura_id'] is None):
+                raise Abortado("Corrida pendiente/anterior: no repetir lectura; limpiar primero")
+        alguna_lectura = any(info['lectura_id'] is not None for info in casos.values())
+        permitidos = {'iniciada', 'refechada'}
+        if permitir_lectura or caso is not None:
+            permitidos |= {'lectura_creada', 'en_curso', 'casos_ejecutados'}
+        if (
+            estado not in permitidos
+            or (estado in {'iniciada', 'refechada'} and alguna_lectura)
+            or (estado in {'lectura_creada', 'en_curso', 'casos_ejecutados'} and not alguna_lectura)
+        ):
+            raise Abortado("Corrida pendiente/anterior: no repetir lectura; limpiar primero")
+        if caso is not None:
+            if caso == 'qa03':
+                raise Abortado("El comensal qa03 está en reserva y no tiene caso ejecutable")
+            if caso not in casos:
+                raise Abortado(f"Caso desconocido: {caso}")
+            if casos[caso]['estado'] != 'pendiente' or casos[caso]['lectura_id'] is not None:
+                raise Abortado("Corrida pendiente/anterior: no repetir lectura; limpiar primero")
+    else:
+        if caso is not None:
+            raise Abortado(
+                "El diario actual es de versión 1 (un solo comensal); "
+                "cerrar, limpiar y abrir corrida nueva para ejecutar casos múltiples"
+            )
+        permitidos = {'iniciada', 'refechada'}
+        if permitir_lectura:
+            permitidos.add('lectura_creada')
+        if (estado not in permitidos
+                or (estado != 'lectura_creada' and datos.get('lectura_id') is not None)
+                or (estado == 'lectura_creada' and datos.get('lectura_id') is None)):
+            raise Abortado("Corrida pendiente/anterior: no repetir lectura; limpiar primero")
     destino = datos.get('fecha_destino')
     if (estado == 'iniciada' and destino is not None) or (estado == 'refechada' and destino is None):
         raise Abortado("Estado/fecha destino incoherentes en corrida.json")
@@ -514,9 +957,17 @@ def main():
     grupo.add_argument('--huella-final', action='store_true')
     parser.add_argument('--reloj', type=argumento_reloj,
                         help=f"Ancla local de negocio para --huella-base (omisión: {RELOJ_POR_DEFECTO})")
+    parser.add_argument(
+        '--conservar-cuentas-de',
+        metavar='ARCHIVO',
+        help=(
+            'Ruta al corrida.json archivado cuya Parte A aprobada se conserva '
+            'en la nueva corrida sin resetear contraseñas definitivas'
+        ),
+    )
     args = parser.parse_args()
-    if args.huella_final and args.reloj is not None:
-        parser.error('--reloj solo se usa con --huella-base')
+    if args.huella_final and (args.reloj is not None or args.conservar_cuentas_de is not None):
+        parser.error('--reloj y --conservar-cuentas-de solo se usan con --huella-base')
     with bloqueo_corrida(), entorno_seguro() as (motor, huella, servidor):
         if args.huella_final:
             datos = leer_corrida(servidor)
@@ -527,12 +978,17 @@ def main():
             return
         if CORRIDA.exists():
             raise Abortado("Ya existe corrida.json; conservar la evidencia y revisar GUION")
+        herencia = None
         with motor.connect() as conn:
             fila = fila_asignacion(conn)
             cuentas = validar_cuentas_iniciales(conn.execute(text(
                 "SELECT id, username, rol, usuario_turnos_id FROM usuarios_sistema "
                 "WHERE username IN ('cocinera1','cocinera2','cocinera3','jefa')"
             )).mappings().all())
+            if args.conservar_cuentas_de:
+                herencia = heredar_parte_a_aprobada(
+                    conn, args.conservar_cuentas_de, cuentas, servidor
+                )
             if conn.execute(text("SELECT COUNT(*) FROM lecturas_biometricas WHERE dispositivo=:d"),
                             {'d': DISPOSITIVO}).scalar_one():
                 raise Abortado("Hay lecturas QA anteriores; recuperar su corrida antes de continuar")
@@ -555,15 +1011,37 @@ def main():
             )
         ancla = crear_ancla_reloj(args.reloj or argumento_reloj(RELOJ_POR_DEFECTO))
         mostrar_reloj(datetime.fromisoformat(ancla['lab']), datetime.fromisoformat(ancla['real']))
-        guardar_corrida({'version': 1, 'servidor': servidor, 'bases': [SIM, DEMO], 'reloj': ancla,
-                         'usuario_id': USUARIO, 'asignacion_id': ASIGNACION,
-                         'inicio': datetime.now().replace(microsecond=0).isoformat(),
-                         'fecha_original': fila['fecha'].isoformat(), 'fecha_destino': None,
-                         'cuentas': cuentas,
-                         'max_intento_inicial': max_intento,
-                         'contrato_sesiones': sesiones, 'max_sesion_inicial': max_sesion,
-                         'huella_base': huella, 'estado': 'iniciada', 'lectura_id': None})
-        print("corrida.json creada antes de habilitar cuentas")
+        documento = {
+            'version': 2,
+            'escenario': 'tres_comensales_qa',
+            'servidor': servidor,
+            'bases': [SIM, DEMO],
+            'reloj': ancla,
+            'inicio': datetime.now().replace(microsecond=0).isoformat(),
+            'fecha_original': fila['fecha'].isoformat(),
+            'fecha_destino': None,
+            'cuentas': cuentas,
+            'comensales': resumen_comensales_diario(),
+            'casos': casos_iniciales_diario(),
+            'max_intento_inicial': max_intento,
+            'contrato_sesiones': sesiones,
+            'max_sesion_inicial': max_sesion,
+            'huella_base': huella,
+            'estado': 'iniciada',
+        }
+        if herencia is not None:
+            verif_cuentas, parte_a = herencia
+            documento['verificacion_cuentas'] = verif_cuentas
+            documento['parte_a'] = parte_a
+            documento['parte_a_conservada_de'] = Path(args.conservar_cuentas_de).name
+        guardar_corrida(documento)
+        if herencia is not None:
+            print(
+                f"corrida.json creada con tres comensales QA y Parte A aprobada "
+                f"conservada desde {Path(args.conservar_cuentas_de).name}"
+            )
+        else:
+            print("corrida.json creada antes de habilitar cuentas")
 
 
 if __name__ == '__main__':

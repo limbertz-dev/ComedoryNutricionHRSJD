@@ -399,3 +399,148 @@ def test_refechar_usa_dia_laboratorio_por_omision(datos, reloj_controlado, monke
     refechar.refechar(MagicMock(), datos, SimpleNamespace(fecha=None, dry_run=True))
     assert '2026-10-14 -> 2026-10-15' in capsys.readouterr().out
     cambiar.assert_not_called()
+
+
+def test_huella_multi_ejecuta_separadamente_qa01_normal_y_qa02_no_reconocida_y_rechaza_qa03(
+    reloj_controlado, monkeypatch
+):
+    from app.logica import marcacion
+    from app.consultas import derecho, servicio
+
+    datos_multi = {
+        'version': 2,
+        'escenario': 'tres_comensales_qa',
+        'servidor': 'servidor-qa',
+        'bases': [c.SIM, c.DEMO],
+        'reloj': {'lab': '2026-10-15T11:30:00', 'real': '2026-10-20T23:00:00'},
+        'inicio': '2026-10-20T23:00:00',
+        'fecha_original': '2026-10-15',
+        'fecha_destino': None,
+        'cuentas': {'cocinera2': 2, 'cocinera3': 3},
+        'comensales': c.resumen_comensales_diario(),
+        'casos': c.casos_iniciales_diario(),
+        'estado': 'iniciada',
+    }
+
+    assert huella.permisos_caso('qa01') == {
+        (c.SIM, 'lecturas_biometricas', 'INSERT'),
+        (c.SIM, 'asistencias', 'INSERT'),
+    }
+    assert huella.permisos_caso('qa02') == {
+        (c.SIM, 'lecturas_biometricas', 'INSERT'),
+    }
+
+    # QA 03 está en reserva: no debe permitir ejecutar caso.
+    with pytest.raises(c.Abortado, match='reserva'):
+        huella.leer(Mock(), datos_multi, caso='qa03')
+
+    lecturas_en_bd = []
+    sesion = MagicMock()
+    sesion.__enter__.return_value = sesion
+    sesion.execute.return_value.scalars.return_value.all.side_effect = lambda: list(lecturas_en_bd)
+    monkeypatch.setattr(huella, 'Session', Mock(return_value=sesion))
+
+    comida = marcacion.ComidaEnCurso(c.COMIDA, 'Almuerzo', datetime(2026, 10, 15).date())
+    monkeypatch.setattr(marcacion, 'resolver_comida_en_curso', Mock(return_value=comida))
+
+    def buscar_derecho_simulado(_sesion, uid, _cid, _fecha):
+        mapa = {
+            900101: 191739904,
+            900102: 192739904,
+            900103: 193739904,
+        }
+        return SimpleNamespace(turno_asignado_id=mapa[uid], comida_id=c.COMIDA, servicio_id=9001)
+
+    monkeypatch.setattr(derecho, 'buscar_derecho', buscar_derecho_simulado)
+    monkeypatch.setattr(marcacion, 'ya_comio', Mock(return_value=False))
+    monkeypatch.setattr(servicio, 'evaluar_servicio', Mock(return_value=SimpleNamespace(motivo=None)))
+    monkeypatch.setattr(huella.event, 'listen', Mock())
+    monkeypatch.setattr(c, 'guardar_corrida', Mock())
+
+    llamadas_marcacion = []
+
+    def registrar_simulado(_sesion, *, usuario_id, momento, dispositivo, metodo):
+        llamadas_marcacion.append((usuario_id, momento, dispositivo, metodo))
+        if usuario_id == 900101:
+            lecturas_en_bd.append(101)
+            return marcacion.Resultado(
+                True, None, 'Marcación válida', 'Ración habilitada',
+                usuario_id=900101, nombre='QA 01 NORMAL', comida='Almuerzo',
+                comida_id=c.COMIDA, fecha_comida=momento.date(), servicio_id=9001,
+                lectura_id=101, asistencia_id=201,
+            )
+        assert usuario_id is None
+        lecturas_en_bd.append(102)
+        return marcacion.Resultado(
+            False, 'no_identificado', 'Huella no reconocida', 'Prueba QA 02',
+            usuario_id=None, lectura_id=102, asistencia_id=None,
+        )
+
+    monkeypatch.setattr(marcacion, 'registrar_marcacion', registrar_simulado)
+
+    # 3a) Registro normal de QA 01
+    huella.leer(Mock(), datos_multi, caso='qa01')
+    assert llamadas_marcacion == [(900101, datetime(2026, 10, 15, 11, 30), c.DISPOSITIVO, 'biometrico')]
+    assert datos_multi['casos']['qa01']['estado'] == 'completado'
+    assert datos_multi['casos']['qa01']['lectura_id'] == 101
+    assert datos_multi['casos']['qa01']['asistencia_id'] == 201
+    assert datos_multi['casos']['qa02']['estado'] == 'pendiente'
+    assert datos_multi['casos']['qa02']['lectura_id'] is None
+
+    # No permite repetir qa01
+    with pytest.raises(c.Abortado, match='no repetir lectura'):
+        huella.leer(Mock(), datos_multi, caso='qa01')
+
+    # 3b) Lectura no reconocida de QA 02 (conserva usuario_id=None y comensal_previsto_id=900102)
+    huella.leer(Mock(), datos_multi, caso='qa02')
+    assert len(llamadas_marcacion) == 2
+    assert llamadas_marcacion[1] == (None, datetime(2026, 10, 15, 11, 30), c.DISPOSITIVO, 'biometrico')
+    assert datos_multi['casos']['qa02']['estado'] == 'lectura_creada'
+    assert datos_multi['casos']['qa02']['usuario_id'] is None
+    assert datos_multi['casos']['qa02']['comensal_previsto_id'] == 900102
+    assert datos_multi['casos']['qa02']['lectura_id'] == 102
+    assert datos_multi['casos']['qa02']['asistencia_id'] is None
+
+
+def test_refechar_multi_comensales_actualiza_tres_asignaciones_y_valida_derechos(
+    reloj_controlado, monkeypatch, tmp_path
+):
+    from app.consultas import derecho
+
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    monkeypatch.setattr(c, 'CORRIDA', tmp_path / 'corrida.json')
+    monkeypatch.setattr(
+        c, 'fila_asignacion', Mock(return_value={'fecha': datetime(2026, 10, 14).date()})
+    )
+    cambiar = Mock()
+    monkeypatch.setattr(c, 'cambiar_fecha', cambiar)
+
+    datos_multi = {
+        'version': 2,
+        'escenario': 'tres_comensales_qa',
+        'servidor': 'servidor-qa',
+        'bases': [c.SIM, c.DEMO],
+        'reloj': {'lab': '2026-10-15T11:30:00', 'real': '2026-10-20T23:00:00'},
+        'inicio': '2026-10-20T23:00:00',
+        'fecha_original': '2026-10-14',
+        'fecha_destino': None,
+        'cuentas': {'cocinera2': 2, 'cocinera3': 3},
+        'comensales': c.resumen_comensales_diario(),
+        'casos': c.casos_iniciales_diario(),
+        'estado': 'iniciada',
+    }
+    consultados = []
+
+    def buscar_derecho_tres(_sesion, uid, cid, fecha):
+        consultados.append((uid, cid, fecha))
+        mapa = {900101: 191739904, 900102: 192739904, 900103: 193739904}
+        return SimpleNamespace(turno_asignado_id=mapa[uid], comida_id=cid)
+
+    with c.app_sin_dotenv():
+        monkeypatch.setattr(derecho, 'buscar_derecho', buscar_derecho_tres)
+        refechar.refechar(MagicMock(), datos_multi, SimpleNamespace(fecha=None, dry_run=False))
+
+    cambiar.assert_called_once()
+    assert [u for u, _, _ in consultados] == [900101, 900102, 900103]
+    assert datos_multi['estado'] == 'refechada'
+    assert datos_multi['fecha_destino'] == '2026-10-15'
