@@ -34,6 +34,7 @@ export default function IdentificarLectura({
   abierta = null,
   onAbrir = () => {},
   onResultado = () => {},
+  onCambiarPersona = () => {},
   identificar,
   identificador: identificadorExterno = null,
   elegidoInicial = '',
@@ -57,6 +58,16 @@ export default function IdentificarLectura({
   const montado = useRef(true);
   useEffect(() => () => { montado.current = false; }, []);
 
+  /* Al cambiar de lectura desde Marcaciones del turno, limpia búsqueda y
+     selección previa para no preseleccionar ni arrastrar otro comensal. */
+  const abiertaPrevia = useRef(abierta);
+  useEffect(() => {
+    if (abiertaPrevia.current === abierta) return;
+    abiertaPrevia.current = abierta;
+    setBusqueda('');
+    setElegido('');
+  }, [abierta]);
+
   const lecturas = pendientes?.lecturas ?? [];
   const sinResolver = identificador.pendientes();
   const lecturaAbierta = abierta === null ? null : lecturas.find((lectura) => lectura.id === abierta) ?? null;
@@ -67,6 +78,11 @@ export default function IdentificarLectura({
   const opciones = filtrarPadron(personal, busqueda);
   const puedeEnviar = !enviando && persona !== null && (intento !== null || lecturaAbierta !== null);
   const porVerificar = sinResolver.filter((pendiente) => pendiente.lecturaId !== abierta);
+
+  const idPersonaActiva = abierta !== null && persona?.id ? persona.id : null;
+  useEffect(() => {
+    onCambiarPersona(idPersonaActiva);
+  }, [idPersonaActiva, onCambiarPersona]);
 
   function abrir(lecturaId) {
     setAviso(null);
@@ -108,7 +124,10 @@ export default function IdentificarLectura({
   const total = pendientes?.total ?? 0;
 
   return (
-    <section className="identificar" aria-label="Huellas por identificar">
+    <section
+      className={`identificar${abierta !== null ? ' identificar--abierta' : ''}`}
+      aria-label="Huellas por identificar"
+    >
       <header className="identificar__cabecera">
         <span className="identificar__icono" aria-hidden="true">
           <IconoHuella tamano={20} />
@@ -199,12 +218,24 @@ export default function IdentificarLectura({
       {abierta !== null ? (
         <div className="identificar__panel" role="group" aria-label="Identificar a la persona">
           {lecturaAbierta ? (
-            <p className="identificar__lectura">
-              Huella no reconocida de las <strong>{lecturaAbierta.hora}</strong>
-              {lecturaAbierta.identificableHasta
-                ? ` · hasta las ${horaCortaServidor(lecturaAbierta.identificableHasta)}`
-                : ''}
-            </p>
+            <div className="identificar__lectura-bloque">
+              <div className="identificar__lectura-encabezado">
+                <span className="identificar__paso">1. Lectura seleccionada</span>
+                <Etiqueta tono="aviso">Huella no reconocida</Etiqueta>
+              </div>
+              <p className="identificar__lectura">
+                Huella no reconocida de las <strong>{lecturaAbierta.hora}</strong>
+                {[lecturaAbierta.comida, lecturaAbierta.dispositivo].filter(Boolean).length > 0
+                  ? ` · ${[lecturaAbierta.comida, lecturaAbierta.dispositivo].filter(Boolean).join(' · ')}`
+                  : ''}
+                {lecturaAbierta.identificableHasta
+                  ? ` · hasta las ${horaCortaServidor(lecturaAbierta.identificableHasta)}`
+                  : ''}
+              </p>
+              <p className="identificar__lectura-aclaracion">
+                El lector no reconoció la huella: la identidad aún se desconoce y esto no demuestra falta de turno.
+              </p>
+            </div>
           ) : intento ? (
             <p className="identificar__estado identificar__estado--aviso" role="status">
               Esta huella ya no figura como pendiente. Eso no confirma la entrega: pudo terminar el
@@ -230,49 +261,59 @@ export default function IdentificarLectura({
             <p className="identificar__estado" role="status">El padrón no tiene comensales para elegir.</p>
           ) : (
             <div className="identificar__campos">
-              <div className="identificar__buscador">
-                <span className="identificar__buscador-icono" aria-hidden="true">
-                  <IconoBuscar tamano={16} />
-                </span>
-                <input
-                  type="text"
-                  className="identificar__input"
-                  value={busqueda}
-                  onChange={(e) => {
-                    setBusqueda(e.target.value);
-                    if (elegido && !personaVisible(personal, e.target.value, elegido)) setElegido('');
-                  }}
-                  placeholder="Buscar por nombre o legajo…"
-                  aria-label="Buscar a la persona en el padrón"
+              <span className="identificar__paso">2. Buscar y elegir comensal del padrón</span>
+              <div className="identificar__controles">
+                <div className="identificar__buscador">
+                  <span className="identificar__buscador-icono" aria-hidden="true">
+                    <IconoBuscar tamano={16} />
+                  </span>
+                  <input
+                    type="text"
+                    className="identificar__input"
+                    value={busqueda}
+                    onChange={(e) => {
+                      setBusqueda(e.target.value);
+                      if (elegido && !personaVisible(personal, e.target.value, elegido)) setElegido('');
+                    }}
+                    placeholder="Buscar por nombre o legajo…"
+                    aria-label="Buscar a la persona en el padrón"
+                    disabled={enviando}
+                  />
+                </div>
+                <label className="solo-lectores" htmlFor="identificar-persona">Persona</label>
+                <select
+                  id="identificar-persona"
+                  className="identificar__select"
+                  value={persona ? elegido : ''}
+                  onChange={(e) => setElegido(e.target.value)}
                   disabled={enviando}
-                />
-              </div>
-              <label className="solo-lectores" htmlFor="identificar-persona">Persona</label>
-              <select
-                id="identificar-persona"
-                className="identificar__select"
-                value={persona ? elegido : ''}
-                onChange={(e) => setElegido(e.target.value)}
-                disabled={enviando}
-              >
-                <option value="">
-                  {opciones.length === 0 ? 'Ninguna persona coincide' : 'Seleccione a la persona…'}
-                </option>
-                {opciones.map((p) => (
-                  <option key={p.id} value={String(p.id)}>
-                    {p.nombre} — {p.categoria} ({p.legajo})
+                >
+                  <option value="">
+                    {opciones.length === 0 ? 'Ninguna persona coincide' : 'Seleccione a la persona…'}
                   </option>
-                ))}
-              </select>
+                  {opciones.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      {p.nombre} — {p.categoria} (Legajo {p.legajo})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
 
           {persona ? (
-            <p className="identificar__identidad">
+            <div className="identificar__identidad" aria-label="Comensal seleccionado">
+              <span className="identificar__identidad-etiqueta">
+                {intento ? 'Identidad del intento por verificar' : '3. Identidad seleccionada'}
+              </span>
               <strong>{persona.nombre ?? `Comensal ${persona.id}`}</strong>
-              <span>
+              <span className="identificar__identidad-meta">
                 {[persona.categoria, persona.legajo ? `Legajo ${persona.legajo}` : null].filter(Boolean).join(' · ')}
               </span>
+            </div>
+          ) : lecturaAbierta && !cargandoPadron && !errorPadron && personal.length > 0 ? (
+            <p className="identificar__identidad identificar__identidad--vacia">
+              3. Sin comensal preseleccionado: busque por nombre o legajo y elija a la persona para confirmar la entrega.
             </p>
           ) : null}
 

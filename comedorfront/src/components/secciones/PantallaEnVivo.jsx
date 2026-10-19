@@ -5,7 +5,7 @@ import GaugeRaciones from '../ui/GaugeRaciones.jsx';
 import Tarjeta from '../ui/Tarjeta.jsx';
 import { obtenerDiaPersonal, obtenerLecturasPorIdentificar, obtenerUltimasMarcaciones } from '../../api.js';
 import { LIMITE_MARCACIONES_COCINA, programarCicloCocina } from '../../cocinaEnVivo.js';
-import { revisionesCambiadas } from '../../identificacion.js';
+import { crearIdentificador, revisionesCambiadas } from '../../identificacion.js';
 import IdentificarLectura from './IdentificarLectura.jsx';
 import useConsultaApi from '../../hooks/useConsultaApi.js';
 import Boton from '../ui/Boton.jsx';
@@ -103,6 +103,19 @@ export function identificadaPorCocina(fila) {
 }
 
 /**
+ * Distingue una huella no reconocida de un rechazo por falta de turno:
+ * que el lector no haya reconocido la huella solo significa que aún no se
+ * conoce la identidad del comensal, no que carezca de derecho en el turno.
+ */
+export function esHuellaNoReconocida(fila) {
+  if (!fila || fila.valido || identificadaPorCocina(fila)) return false;
+  const motivo = fila.motivo ?? fila.decisionOriginal?.motivo ?? null;
+  if (motivo === 'no_identificado' || motivo === 'desconocida') return true;
+  if (fila.titulo === 'Huella no reconocida') return true;
+  return fila.origen === 'lectura_biometrica' && (fila.persona?.id ?? fila.usuarioId ?? null) === null;
+}
+
+/**
  * Fila de la lista con la misma forma que la marcación en vivo, para que el
  * escenario y la barra de comidas la muestren igual. `id` es la clave del
  * evento: el id numérico se repite entre lecturas y asistencias manuales.
@@ -118,6 +131,7 @@ export function eventoDeFila(fila) {
       id: fila.clave,
       origen: fila.origen ?? null,
       valido: true,
+      sinIdentificar: false,
       titulo: 'Entrega registrada por cocina',
       detalle: 'El lector no reconoció la huella; cocina identificó a la persona',
       hora: fila.hora,
@@ -130,21 +144,34 @@ export function eventoDeFila(fila) {
     };
   }
   const manual = fila.origen === 'asistencia_manual';
+  const sinIdentificar = esHuellaNoReconocida(fila);
+  const motivo = fila.motivo ?? fila.decisionOriginal?.motivo ?? null;
   return {
     id: fila.clave,
     origen: fila.origen ?? null,
     valido: fila.valido,
+    sinIdentificar,
     titulo: manual && fila.valido ? 'Registro manual' : fila.titulo,
     detalle: manual
       ? 'Ración registrada a mano desde Supervisión'
       : fila.valido
         ? 'Ración habilitada — comensal registrado'
-        : 'Marcación no habilitada para este turno',
+        : sinIdentificar
+          ? 'El lector no reconoció la huella — identidad aún no determinada (no implica falta de turno)'
+          : motivo === 'duplicado'
+            ? 'El comensal ya recibió su ración en este turno'
+            : motivo === 'fuera_horario'
+              ? 'Lectura realizada fuera del horario de servicio'
+              : 'Marcación no habilitada para este turno',
     hora: fila.hora,
     persona: {
       id: fila.persona?.id ?? null,
-      nombre: fila.persona?.nombre,
-      categoria: fila.persona?.categoria,
+      nombre: sinIdentificar && (!fila.persona?.nombre || fila.persona.nombre === 'Huella no reconocida' || fila.persona.nombre === 'Desconocido')
+        ? 'Comensal sin identificar'
+        : fila.persona?.nombre,
+      categoria: sinIdentificar && (!fila.persona?.categoria || fila.persona.categoria === 'Sin clasificar')
+        ? 'Sin identificar'
+        : fila.persona?.categoria,
       legajo: fila.persona?.legajo ?? '—',
     },
   };
@@ -206,6 +233,11 @@ export default function PantallaEnVivo({
   personal = [],
   cargandoPadron = false,
   errorPadron = '',
+  marcacionesIniciales = null,
+  pendientesIniciales = null,
+  claveSeleccionadaInicial = null,
+  lecturaAbiertaInicial = null,
+  identificador: identificadorExterno = null,
 }) {
   /*
    * Lo que se muestra como «recién ocurrido»: la marcación que envió esta
@@ -223,7 +255,7 @@ export default function PantallaEnVivo({
 
   /* Fila de la lista elegida a mano (por su clave): mientras haya una, manda
      sobre la marcación en vivo en el escenario y en la barra de comidas. */
-  const [claveSeleccionada, setClaveSeleccionada] = useState(null);
+  const [claveSeleccionada, setClaveSeleccionada] = useState(claveSeleccionadaInicial);
 
   /* Texto para acotar la lista por nombre o legajo, sobre lo ya cargado. */
   const [busqueda, setBusqueda] = useState('');
@@ -255,14 +287,23 @@ export default function PantallaEnVivo({
    * día actual), en ciclos junto con el estado del comedor. Un fallo conserva
    * la lista anterior con un aviso de desactualización.
    */
-  const [marcaciones, setMarcaciones] = useState(null);
+  const [marcaciones, setMarcaciones] = useState(marcacionesIniciales);
   const [errorMarcaciones, setErrorMarcaciones] = useState('');
 
   /* Solo cocinera: las huellas no reconocidas identificables ahora, aparte de
      la ventana de marcaciones (que corta por fecha y en 100 filas). */
-  const [pendientes, setPendientes] = useState(null);
+  const [pendientes, setPendientes] = useState(pendientesIniciales);
   const [errorPendientes, setErrorPendientes] = useState('');
-  const [lecturaAbierta, setLecturaAbierta] = useState(null);
+  const [lecturaAbierta, setLecturaAbierta] = useState(lecturaAbiertaInicial);
+  const [lecturaCerradaManual, setLecturaCerradaManual] = useState(null);
+  const [idPersonaEnIdentificacion, setIdPersonaEnIdentificacion] = useState(null);
+
+  const identificadorPropio = useRef(null);
+  if (puedeIdentificar && identificadorExterno === null && identificadorPropio.current === null) {
+    identificadorPropio.current = crearIdentificador();
+  }
+  const identificador = identificadorExterno ?? identificadorPropio.current;
+
   /* `intervencion.revision` de cada fila en la consulta anterior. */
   const revisiones = useRef(null);
   const cargandoMarcaciones = marcaciones === null && !errorMarcaciones;
@@ -371,34 +412,98 @@ export default function PantallaEnVivo({
     });
   }, [filas, filtroComida, busqueda]);
 
+  const filaSeleccionada = useMemo(() => {
+    if (claveSeleccionada === null) return null;
+    return filas.find((f) => f.clave === claveSeleccionada) ?? null;
+  }, [claveSeleccionada, filas]);
+
   /* Fila elegida a mano en la lista, con la misma forma que el evento en
      vivo: así el escenario y la barra de comidas muestran cualquiera de los
      dos sin distinguir de dónde vino. */
-  const eventoSeleccionado = useMemo(() => {
-    if (claveSeleccionada === null) return null;
-    const fila = filas.find((f) => f.clave === claveSeleccionada);
-    return fila ? eventoDeFila(fila) : null;
-  }, [claveSeleccionada, filas]);
+  const eventoSeleccionado = useMemo(
+    () => (filaSeleccionada ? eventoDeFila(filaSeleccionada) : null),
+    [filaSeleccionada],
+  );
 
   /* Lo que manda en el escenario y en la barra de comidas: la fila elegida a
      mano si hay una, o si no, la marcación en vivo. */
   const eventoMostrado = eventoSeleccionado ?? enVivo?.evento ?? null;
-  /* La huella a la vista sigue pendiente de identificar: su resultado ofrece
-     abrirla directamente en «Huellas por identificar». */
+  /* La huella a la vista sigue pendiente de identificar: al seleccionarla en
+     las marcaciones se abre directamente en el área central. */
   const claveMostrada = eventoSeleccionado ? claveSeleccionada : enVivo?.evento?.claveEvento ?? enVivo?.llave;
   const lecturaMostradaPendiente = puedeIdentificar && eventoMostrado && !eventoMostrado.valido
-    ? (pendientes?.lecturas ?? []).find((lectura) => lectura.clave === claveMostrada) ?? null
+    ? (pendientes?.lecturas ?? []).find((lectura) => lectura.clave === claveMostrada)
+      ?? (filaSeleccionada?.origen === 'lectura_biometrica'
+        && (filaSeleccionada.puedeIdentificar || Boolean(identificador?.pendiente(filaSeleccionada.id)))
+        ? filaSeleccionada
+        : null)
     : null;
+
+  const lecturaSeleccionadaAbrible = puedeIdentificar
+    && filaSeleccionada
+    && !filaSeleccionada.valido
+    && !identificadaPorCocina(filaSeleccionada)
+    && filaSeleccionada.origen === 'lectura_biometrica'
+    && (
+      filaSeleccionada.puedeIdentificar
+      || (pendientes?.lecturas ?? []).some((lectura) => lectura.id === filaSeleccionada.id)
+      || Boolean(identificador?.pendiente(filaSeleccionada.id))
+    )
+    ? filaSeleccionada.id
+    : null;
+
+  const lecturaAbiertaEfectiva = puedeIdentificar
+    ? (lecturaAbierta
+      ?? (lecturaSeleccionadaAbrible !== null && lecturaCerradaManual !== lecturaSeleccionadaAbrible
+        ? lecturaSeleccionadaAbrible
+        : null))
+    : null;
+
+  function seleccionarFilaHistorial(registro) {
+    setClaveSeleccionada(registro.clave);
+    if (!puedeIdentificar) return;
+    const esAbrible = registro.origen === 'lectura_biometrica'
+      && !registro.valido
+      && !identificadaPorCocina(registro)
+      && (
+        registro.puedeIdentificar
+        || (pendientes?.lecturas ?? []).some((lectura) => lectura.id === registro.id)
+        || Boolean(identificador?.pendiente(registro.id))
+      );
+    setLecturaCerradaManual(null);
+    setLecturaAbierta(esAbrible ? registro.id : null);
+  }
+
+  function manejarAbrirLectura(lecturaId) {
+    if (lecturaId === null) {
+      if (lecturaSeleccionadaAbrible !== null) {
+        setLecturaCerradaManual(lecturaSeleccionadaAbrible);
+      }
+      setLecturaAbierta(null);
+      return;
+    }
+    setLecturaCerradaManual(null);
+    setLecturaAbierta(lecturaId);
+    const clave = `lectura_biometrica:${lecturaId}`;
+    if (filas.some((f) => f.clave === clave)) {
+      setClaveSeleccionada(clave);
+    } else {
+      setClaveSeleccionada(null);
+    }
+  }
+
   const origenMostrado = etiquetaDeOrigen(eventoMostrado?.origen);
-  const mostrarResultado = eventoMostrado !== null;
+  const mostrarResultado = eventoMostrado !== null && lecturaAbiertaEfectiva === null;
   const personaMostrada = eventoMostrado?.persona;
 
-  /* Comidas del día de hoy del comensal mostrado. */
-  const usuarioIdConsultar = personaMostrada?.id;
+  /* Comidas del día de hoy del comensal mostrado o del comensal elegido al identificar. */
+  const usuarioIdConsultar = (lecturaAbiertaEfectiva !== null ? idPersonaEnIdentificacion : null)
+    ?? personaMostrada?.id
+    ?? null;
   const consultarDia = useCallback(
-    (signal) => usuarioIdConsultar
+    (signal) => (usuarioIdConsultar
       ? obtenerDiaPersonal(usuarioIdConsultar, { signal })
-      : Promise.resolve(null),
+      : Promise.resolve(null)),
     [usuarioIdConsultar],
   );
   const { datos: dia, cargando: cargandoDia, error: errorDia, recargar: recargarDia } = useConsultaApi(consultarDia);
@@ -450,8 +555,27 @@ export default function PantallaEnVivo({
                 />
               </div>
 
-              <div className="escenario__principal">
-                {eventoMostrado === null ? (
+              <div
+                className={`escenario__principal${
+                  puedeIdentificar ? ' escenario__principal--cocina' : ''
+                }${lecturaAbiertaEfectiva !== null ? ' escenario__principal--identificando' : ''}`}
+              >
+                {puedeIdentificar ? (
+                  <IdentificarLectura
+                    pendientes={pendientes}
+                    error={errorPendientes}
+                    personal={personal}
+                    cargandoPadron={cargandoPadron}
+                    errorPadron={errorPadron}
+                    abierta={lecturaAbiertaEfectiva}
+                    onAbrir={manejarAbrirLectura}
+                    onResultado={() => ciclo.current?.solicitar()}
+                    onCambiarPersona={setIdPersonaEnIdentificacion}
+                    identificador={identificador}
+                  />
+                ) : null}
+
+                {lecturaAbiertaEfectiva === null && eventoMostrado === null ? (
                   <div className="escenario__estado">
                     <span className="escenario__huella">
                       <IconoHuella tamano={104} />
@@ -466,27 +590,35 @@ export default function PantallaEnVivo({
                 {mostrarResultado ? (
                   <div
                     key={eventoMostrado.id}
-                    className={`resultado resultado--${eventoMostrado.valido ? 'exito' : 'error'}`}
+                    className={`resultado resultado--${
+                      eventoMostrado.valido ? 'exito' : eventoMostrado.sinIdentificar ? 'aviso' : 'error'
+                    }`}
                     role="status"
                   >
                     <span className="resultado__sello">
-                      {eventoMostrado.valido ? <IconoCheck tamano={92} /> : <IconoEquis tamano={92} />}
+                      {eventoMostrado.valido ? (
+                        <IconoCheck tamano={92} />
+                      ) : eventoMostrado.sinIdentificar ? (
+                        <IconoHuella tamano={92} />
+                      ) : (
+                        <IconoEquis tamano={92} />
+                      )}
                     </span>
 
                     <p className="resultado__titulo">{eventoMostrado.titulo}</p>
-                    <p className="resultado__nombre">{personaMostrada?.nombre ?? 'Huella no reconocida'}</p>
+                    <p className="resultado__nombre">{personaMostrada?.nombre ?? 'Comensal sin identificar'}</p>
 
                     <div className="resultado__meta">
                       {origenMostrado ? <Etiqueta tono="neutro">{origenMostrado}</Etiqueta> : null}
-                      <Etiqueta tono="neutro">{personaMostrada.categoria}</Etiqueta>
+                      <Etiqueta tono={eventoMostrado.sinIdentificar ? 'aviso' : 'neutro'}>{personaMostrada.categoria}</Etiqueta>
                       <span className="resultado__legajo">Legajo {personaMostrada.legajo}</span>
                       <span className="resultado__hora">{eventoMostrado.hora}</span>
                     </div>
 
                     <p className="resultado__detalle">{eventoMostrado.detalle}</p>
 
-                    {lecturaMostradaPendiente && lecturaAbierta !== lecturaMostradaPendiente.id ? (
-                      <Boton onClick={() => setLecturaAbierta(lecturaMostradaPendiente.id)}>
+                    {lecturaMostradaPendiente && lecturaAbiertaEfectiva !== lecturaMostradaPendiente.id ? (
+                      <Boton onClick={() => manejarAbrirLectura(lecturaMostradaPendiente.id)}>
                         Identificar a la persona
                       </Boton>
                     ) : null}
@@ -500,11 +632,10 @@ export default function PantallaEnVivo({
             Día del comensal mostrado: las comidas del turno con su estado,
             como en el historial. Se rearma al cambiar de persona —de ahí la
             `key`— para que las casillas entren escalonadas y se vea el
-            cambio, sea por una marcación en vivo o por elegir una fila de la
-            lista. Ocupa el mismo ancho que el lector: es su barra de estado,
-            no una franja aparte.
+            cambio, sea por una marcación en vivo, por elegir una fila de la
+            lista o por seleccionar al comensal al identificar una lectura.
           */}
-          <footer className="vivo__dia" key={eventoMostrado?.id ?? 'sin-marcacion'}>
+          <footer className="vivo__dia" key={usuarioIdConsultar ?? eventoMostrado?.id ?? 'sin-marcacion'}>
             {dia ? (
               <ul className="vivo__comidas">
                 {dia.comidas.map((comida, indice) => (
@@ -521,26 +652,23 @@ export default function PantallaEnVivo({
             ) : (
               <div className="vivo__dia-vacio">
                 {errorDia ? <p role="alert">{errorDia} <Boton variante="fantasma" onClick={recargarDia}>Reintentar historial</Boton></p>
-                  : <p role="status">{eventoMostrado && cargandoDia ? 'Consultando las comidas del comensal…' : eventoMostrado ? 'No hay registro de este comensal para la fecha consultada.' : 'Cuando alguien marque, aquí se consultarán las comidas de su día.'}</p>}
+                  : (
+                    <p role="status">
+                      {usuarioIdConsultar && cargandoDia
+                        ? 'Consultando las comidas del comensal…'
+                        : lecturaAbiertaEfectiva !== null || eventoMostrado?.sinIdentificar
+                          ? 'Huella no reconocida: aún no se determinó la identidad del comensal. Seleccione a la persona para consultar sus comidas del día.'
+                          : eventoMostrado
+                            ? 'No hay registro de este comensal para la fecha consultada.'
+                            : 'Cuando alguien marque, aquí se consultarán las comidas de su día.'}
+                    </p>
+                  )}
               </div>
             )}
           </footer>
         </div>
 
         <aside className="vivo__lateral">
-          {puedeIdentificar ? (
-            <IdentificarLectura
-              pendientes={pendientes}
-              error={errorPendientes}
-              personal={personal}
-              cargandoPadron={cargandoPadron}
-              errorPadron={errorPadron}
-              abierta={lecturaAbierta}
-              onAbrir={setLecturaAbierta}
-              onResultado={() => ciclo.current?.solicitar()}
-            />
-          ) : null}
-
           <Tarjeta
             titulo="Marcaciones del turno"
             accesorio={`${filasFiltradas.length}`}
@@ -604,13 +732,17 @@ export default function PantallaEnVivo({
                     tabIndex={0}
                     aria-pressed={claveSeleccionada === registro.clave}
                     className={`historial__fila historial__fila--${
-                      registro.valido || identificadaPorCocina(registro) ? 'exito' : 'error'
+                      registro.valido || identificadaPorCocina(registro)
+                        ? 'exito'
+                        : esHuellaNoReconocida(registro)
+                          ? 'aviso'
+                          : 'error'
                     }${claveSeleccionada === registro.clave ? ' historial__fila--activa' : ''}`}
-                    onClick={() => setClaveSeleccionada(registro.clave)}
+                    onClick={() => seleccionarFilaHistorial(registro)}
                     onKeyDown={(e) => {
                       if (e.key !== 'Enter' && e.key !== ' ') return;
                       e.preventDefault();
-                      setClaveSeleccionada(registro.clave);
+                      seleccionarFilaHistorial(registro);
                     }}
                   >
                     <span className="historial__textos">
@@ -621,7 +753,9 @@ export default function PantallaEnVivo({
                         {registro.origen === 'asistencia_manual' ? ' · Registro manual' : null}
                         {identificadaPorCocina(registro)
                           ? ` · Identificada por cocina: ${registro.resultadoFinal.comensal.nombre ?? 'persona identificada'}`
-                          : null}
+                          : esHuellaNoReconocida(registro) && registro.puedeIdentificar && puedeIdentificar
+                            ? ' · Pendiente de identificar'
+                            : null}
                       </span>
                     </span>
                     {identificadaPorCocina(registro) ? (

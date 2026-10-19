@@ -67,34 +67,25 @@
 .vivo__lateral {
   display: flex;
   flex-direction: column;
-  gap: var(--e-3);
   min-height: 0;
-}
-
-/* Huellas por identificar (solo cocinera) arriba de las marcaciones: la
-   pantalla no tiene scroll, así que el panel se acota y desplaza por dentro
-   en vez de empujar la tarjeta de marcaciones fuera de la vista. */
-.vivo__lateral > .identificar {
-  flex: 0 1 auto;
-  max-height: 60%;
-  min-height: 0;
-  overflow-y: auto;
+  height: 100%;
 }
 
 .vivo__tarjeta-historial {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .vivo__tarjeta-historial .tarjeta__cuerpo {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   padding: var(--e-3);
-  overflow-y: auto;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE / Edge */
-}
-
-.vivo__tarjeta-historial .tarjeta__cuerpo::-webkit-scrollbar {
-  display: none; /* Chrome / Safari */
+  overflow: hidden;
 }
 
 /* ---------- Filtro por tiempo de comida ---------- */
@@ -358,9 +349,34 @@
   overflow-y: auto;
 }
 
-/* Compacta el gauge en pantallas bajas para que la barra de comidas siga
-   visible sin scroll. */
-@media (max-height: 800px) {
+.escenario__principal--cocina {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: var(--e-3);
+  padding: var(--e-4);
+}
+
+.escenario__principal--cocina > .escenario__estado,
+.escenario__principal--cocina > .resultado {
+  margin: auto;
+}
+
+.escenario__principal--identificando {
+  text-align: left;
+}
+
+/* Compacta el gauge y la barra inferior en pantallas bajas (ej. 1366x768)
+   para que la identificación central y la barra de comidas entren sin scroll. */
+@media (max-height: 820px) {
+  .vivo__columna-izquierda {
+    gap: var(--e-3);
+  }
+
+  .escenario__barra {
+    padding: var(--e-2) var(--e-4);
+  }
+
   .escenario__gauge {
     width: 190px;
     padding: var(--e-3);
@@ -368,6 +384,21 @@
 
   .escenario__gauge .gauge__grafico {
     max-width: 130px;
+  }
+
+  .escenario__principal--cocina {
+    padding: var(--e-3);
+    gap: var(--e-2);
+  }
+
+  .escenario__principal--cocina .resultado__sello {
+    width: 108px;
+    height: 108px;
+  }
+
+  .vivo__dia {
+    min-height: 76px;
+    padding: var(--e-2) var(--e-4);
   }
 }
 
@@ -470,6 +501,12 @@
   box-shadow: 0 0 0 8px rgba(0, 143, 93, 0.1);
 }
 
+.resultado--aviso .resultado__sello {
+  background: var(--c-aviso-tenue);
+  color: var(--c-aviso);
+  box-shadow: 0 0 0 8px rgba(180, 83, 9, 0.1);
+}
+
 .resultado--error .resultado__sello {
   background: var(--c-error-tenue);
   color: var(--c-error);
@@ -485,6 +522,10 @@
 
 .resultado--exito .resultado__titulo {
   color: var(--c-exito);
+}
+
+.resultado--aviso .resultado__titulo {
+  color: var(--c-aviso);
 }
 
 .resultado--error .resultado__titulo {
@@ -527,6 +568,12 @@
   color: var(--c-exito);
 }
 
+.resultado--aviso .resultado__detalle {
+  background: var(--c-aviso-tenue);
+  color: var(--c-aviso);
+  border: 1px solid #fde68a;
+}
+
 .resultado--error .resultado__detalle {
   background: var(--c-error-tenue);
   color: var(--c-error);
@@ -536,10 +583,14 @@
 .historial {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: var(--e-1);
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 2px 4px 2px 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .historial__vacio {
@@ -569,6 +620,7 @@
   align-items: center;
   gap: var(--e-3);
   width: 100%;
+  flex-shrink: 0;
   padding: 12px 16px;
   border: 1px solid var(--c-borde);
   border-radius: var(--r-md);
@@ -606,6 +658,12 @@
   color: var(--c-acento-oscuro);
   background: var(--c-exito-tenue);
   border-color: var(--c-acento-linea);
+}
+
+.historial__fila--aviso {
+  color: #92400e;
+  background: var(--c-aviso-tenue);
+  border-color: #fde68a;
 }
 
 .historial__fila--error {
