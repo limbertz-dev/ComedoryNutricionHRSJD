@@ -655,14 +655,29 @@ test('una huella identificada por cocina se muestra como entrega, sin decir que 
   assert.match(evento.detalle, /no reconoció la huella/);
 });
 
-test('los paneles de cocina y jefa no montan huellas por identificar', () => {
+test('el panel de la cocinera monta las huellas por identificar; jefa y sistemas no pueden operarla', () => {
   const localOriginal = globalThis.localStorage;
-  globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  const montar = (rol, guardada = null) => {
+    globalThis.localStorage = { getItem: () => guardada, setItem: () => {}, removeItem: () => {} };
+    return renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol, usuario: `${rol}.test` })));
+  };
   try {
-    const cocina = renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol: 'cocinera', usuario: 'cocina.test' })));
-    assert.doesNotMatch(cocina, /Huellas por identificar|Confirmar entrega/);
-    const jefa = renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol: 'jefa', usuario: 'jefa.test' })));
-    assert.doesNotMatch(jefa, /Huellas por identificar|Confirmar entrega/);
+    const cocina = montar('cocinera');
+    assert.match(cocina, /Huellas por identificar/);
+    assert.match(cocina, /Consultando huellas por identificar…/);
+    assert.doesNotMatch(cocina, /Intervenciones de cocina/);
+
+    for (const guardada of [null, 'vivo']) {
+      const jefa = montar('jefa', guardada);
+      assert.doesNotMatch(jefa, /Huellas por identificar|Confirmar entrega|Identificar a la persona/);
+      assert.match(jefa, /Cargando supervisión…/);
+    }
+
+    for (const guardada of [null, 'vivo', 'supervision']) {
+      const sistemas = montar('sistemas', guardada);
+      assert.doesNotMatch(sistemas, /Huellas por identificar|Confirmar entrega|Identificar a la persona|Intervenciones de cocina/);
+      assert.match(sistemas, /Reglas del sistema/);
+    }
   } finally {
     if (localOriginal === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = localOriginal;

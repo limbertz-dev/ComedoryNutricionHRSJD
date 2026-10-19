@@ -23,6 +23,7 @@ import {
 } from './navegacion.js';
 import {
   puedeConsultarIntervenciones,
+  puedeIdentificarLecturas,
   puedeVerSeccion,
   seccionInicialDeRol,
   usaDatosDelComedor,
@@ -194,6 +195,7 @@ export function Panel({ rol, usuario = null }) {
               pantalla={pantalla}
               turno={turno}
               recargarEstado={recargarEstado}
+              puedeIdentificar={puedeIdentificarLecturas(rol)}
               personal={estado.personal}
               cargandoPadron={cargandoPersonal}
               errorPadron={errorApi}

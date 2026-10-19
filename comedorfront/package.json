@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node --import ./tests/soporte/cargador-jsx.js --test",
     "dev": "vite",
+    "dev:qa": "node scripts/iniciar-qa.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },

@@ -4,14 +4,14 @@
 
 El ensayo se divide en dos partes, donde **la Parte B depende de que la Parte A haya pasado completa**:
 - **PARTE A (preparación automática, cambio de contraseña en frontend y pruebas de integración de identidad y permisos contra la API QA)**: huella base → preparación automática y comprobación de claves temporales (`cuentas.py --preparar`, que crea/resetea `cocinera1`, `cocinera2`, `cocinera3` con rol fijo `cocinera` y `jefa` con rol fijo `jefa`, muestra una vez cada temporal, levanta la API QA, verifica automáticamente los cuatro `428 cambio_password_pendiente`, guarda el estado pendiente en `corrida.json` y mantiene disponible la API) → login en frontend y cambio a contraseña definitiva por el operador en las 4 cuentas → verificación de identidad y permisos con `cuentas.py` → revisar resultados. Permite terminar aquí (detener procesos → limpiar → huella final) o continuar con la Parte B. *Nota*: estos controles contra la API son pruebas de integración de cuentas y permisos; las pruebas unitarias offline (`pytest`) usan respuestas HTTP simuladas.
-- **PARTE B (flujo operativo, solo con Parte A aprobada)**: con la API y el front activos → sesiones de `cocinera2` y `jefa` autenticadas con sus claves definitivas en sesiones separadas del navegador → simular lectura no reconocida (`huella.py`) → identificación por Postman como `cocinera2` (`POST /asistencias/lecturas/{id}/identificar` para `900001`) → consulta de la `jefa` en `Supervisión → Intervenciones de cocina` → verificación por API (`GET /intervenciones-cocina?usuario_id=900001`) → detener procesos → limpiar → huella final.
+- **PARTE B (flujo operativo, solo con Parte A aprobada)**: con la API y el front activos → sesiones de `cocinera2` y `jefa` autenticadas con sus claves definitivas en sesiones separadas del navegador → simular lectura no reconocida (`huella.py`) → identificación en el navegador como `cocinera2` (`POST /asistencias/lecturas/{id}/identificar` para `900001`) → consulta de la `jefa` en `Supervisión → Intervenciones de cocina` → verificación por API (`GET /intervenciones-cocina?usuario_id=900001`) → detener procesos → limpiar → huella final.
 
 **Distinción entre resultados esperados y obtenidos:** las columnas «Esperado» de este guion documentan el comportamiento verificado en el código y los contratos; las columnas «Obtenido» permanecen vacías en la entrega offline y solo deben completarse con lo observado al ejecutar en vivo contra el escenario.
 
 **Alcance y limitaciones verificadas:**
 - **La consulta API de pantalla (`GET /pantalla/estado` o `GET /pantalla/ultimas-marcaciones`) solo acredita la respuesta del backend; no demuestra por sí sola que la interfaz gráfica se haya mostrado correctamente en el navegador.**
 - **La huella no reconocida generada por `huella.py` es una simulación por software (`registrar_marcacion(usuario_id=None, metodo='biometrico')`); no acredita una falla física del lector biométrico.**
-- **Limitación verificada en `develop` local:** `PantallaEnVivo` tiene `puedeIdentificar = false` por defecto (`comedorfront/src/components/secciones/PantallaEnVivo.jsx:205`) y `App.jsx` (`comedorfront/src/App.jsx:192`) no le pasa esa propiedad. Por ello esta versión del guion usa Postman para identificar la lectura como `cocinera2`. No se modifica el frontend en esta tarea ni se declara validado el flujo completo de aprobación por navegador.
+- **Identificación habilitada en QA:** `App.jsx` pasa `puedeIdentificarLecturas(rol)` a `PantallaEnVivo`. La cocinera puede seleccionar al comensal y pulsar «Confirmar entrega»; la jefa solo consulta las intervenciones. Las pruebas automatizadas no sustituyen la validación del recorrido real en navegador.
 
 Solo usar el escenario dedicado y reservar `cocinera1`, `cocinera2`, `cocinera3` y `jefa` para esta corrida. Nadie debe cambiar sus datos o usar otra API sobre estas bases durante la prueba. No ejecutar el preparador histórico: se leyó con `git show`, no se incorporó al árbol.
 
@@ -21,7 +21,7 @@ Desde PowerShell, establecer estas rutas (en cada consola nueva):
 
 ```powershell
 $qaRoot = 'C:/__Proyectos__/comedorynutriciónhospitalaria/wt-qa'
-$qaPython = 'C:/__Proyectos__/comedorynutriciónhospitalaria/wt-develop/comedorback/.venv/Scripts/python.exe'
+$qaPython = 'C:/__Proyectos__/comedorynutriciónhospitalaria/wt-qa/comedorback/.venv/Scripts/python.exe'
 Set-Location $qaRoot
 $env:DB_NAME = 'bd_nutricion_escenario_sim'
 $env:DB_NAME_TURNOS = 'bd_turnos_escenario_demo'
@@ -116,16 +116,16 @@ Los archivos y líneas se refieren al código de `wt-qa`, salvo las referencias 
 
 ## PARTE B: Huella no reconocida, identificación por `cocinera2` y consulta de la `jefa` (solo con Parte A aprobada)
 
-Ejecutar únicamente si los controles de las 4 cuentas pasaron en la Parte A (`PASA`, `parte_a.completa=true`), con sus claves definitivas ya vigentes y la API QA activa en `http://127.0.0.1:8001`. **Limitación verificada en `develop` local:** `PantallaEnVivo` define `puedeIdentificar = false` por defecto (`comedorfront/src/components/secciones/PantallaEnVivo.jsx:205`) y `App.jsx` (`comedorfront/src/App.jsx:192`) no le pasa esa propiedad. Por ello esta versión del guion utiliza Postman para identificar la lectura como `cocinera2`; no se modifica el frontend ni se declara validado el flujo completo de aprobación desde el navegador.
+Ejecutar únicamente si los controles de las 4 cuentas pasaron en la Parte A (`PASA`, `parte_a.completa=true`), con sus claves definitivas ya vigentes y la API QA activa en `http://127.0.0.1:8001`. El flujo principal de identificación y confirmación se realiza desde el frontend de `wt-qa` como `cocinera2`; la jefa consulta en otra sesión aislada. Postman se conserva para verificaciones complementarias por API.
 
 | Paso | Acción del operador | Esperado (leído del código, archivo:línea) | Obtenido |
 |---|---|---|---|
-| B1. Mantener o levantar front | Si el frontend abierto en A4 sigue activo en `http://127.0.0.1:5173`, conservarlo; de lo contrario, ejecutar el bloque «Frontend» de abajo en otra consola. | Usa el front de `develop` con contenido igual al de `qa` y `VITE_API_URL=http://127.0.0.1:8001`. Abre `http://127.0.0.1:5173`. `comedorfront/src/config.js:14`. | |
+| B1. Mantener o levantar front | Si el frontend abierto en A4 sigue activo en `http://127.0.0.1:5173`, conservarlo; de lo contrario, ejecutar el bloque «Frontend» de abajo en otra consola. | Usa exclusivamente el frontend de `wt-qa` y `VITE_API_URL=http://127.0.0.1:8001`. Abre `http://127.0.0.1:5173`. `comedorfront/src/config.js:14`. | |
 | B2. Login en navegador (`cocinera2` y `jefa`) | Ingresar como `cocinera2` en una ventana del navegador y como `jefa` en otra sesión/perfil aislado, usando las claves definitivas definidas en el frontend durante Parte A. | Ambas sesiones ingresan directo (`200`, `debe_cambiar=false`). `cocinera2` abre «Pantalla en vivo»; `jefa` ve el panel con acceso a «Supervisión». `comedorback/app/api/auth.py:115`, `comedorfront/src/App.jsx:153`. | |
 | B3. Simular huella no reconocida | `& $qaPython qa/prueba-basica/huella.py` antes de que venza el almuerzo del laboratorio. | Reloj compartido, comida actual=2, derecho vigente para `900001` y ninguna lectura QA anterior; UNA llamada a `registrar_marcacion(usuario_id=None, metodo='biometrico')` (simulación por software; no acredita falla física del lector). Respuesta `valido=false`, `motivo=no_identificado`, `lectura_id` guardado en `corrida.json`. `qa/prueba-basica/huella.py:19`, `comedorback/app/logica/marcacion.py:214`. | |
-| B4. Postman: `cocinera2` identifica y confirma entrega | Importar colección, completar `base` y `lectura_id`, guardar en Vault `qa-cocinera2-actual` (clave cambiada en Parte A) y `qa-jefa-actual`. Ejecutar solicitudes 1 a 5. | Solicitud 1: login 200; solicitud 2 se omite; solicitud 3 (`POST /asistencias/lecturas/{{lectura_id}}/identificar`, `{"usuario_id":900001}` y cabecera `Idempotency-Key` UUID v4): 200 con `valido=true`, `resultado=registrada`, `reintento=false`; solicitud 4: replay idempotente `reintento=true`; solicitud 5: evento `lectura_biometrica:<id>` con `estado_final=racion_servida`, `via=identificacion_manual`, `resuelta_por_mi=true` (la consulta API no acredita por sí sola el renderizado visual, que se observa en la ventana de `cocinera2`). `comedorback/app/api/asistencias.py:89`, `comedorback/app/logica/intervencion.py:458`, `comedorback/app/api/pantalla.py:64`. | |
+| B4. Navegador: `cocinera2` identifica y confirma entrega | En «Huellas por identificar», abrir la lectura creada en B3, buscar y seleccionar al comensal `900001` y pulsar «Confirmar entrega» una sola vez. | Aparece «Entrega registrada» y la marcación pasa a entregada por cocina. No se pide nota, motivo ni descripción. La petición usa `{usuario_id:900001}` y una `Idempotency-Key` UUID v4; el éxito requiere HTTP 200, `valido=true` y `resultado=registrada`. La lectura original sigue rechazada por huella no reconocida. El navegador conserva la clave del intento para verificar un resultado incierto. | |
 | B5. Navegador: consulta de la `jefa` | En la ventana de la `jefa`, abrir **Supervisión → Intervenciones de cocina**. | En la tabla de intervenciones aparece la fila del comensal `900001` (Almuerzo), columna «Cocinera» = `cocinera2` (`cuenta.nombre ?? cuenta.usuario`), decisión original «Rechazada · Huella no reconocida» y resultado final «Entrega registrada». `comedorfront/src/App.jsx:203`, `comedorfront/src/components/secciones/IntervencionesCocina.jsx:236`. | |
-| B6. Verificación por API (`jefa`) | Ejecutar en Postman las solicitudes 6 (`6 - Login jefa`) y 7 (`7 - Registro de la jefa`: `GET /intervenciones-cocina?usuario_id=900001`). | Solicitud 6: 200, `rol=jefa`, `debe_cambiar=false`. Solicitud 7: HTTP 200 y una misma fila de `datos` cumple `resultado == 'registrada'`, `decision_original.lectura_id == {{lectura_id}}` y `cuenta.usuario == 'cocinera2'`. `comedorback/app/api/intervenciones.py:101`, `comedorback/app/consultas/intervenciones.py:109`. | |
+| B6. Verificación complementaria por API (`jefa`) | En Postman, establecer `base`, `lectura_id` y `qa-jefa-actual` en Vault. Ejecutar solo las solicitudes 6 («Login jefa») y 7 («Registro de la jefa»). | Login 200, rol `jefa` y `debe_cambiar=false`; una misma fila de `datos` contiene `resultado=registrada`, el `decision_original.lectura_id` de la corrida y `cuenta.usuario=cocinera2`. No enviar las solicitudes 3 o 4 con otra clave sobre la lectura ya resuelta desde el navegador; la prueba de replay se realiza como caso separado, conservando su clave original. | |
 | B7. Detener procesos | Cerrar sesiones en navegador, cerrar front y detener API con Ctrl+C; no enviar más solicitudes. | Finaliza el lanzador, compara huella antes/después y elimina `api.activa`; quedan disponibles los scripts de limpieza. `qa/prueba-basica/ejecutar_app.py:55`, `qa/prueba-basica/comun.py:196`. | |
 | B8. Limpiar, simulacro | `& $qaPython qa/prueba-basica/limpiar.py` | Comprueba identidad y rol de las 4 cuentas (aceptando las creadas en la corrida), muestra conteos de corrida y totales antes/después sin cambiarlos, fecha a restaurar y huellas iguales. No DELETE ni UPDATE. `qa/prueba-basica/limpiar.py:44`, `qa/prueba-basica/limpiar.py:79`. | |
 | B9. Limpiar, aplicar | Revisados los conteos: `& $qaPython qa/prueba-basica/limpiar.py --aplicar` | En **una transacción**, borra intervenciones de esa lectura, su asistencia y su lectura, luego sesiones/ingresos (`intentos_login`) de las 4 cuentas desde el inicio real. Restaura la fecha únicamente si fue movida. Las 4 cuentas quedan en `usuarios_sistema`. Conteos seleccionados finales=0. `qa/prueba-basica/limpiar.py:10`, `qa/prueba-basica/limpiar.py:79`. | |
@@ -142,31 +142,21 @@ Solo si se eligió un ancla con fecha distinta de `fecha_original`, ejecutar est
 
 ### Frontend (paso B1)
 
-`wt-qa` no necesita instalar dependencias. Se usa `wt-develop/comedorfront`, cuyo contenido coincide con el frontend de `qa`. Los commits de QA pueden diferir por las herramientas; comparar el contenido del front, no exigir el mismo HEAD. Desde `wt-qa`, repetir:
+Todo el circuito de pruebas se ejecuta dentro de `wt-qa`, rama `qa`: backend, frontend, dependencias, cachés, casos simulados y evidencias. `develop` conserva la versión limpia para integrar las correcciones funcionales validadas antes del paso a `main`. Los ejemplos de este guion no sustituyen la matriz de casos que debe probarse en QA.
 
 ```powershell
-git diff HEAD develop -- comedorfront
-git -C '../wt-develop' status --short -- comedorfront
+Set-Location 'C:/__Proyectos__/comedorynutriciónhospitalaria/wt-qa/comedorback'
+python -m venv .venv
+& .venv/Scripts/python.exe -m pip install -r requirements.txt
+Set-Location '../comedorfront'
+npm.cmd ci --no-audit --no-fund
 ```
 
-Continuar solo si ambas salidas están vacías. En otra consola, ejecutar lo siguiente. `envFile:false` impide la carga de dotenv; `configFile:false` evita generar un archivo de configuración compilado fuera de QA. La caché de Vite se dirige a QA. No hay cambios al código del frontend.
+La instalación anterior se realiza una vez al preparar el entorno de QA. Para abrir el frontend, ejecutar el siguiente comando en otra consola. El lanzador exige la rama `qa`, fija la API local en el puerto 8001 y evita leer dotenv con `envFile:false`. Su configuración y caché permanecen en QA.
 
 ```powershell
-Set-Location 'C:/__Proyectos__/comedorynutriciónhospitalaria/wt-develop/comedorfront'
-$env:VITE_API_URL = 'http://127.0.0.1:8001'
-@'
-import { createServer } from 'vite';
-import react from '@vitejs/plugin-react';
-const server = await createServer({
-  configFile: false,
-  envFile: false,
-  plugins: [react()],
-  cacheDir: '../../wt-qa/qa/prueba-basica/evidencias/vite',
-  server: { host: '127.0.0.1', port: 5173, strictPort: true, open: false }
-});
-await server.listen();
-server.printUrls();
-'@ | node --input-type=module
+Set-Location 'C:/__Proyectos__/comedorynutriciónhospitalaria/wt-qa/comedorfront'
+npm.cmd run dev:qa
 ```
 
 No intentar registrar la huella con `POST /asistencias`: una sesión recibe 403 `biometrico_solo_lector` antes de cualquier escritura (`comedorback/app/api/asistencias.py:51`). No hay endpoint de lector en los routers de este HEAD.
@@ -214,7 +204,7 @@ El SHA-256 mostrado es propio de estas herramientas (JSON canónico de nombre→
 Desde `wt-qa`, sin cargar configuración ni credenciales:
 
 ```powershell
-$qaPython = 'C:/__Proyectos__/comedorynutriciónhospitalaria/wt-develop/comedorback/.venv/Scripts/python.exe'
+$qaPython = 'C:/__Proyectos__/comedorynutriciónhospitalaria/wt-qa/comedorback/.venv/Scripts/python.exe'
 Get-ChildItem qa/prueba-basica/*.py | ForEach-Object {
     & $qaPython -m py_compile $_.FullName
     if ($LASTEXITCODE -ne 0) { throw 'Falló py_compile' }
