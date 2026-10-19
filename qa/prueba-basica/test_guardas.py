@@ -532,7 +532,7 @@ def test_limpieza_acepta_cuentas_creadas_en_corrida_y_cierra_parte_a_o_ab(monkey
         limpiar.comprobar_propiedad(_conn_simulada([], [], [], cuentas=filas_actuales[1:]), datos_a, False)
 
 
-def _simulador_http_cuentas(fallo_en=None):
+def _simulador_http_cuentas(fallo_en=None, temporales_esperadas=None):
     """Respuestas HTTP simuladas para cuentas.py, con tokens y detalles ficticios."""
     llamadas = []
 
@@ -549,7 +549,12 @@ def _simulador_http_cuentas(fallo_en=None):
         if (metodo, ruta) == ('POST', '/auth/login'):
             cuenta = cuerpo['username']
             rol = c.rol_cuenta(cuenta)
-            if cuerpo['password'].startswith('TEMP-'):
+            clave = cuerpo['password']
+            es_temporal = (
+                (temporales_esperadas is not None and clave == temporales_esperadas.get(cuenta))
+                or clave.startswith('TEMP-')
+            )
+            if es_temporal:
                 if fallo_en == (cuenta, 'login_temporal'):
                     return 401, {
                         'motivo': 'credenciales_invalidas',
@@ -560,7 +565,12 @@ def _simulador_http_cuentas(fallo_en=None):
                     'temporal': f'JWT-TEMP-{cuenta}',
                     'detail': 'Detalle arbitrario con SECRETO-SERVIDOR-99',
                 }
-            if fallo_en == (cuenta, 'login_nueva'):
+            if fallo_en == (cuenta, 'sin_cambio_frontend'):
+                return 428, {
+                    'motivo': 'cambio_password_pendiente',
+                    'temporal': f'JWT-TEMP-{cuenta}',
+                }
+            if fallo_en == (cuenta, 'login_definitiva'):
                 return 401, {'motivo': 'Mensaje arbitrario con SECRETO-SERVIDOR-99'}
             return 200, {
                 'access': f'JWT-ACCESS-{cuenta}',
@@ -569,20 +579,8 @@ def _simulador_http_cuentas(fallo_en=None):
                 'debe_cambiar': False,
             }
         if (metodo, ruta) == ('POST', '/auth/cambio-password'):
-            cuenta = token.removeprefix('JWT-TEMP-')
-            rol = c.rol_cuenta(cuenta)
-            if fallo_en == (cuenta, 'cambio_password'):
-                return 422, {
-                    'motivo': 'password_rechazada',
-                    'detail': 'La clave contiene SECRETO-SERVIDOR-99',
-                }
-            return 200, {
-                'access': f'JWT-CAMBIO-{cuenta}',
-                'refresh': f'JWT-REFRESH-{cuenta}',
-                'rol': rol,
-                'debe_cambiar': False,
-            }
-        cuenta = token.removeprefix('JWT-ACCESS-').removeprefix('JWT-CAMBIO-')
+            raise AssertionError('El kit no debe invocar /auth/cambio-password; el cambio es en el frontend')
+        cuenta = token.removeprefix('JWT-ACCESS-')
         rol = c.rol_cuenta(cuenta)
         if (metodo, ruta) == ('GET', '/auth/yo'):
             rol_respuesta = 'sistemas' if fallo_en == (cuenta, 'auth_yo') else rol
@@ -608,41 +606,480 @@ def _simulador_http_cuentas(fallo_en=None):
     return solicitar, llamadas
 
 
-def _preparar_diario_base(tmp_path):
+def _verificacion_temporales_previa():
+    return {
+        cuenta: {
+            'rol': c.rol_cuenta(cuenta),
+            'temporal_verificada': True,
+            'cambio_frontend_completado': False,
+            'resultado': 'PENDIENTE',
+            'controles': [{
+                'control': 'POST /auth/login (temporal)',
+                'esperado': '428 cambio_password_pendiente',
+                'codigo': 428,
+                'obtenido': '428 cambio_password_pendiente',
+                'resultado': 'PASA',
+            }],
+        }
+        for cuenta in c.CUENTAS
+    }
+
+
+def _preparar_diario_base(tmp_path, con_temporales=True):
     diario = tmp_path / 'corrida.json'
     datos = {
         'version': 1,
         'servidor': 'servidor-qa',
         'bases': [c.SIM, c.DEMO],
+        'reloj': {'lab': '2026-10-15T11:30:00', 'real': '2026-10-16T11:00:00'},
         'usuario_id': c.USUARIO,
         'asignacion_id': c.ASIGNACION,
         'inicio': '2026-10-16T11:00:00',
         'fecha_original': '2026-10-15',
         'fecha_destino': None,
         'cuentas': {'cocinera2': 2, 'cocinera3': 3},
+        'huella_base': {'sha256': 'huella-inicial'},
         'estado': 'iniciada',
         'lectura_id': None,
     }
+    if con_temporales:
+        datos['verificacion_cuentas'] = _verificacion_temporales_previa()
+        datos['parte_a'] = {'estado': 'pendiente_cambio_frontend', 'completa': False}
     diario.write_text(json.dumps(datos), encoding='utf-8')
     return diario
 
 
-def test_cuentas_py_pasa_las_4_cuentas_y_no_guarda_claves_ni_tokens(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize('invocador', ['cuentas', 'ejecutar_app'])
+def test_preparacion_automatica_verifica_428_deja_parte_a_pendiente_y_mantiene_api(
+    monkeypatch, tmp_path, capsys, invocador
+):
+    import cuentas
+    import ejecutar_app
+
+    diario = _preparar_diario_base(tmp_path, con_temporales=False)
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    monkeypatch.setattr(c, 'CORRIDA', diario)
+    monkeypatch.setenv('ENTORNO', 'desarrollo')
+    monkeypatch.setattr(cuentas, '_puerto_ocupado', lambda host, port: False)
+
+    no_getpass = Mock(side_effect=AssertionError('La preparación automática no debe usar getpass'))
+    monkeypatch.setattr(cuentas.getpass, 'getpass', no_getpass)
+
+    control = MagicMock()
+    motor = MagicMock()
+    motor.connect.return_value.__enter__.return_value.execute.return_value.mappings.return_value.one_or_none.return_value = None
+    control.__enter__.return_value = (motor, {'sha256': 'huella-inicial'}, 'servidor-qa')
+    monkeypatch.setattr(c, 'entorno_seguro', Mock(return_value=control))
+
+    fijadas = {}
+    with c.app_sin_dotenv():
+        from app.core import reloj as reloj_app
+        from app.semillas import admin as semilla_admin
+
+        monkeypatch.setattr(reloj_app, 'real', lambda: datetime(2026, 10, 16, 11, 0, 0))
+        sesion_falsa = MagicMock()
+        sesion_falsa.execute.return_value.scalar_one_or_none.return_value = None
+        monkeypatch.setattr(semilla_admin, 'SesionLocal', Mock(return_value=sesion_falsa))
+
+        def fijar_espia(sesion, usuario, clave, *, temporal):
+            usuario.debe_cambiar = 1 if temporal else 0
+            fijadas[usuario.username] = (usuario.rol, usuario.debe_cambiar, clave)
+
+        monkeypatch.setattr(semilla_admin, 'fijar_clave', fijar_espia)
+        generador_original = semilla_admin.clave_temporal
+
+        proceso_api = MagicMock()
+        proceso_api.poll.return_value = None
+        proceso_api.wait.return_value = 0
+        lanzar = Mock(return_value=proceso_api)
+        monkeypatch.setattr(cuentas, 'lanzar_api_qa', lanzar)
+
+        solicitar, llamadas_http = _simulador_http_cuentas(
+            temporales_esperadas=type('VistaTemporales', (), {'get': lambda self, k: fijadas[k][2]})()
+        )
+        monkeypatch.setattr(cuentas, 'cliente_http', lambda base: solicitar)
+
+        if invocador == 'cuentas':
+            cuentas.main(['--preparar'])
+        else:
+            ejecutar_app.main(['preparar'])
+
+        assert semilla_admin.clave_temporal is generador_original
+
+    no_getpass.assert_not_called()
+    lanzar.assert_called_once_with(8001)
+    proceso_api.wait.assert_called_once()
+    assert set(fijadas) == set(c.CUENTAS)
+
+    salida = capsys.readouterr()
+    texto_diario = diario.read_text(encoding='utf-8')
+    guardado = json.loads(texto_diario)
+
+    assert guardado['parte_a'] == {'estado': 'pendiente_cambio_frontend', 'completa': False}
+    for cuenta in c.CUENTAS:
+        rol_fijado, debe_cambiar, clave_generada = fijadas[cuenta]
+        assert rol_fijado == c.rol_cuenta(cuenta)
+        assert debe_cambiar == 1
+        assert len(clave_generada) == 12
+        assert salida.out.count(clave_generada) == 1
+        assert clave_generada not in salida.err
+        assert clave_generada not in texto_diario
+
+        resumen = guardado['verificacion_cuentas'][cuenta]
+        assert resumen['rol'] == c.rol_cuenta(cuenta)
+        assert resumen['temporal_verificada'] is True
+        assert resumen['cambio_frontend_completado'] is False
+        assert resumen['resultado'] == 'PENDIENTE'
+        assert len(resumen['controles']) == 1
+        assert resumen['controles'][0]['control'] == 'POST /auth/login (temporal)'
+        assert resumen['controles'][0]['resultado'] == 'PASA'
+
+    assert [ll[1] for ll in llamadas_http if ll[0] == 'POST'] == ['/auth/login'] * 4
+    for secreto in ('JWT-TEMP-', 'SECRETO-SERVIDOR-99'):
+        assert secreto not in texto_diario
+        assert secreto not in salida.out
+        assert secreto not in salida.err
+
+
+@pytest.mark.parametrize('causa', ['archivo_marca', 'puerto_ocupado'])
+def test_preparacion_aborta_si_hay_api_anterior_activa_sin_matar_procesos(
+    monkeypatch, tmp_path, causa
+):
     import cuentas
 
-    diario = _preparar_diario_base(tmp_path)
+    diario = _preparar_diario_base(tmp_path, con_temporales=False)
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    monkeypatch.setattr(c, 'CORRIDA', diario)
+    monkeypatch.setenv('ENTORNO', 'desarrollo')
+    if causa == 'archivo_marca':
+        (tmp_path / 'api.activa').write_text('', encoding='utf-8')
+        monkeypatch.setattr(cuentas, '_puerto_ocupado', lambda host, port: False)
+    else:
+        monkeypatch.setattr(cuentas, '_puerto_ocupado', lambda host, port: True)
+
+    entorno_mock = Mock(side_effect=AssertionError('No debe abrir entorno ni tocar cuentas si hay API activa'))
+    lanzar_mock = Mock(side_effect=AssertionError('No debe iniciar otra API'))
+    detener_mock = Mock(side_effect=AssertionError('No debe matar procesos ajenos'))
+    monkeypatch.setattr(c, 'entorno_seguro', entorno_mock)
+    monkeypatch.setattr(cuentas, 'lanzar_api_qa', lanzar_mock)
+    monkeypatch.setattr(cuentas, 'detener_proceso_api', detener_mock)
+
+    with pytest.raises(c.Abortado, match=r'Ctrl\+C'):
+        cuentas.main(['--preparar'])
+
+    entorno_mock.assert_not_called()
+    lanzar_mock.assert_not_called()
+    detener_mock.assert_not_called()
+    if causa == 'archivo_marca':
+        assert (tmp_path / 'api.activa').exists()
+
+
+def test_preparacion_detiene_proceso_api_propio_si_falla_control_temporal(
+    monkeypatch, tmp_path, capsys
+):
+    import cuentas
+    import ejecutar_app
+
+    diario = _preparar_diario_base(tmp_path, con_temporales=False)
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    monkeypatch.setattr(c, 'CORRIDA', diario)
+    monkeypatch.setenv('ENTORNO', 'desarrollo')
+    monkeypatch.setattr(cuentas, '_puerto_ocupado', lambda host, port: False)
+
+    control = MagicMock()
+    motor = MagicMock()
+    control.__enter__.return_value = (motor, {'sha256': 'huella-inicial'}, 'servidor-qa')
+    monkeypatch.setattr(c, 'entorno_seguro', Mock(return_value=control))
+    temporales_generadas = {cuenta: f'TEMP-gen-{cuenta}' for cuenta in c.CUENTAS}
+    monkeypatch.setattr(
+        ejecutar_app,
+        'sembrar_cuentas_qa',
+        Mock(return_value=dict(temporales_generadas)),
+    )
+
+    with c.app_sin_dotenv():
+        from app.core import reloj as reloj_app
+        monkeypatch.setattr(reloj_app, 'real', lambda: datetime(2026, 10, 16, 11, 0, 0))
+
+        proceso_api = MagicMock()
+        proceso_api.poll.return_value = None
+        proceso_api.terminate.side_effect = lambda: setattr(proceso_api.poll, 'return_value', 0)
+
+        def crear_marca_y_devolver_proceso(port=8001):
+            (tmp_path / 'api.activa').write_text('', encoding='utf-8')
+            return proceso_api
+
+        monkeypatch.setattr(cuentas, 'lanzar_api_qa', crear_marca_y_devolver_proceso)
+        solicitar, _ = _simulador_http_cuentas(
+            fallo_en=('jefa', 'login_temporal'),
+            temporales_esperadas=temporales_generadas,
+        )
+        monkeypatch.setattr(cuentas, 'cliente_http', lambda base: solicitar)
+
+        with pytest.raises(c.Abortado, match='clave temporal'):
+            cuentas.main(['--preparar'])
+
+    proceso_api.terminate.assert_called_once()
+    proceso_api.kill.assert_not_called()
+    assert not (tmp_path / 'api.activa').exists()
+    salida = capsys.readouterr()
+    texto_diario = diario.read_text(encoding='utf-8')
+    guardado = json.loads(texto_diario)
+    assert guardado['parte_a'] == {'estado': 'falla', 'completa': False}
+    assert guardado['verificacion_cuentas']['jefa']['resultado'] == 'FALLA'
+    for clave_temp in temporales_generadas.values():
+        assert clave_temp not in texto_diario
+        assert clave_temp not in salida.out
+        assert clave_temp not in salida.err
+
+
+def test_detener_proceso_api_cierre_correcto_retira_marca_y_no_toca_procesos_ajenos(
+    monkeypatch, tmp_path
+):
+    import cuentas
+
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    marca = tmp_path / 'api.activa'
+    marca.write_text('', encoding='utf-8')
+
+    # Si no hay proceso propio iniciado por esta preparación, no toca api.activa.
+    assert cuentas.detener_proceso_api(None) is False
+    assert marca.exists()
+
+    # Cierre correcto mediante terminate() con confirmación de fin (poll() == 0).
+    proceso = MagicMock()
+    proceso.poll.return_value = None
+    proceso.terminate.side_effect = lambda: setattr(proceso.poll, 'return_value', 0)
+    proceso.wait.return_value = 0
+
+    assert cuentas.detener_proceso_api(proceso) is True
+    proceso.terminate.assert_called_once()
+    proceso.kill.assert_not_called()
+    assert not marca.exists()
+
+    # Cierre normal tras Ctrl+C en mantener_api_activa: espera fin limpio sin forzar terminate/kill.
+    marca.write_text('', encoding='utf-8')
+    proceso_ctrl_c = MagicMock()
+    proceso_ctrl_c.poll.return_value = None
+
+    def wait_side_effect(timeout=None):
+        if timeout is None:
+            raise KeyboardInterrupt()
+        proceso_ctrl_c.poll.return_value = 0
+        return 0
+
+    proceso_ctrl_c.wait.side_effect = wait_side_effect
+    cuentas.mantener_api_activa(proceso_ctrl_c, timeout_cierre=2.0)
+    proceso_ctrl_c.terminate.assert_not_called()
+    proceso_ctrl_c.kill.assert_not_called()
+    assert not marca.exists()
+
+
+@pytest.mark.parametrize('modo_fallo', ['excepcion_timeout', 'excepcion_oserror', 'sigue_vivo_sin_excepcion'])
+def test_detener_proceso_api_conserva_marca_y_aborta_si_terminate_y_kill_fallan_con_proceso_vivo(
+    monkeypatch, tmp_path, modo_fallo
+):
+    import subprocess
+    import cuentas
+
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    marca = tmp_path / 'api.activa'
+    marca.write_text('', encoding='utf-8')
+
+    proceso = MagicMock()
+    proceso.poll.return_value = None
+    if modo_fallo == 'excepcion_timeout':
+        proceso.wait.side_effect = subprocess.TimeoutExpired(cmd='api', timeout=0.1)
+    elif modo_fallo == 'excepcion_oserror':
+        proceso.terminate.side_effect = OSError('detalle-interno-no-exponer')
+        proceso.kill.side_effect = OSError('detalle-interno-no-exponer')
+
+    with pytest.raises(c.Abortado, match=r'No se pudo detener.*api\.activa') as exc:
+        cuentas.detener_proceso_api(proceso, timeout=0.1)
+
+    proceso.terminate.assert_called_once()
+    proceso.kill.assert_called_once()
+    assert marca.exists()
+    assert 'detalle-interno-no-exponer' not in str(exc.value)
+
+
+@pytest.mark.parametrize('escenario', ['kill_forzado', 'ctrl_c_timeout_forzado', 'codigo_error'])
+def test_detener_proceso_api_no_presenta_terminacion_forzada_como_cierre_normal(
+    monkeypatch, tmp_path, escenario
+):
+    import subprocess
+    import cuentas
+
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    marca = tmp_path / 'api.activa'
+    marca.write_text('', encoding='utf-8')
+
+    proceso = MagicMock()
+    proceso.poll.return_value = None
+
+    if escenario == 'kill_forzado':
+        proceso.terminate.side_effect = subprocess.TimeoutExpired(cmd='api', timeout=0.1)
+        proceso.kill.side_effect = lambda: setattr(proceso.poll, 'return_value', -9)
+        with pytest.raises(c.Abortado, match='huella final'):
+            cuentas.detener_proceso_api(proceso, timeout=0.1)
+        proceso.terminate.assert_called_once()
+        proceso.kill.assert_called_once()
+        assert not marca.exists()
+    elif escenario == 'ctrl_c_timeout_forzado':
+        llamadas_wait = []
+
+        def wait_ctrl_c(timeout=None):
+            llamadas_wait.append(timeout)
+            if len(llamadas_wait) == 1:
+                raise KeyboardInterrupt()
+            if len(llamadas_wait) == 2:
+                raise subprocess.TimeoutExpired(cmd='api', timeout=timeout)
+            return 0
+
+        proceso.wait.side_effect = wait_ctrl_c
+        proceso.terminate.side_effect = lambda: setattr(proceso.poll, 'return_value', 0)
+        with pytest.raises(c.Abortado, match='huella final'):
+            cuentas.mantener_api_activa(proceso, timeout_cierre=0.1)
+        proceso.terminate.assert_called_once()
+        assert not marca.exists()
+    else:
+        proceso.terminate.side_effect = lambda: setattr(proceso.poll, 'return_value', 1)
+        with pytest.raises(c.Abortado, match='huella final'):
+            cuentas.detener_proceso_api(proceso, timeout=0.1)
+        assert not marca.exists()
+
+
+@pytest.mark.parametrize('etapa_fallo', ['durante_reseteo', 'arranque_api', 'control_428'])
+def test_preparacion_invalida_parte_a_aprobada_antes_de_resetear_y_ante_fallo_posterior(
+    monkeypatch, tmp_path, etapa_fallo
+):
+    import cuentas
+    import ejecutar_app
+
+    diario = _preparar_diario_base(tmp_path, con_temporales=True)
+    datos_aprobados = json.loads(diario.read_text(encoding='utf-8'))
+    for cuenta in c.CUENTAS:
+        datos_aprobados['verificacion_cuentas'][cuenta] = {
+            'rol': c.rol_cuenta(cuenta),
+            'temporal_verificada': True,
+            'cambio_frontend_completado': True,
+            'resultado': 'PASA',
+            'controles': [
+                {'control': 'POST /auth/login (temporal)', 'resultado': 'PASA'},
+                {'control': 'POST /auth/login (definitiva)', 'resultado': 'PASA'},
+                {'control': 'GET /auth/yo', 'resultado': 'PASA'},
+            ],
+        }
+    datos_aprobados['parte_a'] = {'estado': 'aprobada', 'completa': True}
+    diario.write_text(json.dumps(datos_aprobados), encoding='utf-8')
+
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    monkeypatch.setattr(c, 'CORRIDA', diario)
+    monkeypatch.setenv('ENTORNO', 'desarrollo')
+    monkeypatch.setattr(cuentas, '_puerto_ocupado', lambda host, port: False)
+
+    control = MagicMock()
+    motor = MagicMock()
+    control.__enter__.return_value = (motor, {'sha256': 'huella-inicial'}, 'servidor-qa')
+    monkeypatch.setattr(c, 'entorno_seguro', Mock(return_value=control))
+
+    diario_al_resetear = {}
+    temporales_generadas = {cuenta: f'TEMP-gen-{cuenta}' for cuenta in c.CUENTAS}
+
+    def sembrar_espia(motor_arg, cuentas_arg):
+        # En el instante del reseteo, el diario ya debe haber invalidado la aprobación anterior.
+        diario_al_resetear.update(json.loads(diario.read_text(encoding='utf-8')))
+        if etapa_fallo == 'durante_reseteo':
+            raise c.Abortado('Fallo simulado tras iniciar el reseteo de credenciales')
+        return dict(temporales_generadas)
+
+    monkeypatch.setattr(ejecutar_app, 'sembrar_cuentas_qa', sembrar_espia)
+
+    with c.app_sin_dotenv():
+        from app.core import reloj as reloj_app
+        monkeypatch.setattr(reloj_app, 'real', lambda: datetime(2026, 10, 16, 11, 0, 0))
+
+        proceso_api = MagicMock()
+        proceso_api.poll.return_value = None
+        proceso_api.terminate.side_effect = lambda: setattr(proceso_api.poll, 'return_value', 0)
+        monkeypatch.setattr(cuentas, 'lanzar_api_qa', Mock(return_value=proceso_api))
+
+        if etapa_fallo == 'arranque_api':
+            monkeypatch.setattr(
+                cuentas,
+                'esperar_api_lista',
+                Mock(side_effect=c.Abortado('La API QA no pudo iniciar')),
+            )
+        else:
+            solicitar, _ = _simulador_http_cuentas(
+                fallo_en=('cocinera1', 'login_temporal'),
+                temporales_esperadas=temporales_generadas,
+            )
+            monkeypatch.setattr(cuentas, 'cliente_http', lambda base: solicitar)
+
+        with pytest.raises(c.Abortado):
+            cuentas.main(['--preparar'])
+
+    # 1. Antes del primer reseteo ya quedó invalidada la Parte A anterior en corrida.json.
+    assert diario_al_resetear['parte_a'] == {'estado': 'preparacion_pendiente', 'completa': False}
+    for cuenta in c.CUENTAS:
+        info_prev = diario_al_resetear['verificacion_cuentas'][cuenta]
+        assert info_prev['resultado'] == 'PENDIENTE'
+        assert info_prev['temporal_verificada'] is False
+        assert info_prev['cambio_frontend_completado'] is False
+        assert info_prev['controles'] == []
+
+    # 2. Tras el fallo posterior, el diario sigue incompleto y sin aprobación ni PASA previos vigentes.
+    guardado = json.loads(diario.read_text(encoding='utf-8'))
+    assert guardado['parte_a']['completa'] is False
+    assert guardado['parte_a']['estado'] in {'preparacion_pendiente', 'falla'}
+    assert guardado['parte_a']['estado'] != 'aprobada'
+    for cuenta in c.CUENTAS:
+        resumen = guardado['verificacion_cuentas'][cuenta]
+        assert resumen['resultado'] != 'PASA'
+        assert resumen['cambio_frontend_completado'] is False
+        assert all(
+            ctrl.get('control') != 'POST /auth/login (definitiva)'
+            for ctrl in resumen.get('controles', [])
+        )
+
+
+def test_cuentas_py_exige_preparacion_previa_antes_de_pedir_claves_definitivas(
+    monkeypatch, tmp_path
+):
+    import cuentas
+
+    diario = _preparar_diario_base(tmp_path, con_temporales=False)
     monkeypatch.setattr(c, 'CARPETA', tmp_path)
     monkeypatch.setattr(c, 'CORRIDA', diario)
     solicitar, _ = _simulador_http_cuentas()
     monkeypatch.setattr(cuentas, 'cliente_http', lambda base: solicitar)
+    pedir = Mock(side_effect=AssertionError('No debe pedir clave definitiva si falta --preparar'))
+    monkeypatch.setattr(cuentas.getpass, 'getpass', pedir)
 
-    claves_ingresadas = iter([
-        'TEMP-secreta-c1', 'NUEVA-secreta-c1',
-        'TEMP-secreta-c2', 'NUEVA-secreta-c2',
-        'TEMP-secreta-c3', 'NUEVA-secreta-c3',
-        'TEMP-secreta-jefa', 'NUEVA-secreta-jefa',
+    with pytest.raises(c.Abortado, match='preparar'):
+        cuentas.main([])
+    pedir.assert_not_called()
+
+
+def test_cuentas_py_pasa_las_4_cuentas_tras_cambio_en_frontend_y_no_guarda_claves_ni_tokens(
+    monkeypatch, tmp_path, capsys
+):
+    import cuentas
+
+    diario = _preparar_diario_base(tmp_path, con_temporales=True)
+    monkeypatch.setattr(c, 'CARPETA', tmp_path)
+    monkeypatch.setattr(c, 'CORRIDA', diario)
+    solicitar, llamadas = _simulador_http_cuentas()
+    monkeypatch.setattr(cuentas, 'cliente_http', lambda base: solicitar)
+
+    claves_definitivas = iter([
+        'DEFINITIVA-secreta-c1',
+        'DEFINITIVA-secreta-c2',
+        'DEFINITIVA-secreta-c3',
+        'DEFINITIVA-secreta-jefa',
     ])
-    monkeypatch.setattr(cuentas.getpass, 'getpass', lambda prompt: next(claves_ingresadas))
+    monkeypatch.setattr(cuentas.getpass, 'getpass', lambda prompt: next(claves_definitivas))
 
     cuentas.main([])
     salida = capsys.readouterr()
@@ -650,15 +1087,21 @@ def test_cuentas_py_pasa_las_4_cuentas_y_no_guarda_claves_ni_tokens(monkeypatch,
     texto_diario = diario.read_text(encoding='utf-8')
     guardado = json.loads(texto_diario)
 
+    assert guardado['parte_a'] == {'estado': 'aprobada', 'completa': True}
     for cuenta in ('cocinera1', 'cocinera2', 'cocinera3'):
         assert guardado['verificacion_cuentas'][cuenta]['resultado'] == 'PASA'
-        assert len(guardado['verificacion_cuentas'][cuenta]['controles']) == 8
+        assert guardado['verificacion_cuentas'][cuenta]['cambio_frontend_completado'] is True
+        assert len(guardado['verificacion_cuentas'][cuenta]['controles']) == 7
+        assert guardado['verificacion_cuentas'][cuenta]['controles'][0]['control'] == 'POST /auth/login (temporal)'
+        assert guardado['verificacion_cuentas'][cuenta]['controles'][1]['control'] == 'POST /auth/login (definitiva)'
     assert guardado['verificacion_cuentas']['jefa']['resultado'] == 'PASA'
-    assert len(guardado['verificacion_cuentas']['jefa']['controles']) == 6
+    assert guardado['verificacion_cuentas']['jefa']['cambio_frontend_completado'] is True
+    assert len(guardado['verificacion_cuentas']['jefa']['controles']) == 5
+    assert all(ll[1] != '/auth/cambio-password' for ll in llamadas)
 
     # Ninguna clave, token ni detalle arbitrario puede aparecer en corrida.json ni en la consola.
     for secreto in (
-        'TEMP-secreta', 'NUEVA-secreta', 'JWT-TEMP-', 'JWT-ACCESS-', 'JWT-CAMBIO-',
+        'DEFINITIVA-secreta', 'JWT-TEMP-', 'JWT-ACCESS-',
         'JWT-REFRESH-', 'SECRETO-SERVIDOR-99',
     ):
         assert secreto not in texto_diario
@@ -672,22 +1115,21 @@ def test_cuentas_py_pasa_las_4_cuentas_y_no_guarda_claves_ni_tokens(monkeypatch,
     ('cocinera2', 'intervenciones_cocina'),
     ('cocinera3', 'admin_cuentas'),
     ('jefa', 'identificar_lectura'),
-    ('jefa', 'login_temporal'),
-    ('jefa', 'cambio_password'),
-    ('jefa', 'login_nueva'),
+    ('jefa', 'sin_cambio_frontend'),
+    ('jefa', 'login_definitiva'),
 ])
 def test_cuentas_py_detecta_falla_sin_reintentar_credenciales_y_sale_con_error(
     monkeypatch, tmp_path, capsys, fallo
 ):
     import cuentas
 
-    diario = _preparar_diario_base(tmp_path)
+    diario = _preparar_diario_base(tmp_path, con_temporales=True)
     monkeypatch.setattr(c, 'CARPETA', tmp_path)
     monkeypatch.setattr(c, 'CORRIDA', diario)
     cuenta_fallida, etapa = fallo
     solicitar, llamadas = _simulador_http_cuentas(fallo_en=fallo)
     monkeypatch.setattr(cuentas, 'cliente_http', lambda base: solicitar)
-    claves = iter([f'TEMP-{cuenta_fallida}', f'NUEVA-{cuenta_fallida}'])
+    claves = iter([f'DEFINITIVA-{cuenta_fallida}'])
     monkeypatch.setattr(cuentas.getpass, 'getpass', lambda prompt: next(claves))
 
     with pytest.raises(SystemExit) as exc:
@@ -696,18 +1138,21 @@ def test_cuentas_py_detecta_falla_sin_reintentar_credenciales_y_sale_con_error(
     salida = capsys.readouterr()
     assert 'FALLA' in salida.out
 
-    # Si falla el login temporal o el cambio de clave, no debe enviar otro POST /auth/login.
+    # Nunca debe reintentar POST /auth/login tras un fallo de credenciales o falta de cambio en frontend.
     logins = [ll for ll in llamadas if (ll[0], ll[1]) == ('POST', '/auth/login')]
-    if etapa in ('login_temporal', 'cambio_password'):
-        assert len(logins) == 1
+    assert len(logins) == 1
+    if etapa in ('sin_cambio_frontend', 'login_definitiva'):
+        assert len(llamadas) == 2  # Solo GET /salud y un POST /auth/login
 
     texto_diario = diario.read_text(encoding='utf-8')
     guardado = json.loads(texto_diario)
     resumen = guardado['verificacion_cuentas'][cuenta_fallida]
     assert resumen['resultado'] == 'FALLA'
+    assert resumen['cambio_frontend_completado'] is False
+    assert guardado['parte_a'] == {'estado': 'falla', 'completa': False}
     assert any(ctrl['resultado'] == 'FALLA' for ctrl in resumen['controles'])
     for prohibido in (
-        f'TEMP-{cuenta_fallida}', f'NUEVA-{cuenta_fallida}', 'JWT-', 'SECRETO-SERVIDOR-99'
+        f'DEFINITIVA-{cuenta_fallida}', 'JWT-', 'SECRETO-SERVIDOR-99'
     ):
         assert prohibido not in texto_diario
         assert prohibido not in salida.out
@@ -717,13 +1162,38 @@ def test_cuentas_py_detecta_falla_sin_reintentar_credenciales_y_sale_con_error(
 def test_cuentas_py_solo_conserva_resultados_previos_de_otras_cuentas(monkeypatch, tmp_path):
     import cuentas
 
-    diario = _preparar_diario_base(tmp_path)
+    diario = _preparar_diario_base(tmp_path, con_temporales=True)
     datos_iniciales = json.loads(diario.read_text(encoding='utf-8'))
+    control_temp = datos_iniciales['verificacion_cuentas']['cocinera2']['controles'][0]
     datos_iniciales['verificacion_cuentas'] = {
-        'cocinera1': {'rol': 'cocinera', 'resultado': 'PASA', 'controles': [{'control': 'previo1', 'resultado': 'PASA'}]},
-        'cocinera2': {'rol': 'cocinera', 'resultado': 'FALLA', 'controles': [{'control': 'previo2', 'resultado': 'FALLA'}]},
-        'cocinera3': {'rol': 'cocinera', 'resultado': 'PASA', 'controles': [{'control': 'previo3', 'resultado': 'PASA'}]},
-        'jefa': {'rol': 'jefa', 'resultado': 'PASA', 'controles': [{'control': 'previo4', 'resultado': 'PASA'}]},
+        'cocinera1': {
+            'rol': 'cocinera',
+            'temporal_verificada': True,
+            'cambio_frontend_completado': True,
+            'resultado': 'PASA',
+            'controles': [control_temp, {'control': 'previo1', 'resultado': 'PASA'}],
+        },
+        'cocinera2': {
+            'rol': 'cocinera',
+            'temporal_verificada': True,
+            'cambio_frontend_completado': False,
+            'resultado': 'FALLA',
+            'controles': [control_temp, {'control': 'previo2', 'resultado': 'FALLA'}],
+        },
+        'cocinera3': {
+            'rol': 'cocinera',
+            'temporal_verificada': True,
+            'cambio_frontend_completado': True,
+            'resultado': 'PASA',
+            'controles': [control_temp, {'control': 'previo3', 'resultado': 'PASA'}],
+        },
+        'jefa': {
+            'rol': 'jefa',
+            'temporal_verificada': True,
+            'cambio_frontend_completado': True,
+            'resultado': 'PASA',
+            'controles': [control_temp, {'control': 'previo4', 'resultado': 'PASA'}],
+        },
     }
     diario.write_text(json.dumps(datos_iniciales), encoding='utf-8')
 
@@ -731,7 +1201,7 @@ def test_cuentas_py_solo_conserva_resultados_previos_de_otras_cuentas(monkeypatc
     monkeypatch.setattr(c, 'CORRIDA', diario)
     solicitar, llamadas = _simulador_http_cuentas()
     monkeypatch.setattr(cuentas, 'cliente_http', lambda base: solicitar)
-    claves = iter(['TEMP-cocinera2', 'NUEVA-cocinera2'])
+    claves = iter(['DEFINITIVA-cocinera2'])
     monkeypatch.setattr(cuentas.getpass, 'getpass', lambda prompt: next(claves))
 
     cuentas.main(['--solo', 'cocinera2'])
@@ -739,14 +1209,16 @@ def test_cuentas_py_solo_conserva_resultados_previos_de_otras_cuentas(monkeypatc
     verif = guardado['verificacion_cuentas']
 
     assert verif['cocinera2']['resultado'] == 'PASA'
-    assert len(verif['cocinera2']['controles']) == 8
+    assert verif['cocinera2']['cambio_frontend_completado'] is True
+    assert len(verif['cocinera2']['controles']) == 7
     assert verif['cocinera1'] == datos_iniciales['verificacion_cuentas']['cocinera1']
     assert verif['cocinera3'] == datos_iniciales['verificacion_cuentas']['cocinera3']
     assert verif['jefa'] == datos_iniciales['verificacion_cuentas']['jefa']
+    assert guardado['parte_a'] == {'estado': 'aprobada', 'completa': True}
     usuarios_autenticados = [
         ll[2]['username'] for ll in llamadas if (ll[0], ll[1]) == ('POST', '/auth/login')
     ]
-    assert usuarios_autenticados == ['cocinera2', 'cocinera2']
+    assert usuarios_autenticados == ['cocinera2']
 
 
 @pytest.mark.parametrize('respuesta_salud', [
@@ -797,7 +1269,7 @@ def test_cuentas_py_omite_motivo_desconocido_aunque_cumpla_snake_case(monkeypatc
         return solicitar_base(metodo, ruta, cuerpo, token)
 
     monkeypatch.setattr(cuentas, 'cliente_http', lambda base: solicitar_con_motivo_desconocido)
-    claves = iter(['TEMP-jefa', 'NUEVA-jefa'])
+    claves = iter(['DEFINITIVA-jefa'])
     monkeypatch.setattr(cuentas.getpass, 'getpass', lambda prompt: next(claves))
 
     with pytest.raises(SystemExit) as exc:
@@ -807,8 +1279,8 @@ def test_cuentas_py_omite_motivo_desconocido_aunque_cumpla_snake_case(monkeypatc
     salida = capsys.readouterr()
     texto_diario = diario.read_text(encoding='utf-8')
     guardado = json.loads(texto_diario)
-    primer_control = guardado['verificacion_cuentas']['jefa']['controles'][0]
-    assert primer_control['obtenido'] == '401'
+    control_login_def = guardado['verificacion_cuentas']['jefa']['controles'][1]
+    assert control_login_def['obtenido'] == '401'
     assert motivo_desconocido not in texto_diario
     assert motivo_desconocido not in salida.out
     assert motivo_desconocido not in salida.err
