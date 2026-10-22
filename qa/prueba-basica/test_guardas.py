@@ -546,7 +546,7 @@ def _simulador_http_cuentas(fallo_en=None, temporales_esperadas=None):
                 'entorno': 'desarrollo',
                 'base_datos': c.SIM,
                 'base_turnos': c.DEMO,
-                'revision_alembic': 'e1a7c3b9d5f2',
+                'revision_alembic': '8d4a2b7c9f10',
             }
         if (metodo, ruta) == ('POST', '/auth/login'):
             cuenta = cuerpo['username']
@@ -1225,13 +1225,13 @@ def test_cuentas_py_solo_conserva_resultados_previos_de_otras_cuentas(monkeypatc
 
 @pytest.mark.parametrize('respuesta_salud', [
     (200, {'estado': 'ok', 'entorno': 'desarrollo', 'base_datos': 'bd_nutricion',
-           'base_turnos': c.DEMO, 'revision_alembic': 'e1a7c3b9d5f2'}),
+           'base_turnos': c.DEMO, 'revision_alembic': '8d4a2b7c9f10'}),
     (200, {'estado': 'ok', 'entorno': 'desarrollo', 'base_datos': c.SIM,
-           'base_turnos': c.PROTEGIDA, 'revision_alembic': 'e1a7c3b9d5f2'}),
+           'base_turnos': c.PROTEGIDA, 'revision_alembic': '8d4a2b7c9f10'}),
     (200, {'estado': 'ok', 'entorno': 'desarrollo', 'base_datos': c.SIM,
            'base_turnos': c.DEMO, 'revision_alembic': 'otra'}),
     (200, {'estado': 'ok', 'entorno': 'produccion', 'base_datos': c.SIM,
-           'base_turnos': c.DEMO, 'revision_alembic': 'e1a7c3b9d5f2'}),
+           'base_turnos': c.DEMO, 'revision_alembic': '8d4a2b7c9f10'}),
     (503, {'estado': 'error'}),
 ])
 def test_cuentas_py_aborta_si_salud_no_coincide(monkeypatch, tmp_path, respuesta_salud):
@@ -1434,9 +1434,12 @@ def test_preparar_comensales_simulacro_aplicacion_idempotencia_y_colisiones(
 
     assert preparar_comensales.permisos_preparador(False) == ()
     permisos_aplicar = preparar_comensales.permisos_preparador(True)
-    assert all(verbo == 'INSERT' and base == c.DEMO for base, _, verbo in permisos_aplicar)
+    assert all(verbo in {'INSERT', 'UPDATE'} and base == c.DEMO for base, _, verbo in permisos_aplicar)
+    assert {tabla for _, tabla, verbo in permisos_aplicar if verbo == 'UPDATE'} == {'users', 'usuario_servicios', 'turnos_asignados'}
 
     monkeypatch.setattr(preparar_comensales, 'verificar_comensales_en_app', Mock())
+    import preparar_perfiles
+    monkeypatch.setattr(preparar_perfiles, 'preparar', Mock())  # La migracion tiene pruebas SQL independientes.
 
     # 1. Simulacro por defecto: no emite ningún INSERT.
     motor_sim = MagicMock()
@@ -1640,7 +1643,7 @@ def test_verificar_casos_normal_identificacion_consulta_jefa_y_reserva(
         'cuenta_id': 2,
         'resultado': 'registrada',
         'motivo_rechazo': None,
-        'causa': 'identificacion_lectura_no_reconocida',
+        'causa': 'identificacion_manual_por_no_identificado',
         'asistencia_id': 202,
         'comida_id': c.COMIDA,
         'fecha_comida': fecha_op,
@@ -1668,7 +1671,7 @@ def test_verificar_casos_normal_identificacion_consulta_jefa_y_reserva(
         'id': 301,
         'resultado': 'registrada',
         'motivo_rechazo': None,
-        'causa': 'identificacion_lectura_no_reconocida',
+        'causa': 'identificacion_manual_por_no_identificado',
         'momento': momento_int,
         'lectura_id': 102,
         'lectura_resultado': 'rechazada',

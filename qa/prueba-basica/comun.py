@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import time
 from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
@@ -24,10 +25,22 @@ MARCADOR = "comedor-escenario-sintetico"
 USUARIO = 900001
 ASIGNACION = 91739904
 COMIDA = 2
+COMIDAS_LABORATORIO = {
+    1: {'id': 1, 'nombre': 'Desayuno', 'codigo': 'desayuno', 'hora': '08:00:00'},
+    2: {'id': 2, 'nombre': 'Almuerzo', 'codigo': 'almuerzo', 'hora': '12:00:00'},
+    3: {'id': 3, 'nombre': 'Té', 'codigo': 'te', 'hora': '16:00:00'},
+    4: {'id': 4, 'nombre': 'Cena', 'codigo': 'cena', 'hora': '19:00:00'},
+}
+TURNO_LABORATORIO = 900101
 DISPOSITIVO = "lector-prueba-qa"
 MANIFIESTO_COMENSALES = CARPETA / "manifiesto_comensales_qa.json"
 USUARIOS_HISTORICOS = frozenset(range(900001, 900008))
 CASOS_EJECUTABLES = ("qa01", "qa02")
+PERFILES_QA = {
+    900101: {'categoria_id': 9003, 'categoria': 'Medicos', 'servicio_id': 9003, 'servicio': 'MEDICINA INTERNA'},
+    900102: {'categoria_id': 9004, 'categoria': 'Tecnicos', 'servicio_id': 9004, 'servicio': 'LABORATORIO'},
+    900103: {'categoria_id': 9005, 'categoria': 'Internos', 'servicio_id': 9005, 'servicio': 'IMAGENOLOGIA'},
+}
 COMENSALES_QA = {
     "qa01": {
         "codigo": "qa01",
@@ -170,6 +183,9 @@ def revisar_sql(sentencia, base, permitidas):
         if re.search(r"\b(INSERT|UPDATE|DELETE|REPLACE|CALL|INTO)\b", palabras, re.I):
             # El bloqueo de filas propia es necesario para la intervención.
             sin_bloqueo = re.sub(r"\bFOR UPDATE\b", "", palabras, flags=re.I)
+            # REPLACE(...) es una funcion de texto de solo lectura. REPLACE INTO
+            # sigue prohibido, igual que todo DML dentro de SELECT.
+            sin_bloqueo = re.sub(r"\bREPLACE(?=\s*\()", "FUNCION_TEXTO", sin_bloqueo, flags=re.I)
             if re.search(r"\b(INSERT|UPDATE|DELETE|REPLACE|CALL|INTO)\b", sin_bloqueo, re.I):
                 raise Abortado("Auditor: SELECT no permitido")
         return
@@ -178,6 +194,10 @@ def revisar_sql(sentencia, base, permitidas):
     if re.fullmatch(rf"CHECKSUM TABLE `{PROTEGIDA}`\.`[A-Za-z0-9_]+` EXTENDED", sql, re.I):
         return
     if re.fullmatch(r"(?:SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT) sa_savepoint_\d+", sql, re.I):
+        return
+    # Excepción cerrada para la migración aditiva de bajas lógicas, nunca DDL general.
+    if (base == SIM and (SIM, "usuarios_sistema", "ADD_ELIMINADA_EN") in permitidas
+            and re.fullmatch(r"ALTER TABLE `?usuarios_sistema`? ADD (?:COLUMN )?`?eliminada_en`? DATETIME(?: NULL)?", sql, re.I)):
         return
     for verbo, patron in PATRONES.items():
         m = patron.match(sql)
@@ -230,13 +250,13 @@ def mostrar_huella(etiqueta, huella):
     print(f"{PROTEGIDA} {etiqueta}: {huella['sha256']} ({len(huella['tablas'])} tablas)")
 
 
-def preflight(conexion):
+def preflight(conexion, revisiones=("8d4a2b7c9f10",)):
     """Solo SELECT en conexión AUTOCOMMIT: antes de cualquier transacción DB."""
     validar_marcador(conexion.execute(text(
         f"SELECT clave, version, base_sim FROM `{DEMO}`.escenario_sintetico WHERE clave=:clave"
     ), {"clave": MARCADOR}).mappings().one_or_none())
     revision = conexion.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    if revision != "e1a7c3b9d5f2":
+    if revision not in revisiones:
         raise Abortado("Revisión Alembic incompatible")
     tablas = conexion.execute(text(
         "SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE FROM information_schema.TABLES "
@@ -263,7 +283,7 @@ def preflight(conexion):
 
 
 @contextmanager
-def entorno_seguro(permitidas=()):
+def entorno_seguro(permitidas=(), *, revisiones=None):
     url = validar_entorno()  # Antes de crear motores o importar app.
     autorizadas = set()
     quitar = instalar_auditor(autorizadas)
@@ -272,7 +292,7 @@ def entorno_seguro(permitidas=()):
     inicial = None
     try:
         with control.connect() as conn:
-            servidor = preflight(conn)
+            servidor = preflight(conn) if revisiones is None else preflight(conn, revisiones)
             inicial = huella_protegida(conn)
         mostrar_huella("antes", inicial)
         autorizadas.update(permitidas)
@@ -355,6 +375,13 @@ def guardar_corrida(datos):
     if not isinstance(datos, dict):
         raise Abortado("El diario debe ser un objeto JSON")
     _sin_secretos(datos)
+    if 'casos_por_comida' in datos:
+        import copy
+        if not isinstance(datos['casos_por_comida'], dict):
+            raise Abortado('Historial de casos por comida invalido')
+        clave = str(comida_corrida(datos))
+        datos['casos_por_comida'][clave] = copy.deepcopy(datos['casos'])
+        datos.setdefault('revisiones_por_comida', {})[clave] = copy.deepcopy(datos.get('revision_operador', {}))
     normalizados = {
         campo: normalizar_contador(datos[campo], permitir_none=True)
         for campo in CONTADORES_DIARIO
@@ -369,7 +396,16 @@ def guardar_corrida(datos):
         archivo.write(contenido)
         archivo.flush()
         os.fsync(archivo.fileno())
-    os.replace(temporal, CORRIDA)
+    # Windows puede negar el reemplazo mientras otro proceso lee el reloj.
+    # Se conserva el temporal completo y el diario anterior; no se trunca el destino.
+    for intento in range(40):
+        try:
+            os.replace(temporal, CORRIDA)
+            break
+        except PermissionError as error:
+            if getattr(error, 'winerror', None) not in (5, 32, 33) or intento == 39:
+                raise
+            time.sleep(.025)
 
 
 def cargar_manifiesto_comensales(ruta=None):
@@ -453,7 +489,14 @@ def resumen_comensales_diario():
     }
 
 
-def casos_iniciales_diario():
+def comida_corrida(datos):
+    comida = datos.get('comida_ensayo', COMIDA)
+    if type(comida) is not int or comida not in COMIDAS_LABORATORIO:
+        raise Abortado('Comida del ensayo inválida en corrida.json')
+    return comida
+
+
+def casos_iniciales_diario(comida=None):
     qa01 = COMENSALES_QA["qa01"]
     qa02 = COMENSALES_QA["qa02"]
     return {
@@ -462,7 +505,7 @@ def casos_iniciales_diario():
             "usuario_id": qa01["usuario_id"],
             "comensal_previsto_id": qa01["usuario_id"],
             "asignacion_id": qa01["asignacion_id"],
-            "comida_id": qa01["comida_id"],
+            "comida_id": comida if comida is not None else qa01["comida_id"],
             "modo_marcacion": "reconocida",
             "cuenta_identificadora": None,
             "estado": "pendiente",
@@ -478,7 +521,7 @@ def casos_iniciales_diario():
             "usuario_id": None,
             "comensal_previsto_id": qa02["usuario_id"],
             "asignacion_id": qa02["asignacion_id"],
-            "comida_id": qa02["comida_id"],
+            "comida_id": comida if comida is not None else qa02["comida_id"],
             "modo_marcacion": "no_reconocida",
             "cuenta_identificadora": qa02["cuenta_identificadora"],
             "estado": "pendiente",
@@ -490,6 +533,42 @@ def casos_iniciales_diario():
             "verificado": False,
         },
     }
+
+
+def vistas_servicios(datos):
+    """Proyecciones del diario por comida; conservan las referencias a sus casos."""
+    servicios = dict(datos.get('casos_por_comida', {}))
+    servicios[str(comida_corrida(datos))] = datos['casos']
+    for clave, casos in servicios.items():
+        vista = {**datos, 'comida_ensayo': int(clave), 'casos': casos}
+        vista.pop('casos_por_comida', None)
+        yield vista
+
+
+def ids_casos_corrida(datos):
+    return {caso['lectura_id'] for vista in vistas_servicios(datos)
+            for caso in vista['casos'].values() if caso.get('lectura_id') is not None}
+
+
+def seleccionar_servicio(datos, comida):
+    """Cambiar el servicio visible no descarta lecturas ni aprobaciones de otro."""
+    import copy
+    if type(comida) is not int or comida not in COMIDAS_LABORATORIO:
+        raise Abortado('Comida del ensayo invalida')
+    validar_casos_diario(datos)
+    anterior = str(comida_corrida(datos))
+    servicios = datos.setdefault('casos_por_comida', {})
+    revisiones = datos.setdefault('revisiones_por_comida', {})
+    servicios[anterior] = copy.deepcopy(datos['casos'])
+    revisiones[anterior] = copy.deepcopy(datos.get('revision_operador', {}))
+    clave = str(comida)
+    datos['comida_ensayo'] = comida
+    datos['casos'] = copy.deepcopy(servicios.setdefault(clave, casos_iniciales_diario(comida)))
+    datos['revision_operador'] = copy.deepcopy(revisiones.get(clave, {}))
+    if any(info.get('lectura_id') is not None for info in datos['casos'].values()):
+        datos['estado'] = 'lectura_creada'
+    else:
+        datos['estado'] = 'refechada' if datos.get('fecha_destino') else 'iniciada'
 
 
 def es_corrida_multi(datos):
@@ -506,8 +585,22 @@ def validar_casos_diario(datos):
         raise Abortado("corrida.json no corresponde al escenario de tres comensales")
     if datos.get("comensales") != resumen_comensales_diario():
         raise Abortado("Definición de comensales alterada en corrida.json")
+    if 'casos_por_comida' in datos:
+        servicios = datos['casos_por_comida']
+        if (not isinstance(servicios, dict) or not servicios
+                or any(k not in {'1', '2', '3', '4'} for k in servicios)
+                or servicios.get(str(comida_corrida(datos))) != datos['casos']):
+            raise Abortado('Historial de casos por comida incompatible')
+        vistos = set()
+        for vista in vistas_servicios(datos):
+            validar_casos_diario(vista)
+            ids = {f['lectura_id'] for f in vista['casos'].values() if f.get('lectura_id') is not None}
+            if vistos & ids:
+                raise Abortado('Una lectura esta repetida entre comidas del diario')
+            vistos |= ids
+        return
     casos = datos.get("casos")
-    plantilla = casos_iniciales_diario()
+    plantilla = casos_iniciales_diario(comida_corrida(datos))
     if not isinstance(casos, dict) or set(casos) != set(plantilla):
         raise Abortado("Estructura de casos inválida en corrida.json")
     lecturas_vistas = set()
@@ -683,7 +776,7 @@ def fila_asignacion_v1(conn, bloquear=False):
     return fila
 
 
-def filas_asignaciones_qa(conn, bloquear=False):
+def filas_asignaciones_qa(conn, bloquear=False, turno_laboratorio=None):
     cargar_manifiesto_comensales()
     filas = conn.execute(text(
         f"SELECT id, usuario_id, fecha, turno_id FROM `{DEMO}`.turnos_asignados "
@@ -701,18 +794,28 @@ def filas_asignaciones_qa(conn, bloquear=False):
     por_id = {f["id"]: dict(f) for f in filas}
     fechas = set()
     por_codigo = {}
+    turnos_permitidos = None
+    if turno_laboratorio is not None:
+        if (turno_laboratorio.get('id') != TURNO_LABORATORIO
+                or turno_laboratorio.get('original') != 9001):
+            raise Abortado('Definición del turno de laboratorio alterada')
+        turnos_permitidos = {TURNO_LABORATORIO}
+        if turno_laboratorio.get('preparando') is True:
+            turnos_permitidos.add(9001)
     for codigo, spec in COMENSALES_QA.items():
         fila = por_id.get(spec["asignacion_id"])
         if (
             not fila
             or fila["usuario_id"] != spec["usuario_id"]
-            or fila["turno_id"] != spec["turno_id"]
+            or fila["turno_id"] not in (turnos_permitidos or {spec["turno_id"]})
         ):
             raise Abortado(f"Asignación sintética incompatible para {codigo}")
         fechas.add(fila["fecha"])
         por_codigo[codigo] = fila
     if len(fechas) != 1:
         raise Abortado("Las asignaciones de los tres comensales QA tienen fechas distintas")
+    if len({f['turno_id'] for f in filas}) != 1:
+        raise Abortado('Los tres comensales QA deben conservar el mismo turno')
     if not bloquear:
         padron = conn.execute(text(
             "SELECT usuario_id, nombre_completo, numero_item, carnet_identidad, "
@@ -731,7 +834,7 @@ def filas_asignaciones_qa(conn, bloquear=False):
                 or ficha["nombre_completo"] != spec["nombre"]
                 or ficha["numero_item"] != spec["legajo"]
                 or ficha["carnet_identidad"] != spec["carnet_identidad"]
-                or ficha["categoria"] != "Administrativo"
+                or ficha["categoria"] not in {"Administrativo", PERFILES_QA[spec['usuario_id']]['categoria']}
                 or not bool(ficha["tiene_ficha"])
             ):
                 raise Abortado(
@@ -749,9 +852,27 @@ _FILA_ASIGNACION_ORIGINAL = fila_asignacion
 
 
 def filas_asignaciones_corrida(conn, datos, bloquear=False):
+    if es_corrida_multi(datos) and datos.get('turno_laboratorio'):
+        return filas_asignaciones_qa(conn, bloquear=bloquear, turno_laboratorio=datos['turno_laboratorio'])
     if es_corrida_multi(datos) or fila_asignacion is not _FILA_ASIGNACION_ORIGINAL:
         return fila_asignacion(conn, bloquear=bloquear)
     return fila_asignacion_v1(conn, bloquear=bloquear)
+
+
+def restaurar_turno_laboratorio(conn, datos):
+    if not datos.get('turno_laboratorio'):
+        return
+    filas = filas_asignaciones_qa(conn, bloquear=True, turno_laboratorio=datos['turno_laboratorio'])
+    if all(f['turno_id'] == 9001 for f in filas['asignaciones'].values()):
+        return
+    for spec in COMENSALES_QA.values():
+        resultado = conn.execute(text(
+            f'UPDATE `{DEMO}`.turnos_asignados SET turno_id=:original '
+            'WHERE id=:id AND usuario_id=:uid AND turno_id=:laboratorio'
+        ), {'original': 9001, 'id': spec['asignacion_id'], 'uid': spec['usuario_id'],
+            'laboratorio': TURNO_LABORATORIO})
+        if resultado.rowcount != 1:
+            raise Abortado('La asignación QA cambió al restaurar su turno')
 
 
 def cambiar_fecha_v1(conn, anterior, nueva):
@@ -884,18 +1005,35 @@ def mostrar_reloj(lab, real):
     print(f"Reloj de laboratorio: {lab.isoformat()} (real: {real.isoformat()})")
 
 
+def momento_laboratorio(datos, real=None):
+    """Hora de negocio; el modo fijo permite al operador probar sin que venza la ventana."""
+    desfase = desfase_reloj(datos)
+    modo = datos['reloj'].get('modo', 'continuo')
+    if modo not in ('continuo', 'fijo'):
+        raise Abortado("Modo de reloj de laboratorio inválido")
+    if modo == 'fijo':
+        return datetime.fromisoformat(datos['reloj']['lab'])
+    return (real if real is not None else datetime.now()) + desfase
+
+
 @contextmanager
-def reloj_laboratorio(datos):
+def reloj_laboratorio(datos, *, interactivo=False):
     """Usar dentro de app_sin_dotenv. Solo cambia ahora, durante este proceso.
 
     El desfase sale SIEMPRE del diario; arrancar otro proceso no reinicia la
     ventana. real/real_utc, tokens e inicio real de la corrida quedan intactos.
     """
     from app.core import reloj
-    desfase = desfase_reloj(datos)
     real = reloj.real()
-    mostrar_reloj(real + desfase, real)
-    with patch.object(reloj, 'ahora', lambda: reloj.real() + desfase):
+    mostrar_reloj(momento_laboratorio(datos, real), real)
+
+    def ahora_laboratorio():
+        actual = leer_corrida_local() if interactivo else datos
+        if interactivo and actual['inicio'] != datos['inicio']:
+            raise Abortado("La corrida cambió con la API activa; reiniciar desde el laboratorio")
+        return momento_laboratorio(actual, reloj.real())
+
+    with patch.object(reloj, 'ahora', ahora_laboratorio):
         yield reloj
 
 

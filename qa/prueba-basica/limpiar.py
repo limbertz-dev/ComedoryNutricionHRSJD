@@ -32,6 +32,33 @@ def objetivos(conn, datos, actuales=None):
         filtros = [('intervenciones_lectura', ':lectura IS NOT NULL AND lectura_id=:lectura'),
                    ('asistencias', ':lectura IS NOT NULL AND lectura_id=:lectura'),
                    ('lecturas_biometricas', ':lectura IS NOT NULL AND id=:lectura')]
+    if datos.get('casos_por_comida'):
+        ids = sorted(c.ids_casos_corrida(datos) - {datos['casos'][k].get('lectura_id') for k in ('qa01', 'qa02')})
+        for indice, lid in enumerate(ids):
+            params[f'historica_{indice}'] = lid
+        if ids:
+            lista = ','.join(f':historica_{i}' for i in range(len(ids)))
+            filtros = [(tabla, f'({filtro}) OR {"id" if tabla == "lecturas_biometricas" else "lectura_id"} IN ({lista})')
+                       for tabla, filtro in filtros]
+    if datos.get('lecturas_enroladas'):
+        import lector_enrolado
+        ids = sorted(lector_enrolado.validar(conn, datos))
+        if ids:
+            claves = []
+            for indice, lid in enumerate(ids):
+                clave = f'enrolada_{indice}'
+                params[clave] = lid
+                claves.append(f':{clave}')
+            lista = ','.join(claves)
+            filtros = [(tabla, f'({filtro}) OR {"id" if tabla == "lecturas_biometricas" else "lectura_id"} IN ({lista})')
+                       for tabla, filtro in filtros]
+    if datos.get('lecturas_concurrentes'):
+        import concurrencia
+        ids = sorted(concurrencia.validar(conn, datos))
+        if ids:
+            params.update({f'concurrente_{i}': lid for i,lid in enumerate(ids)})
+            lista = ','.join(f':concurrente_{i}' for i in range(len(ids)))
+            filtros = [(tabla, f'({filtro}) OR {"id" if tabla == "lecturas_biometricas" else "lectura_id"} IN ({lista})') for tabla,filtro in filtros]
     if c.existe_tabla(conn, 'sesiones'):
         contrato = c.contrato_sesiones(conn)
         if contrato != datos['contrato_sesiones'] or params['max_sesion'] is None:
@@ -134,7 +161,7 @@ def _normalizar_asistencia(fila):
     raise ValueError(f"Formato no reconocido para fila de asistencia: {fila}")
 
 
-def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=False, actuales=None):
+def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=False, actuales=None, otras_lecturas=()):
     """Contrasta IDs anotados antes del commit con las filas realmente persistidas en MySQL.
 
     Recupera de forma segura cualquier corrida o caso en `lectura_pendiente`:
@@ -144,6 +171,16 @@ def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=Fa
       constata la fila persistida, valida que cumple la titularidad exacta del caso y reconcilia
       el diario sin reenviar la marcación ni borrar datos ajenos.
     """
+    if datos.get('casos_por_comida'):
+        c.validar_casos_diario(datos)
+        ids = c.ids_casos_corrida(datos)
+        cambios = False
+        for vista in c.vistas_servicios(datos):
+            propios = c.ids_casos_corrida(vista)
+            cambios |= contrastar_casos_interrumpidos(conn, vista, aplicar, False, actuales, ids - propios)
+        if cambios and guardar_diario:
+            c.guardar_corrida(datos)
+        return cambios
     cambios = False
     if actuales is None:
         actuales = dict(datos.get('cuentas') or {})
@@ -164,6 +201,7 @@ def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=Fa
                 for c_cod, c_info in casos.items()
                 if c_cod != codigo and c_info.get('lectura_id') is not None
             }
+            otros_lids.update(otras_lecturas)
 
             lectura = None
             if lid is not None:
@@ -222,7 +260,7 @@ def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=Fa
 
             if not momento_esperado:
                 raise c.Abortado(f"Faltan indicios en el diario para {codigo}: momento_lectura ausente")
-            fh_str = lectura['fecha_hora'].isoformat() if hasattr(lectura['fecha_hora'], 'isoformat') else str(lectura['fecha_hora'])
+            fh_str = datetime.fromisoformat(str(lectura['fecha_hora'])).isoformat()
             fh_norm = fh_str.replace(' ', 'T')
             if fh_norm != momento_esperado:
                 raise c.Abortado(
@@ -258,7 +296,7 @@ def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=Fa
                     if (
                         asist['id'] is None
                         or asist['usuario_id'] != spec['usuario_id']
-                        or asist['comida_id'] != c.COMIDA
+                        or asist['comida_id'] != c.comida_corrida(datos)
                         or asist['turno_asignado_id'] != spec['asignacion_id']
                         or asist['metodo'] != 'biometrico'
                         or asist['registrado_por_cuenta'] is not None
@@ -307,7 +345,7 @@ def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=Fa
                     if (
                         asist['id'] is None
                         or asist['usuario_id'] != spec['usuario_id']
-                        or asist['comida_id'] != c.COMIDA
+                        or asist['comida_id'] != c.comida_corrida(datos)
                         or asist['turno_asignado_id'] != spec['asignacion_id']
                         or asist['metodo'] != 'manual'
                         or asist['registrado_por_cuenta'] != cocinera2_id
@@ -394,7 +432,7 @@ def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=Fa
                     raise c.Abortado("Lectura ajena o alterada: no se borra")
                 if not momento_esperado:
                     raise c.Abortado("Faltan indicios en el diario: momento_lectura ausente")
-                fh_str = lectura['fecha_hora'].isoformat() if hasattr(lectura['fecha_hora'], 'isoformat') else str(lectura['fecha_hora'])
+                fh_str = datetime.fromisoformat(str(lectura['fecha_hora'])).isoformat()
                 fh_norm = fh_str.replace(' ', 'T')
                 if fh_norm != momento_esperado:
                     raise c.Abortado("Lectura con hora distinta a la registrada en la corrida")
@@ -408,7 +446,27 @@ def contrastar_casos_interrumpidos(conn, datos, aplicar=False, guardar_diario=Fa
 
 def _comprobar_propiedad_multi(conn, datos, actuales, aplicar):
     c.validar_casos_diario(datos)
-    contrastar_casos_interrumpidos(conn, datos, aplicar=aplicar, guardar_diario=False, actuales=actuales)
+    if datos.get('casos_por_comida'):
+        ids = c.ids_casos_corrida(datos)
+        if ids & {f.get('lectura_id') for f in datos.get('lecturas_enroladas', [])}:
+            raise c.Abortado('Una lectura pertenece a dos circuitos del diario')
+        for vista in c.vistas_servicios(datos):
+            propios = c.ids_casos_corrida(vista)
+            _comprobar_propiedad_servicio(conn, vista, actuales, aplicar, ids - propios)
+    else:
+        _comprobar_propiedad_servicio(conn, datos, actuales, aplicar)
+
+
+def _comprobar_propiedad_servicio(conn, datos, actuales, aplicar, otras_lecturas=()):
+    extras = set()
+    if datos.get('lecturas_enroladas'):
+        import lector_enrolado
+        extras = lector_enrolado.validar(conn, datos)
+    if datos.get('lecturas_concurrentes'):
+        import concurrencia
+        extras |= concurrencia.validar(conn, datos)
+    c.validar_casos_diario(datos)
+    contrastar_casos_interrumpidos(conn, datos, aplicar=aplicar, guardar_diario=False, actuales=actuales, otras_lecturas=otras_lecturas)
     casos = datos['casos']
     for info in casos.values():
         if info['estado'] == 'lectura_pendiente' or (info['estado'] == 'pendiente') != (info.get('lectura_id') is None):
@@ -432,12 +490,13 @@ def _comprobar_propiedad_multi(conn, datos, actuales, aplicar):
         + (' FOR UPDATE' if aplicar else '')
     ), {'lid1': lid_1, 'lid2': lid_2, 'd': c.DISPOSITIVO, 'u1': u1, 'u2': u2, 'u3': u3}).mappings().all()
 
+    lecturas = [f for f in lecturas if f['id'] not in extras and f['id'] not in otras_lecturas]
     if {fila['id'] for fila in lecturas} != ids_esperados or len(lecturas) != len(ids_esperados):
         raise c.Abortado("Lectura ajena o alterada: no se borra")
 
     for lectura in lecturas:
         fh = lectura['fecha_hora']
-        fh_str = fh.isoformat() if hasattr(fh, 'isoformat') else str(fh).replace(' ', 'T')
+        fh_str = datetime.fromisoformat(str(fh)).isoformat()
         if lectura['id'] == lid_1:
             if (
                 lectura['dispositivo'] != c.DISPOSITIVO
@@ -470,12 +529,14 @@ def _comprobar_propiedad_multi(conn, datos, actuales, aplicar):
         "WHERE lectura_id=:lid1 OR lectura_id=:lid2 OR usuario_id IN (:u1,:u2,:u3)"
     ), {'lid1': lid_1, 'lid2': lid_2, 'u1': u1, 'u2': u2, 'u3': u3}).mappings().all()
     intentos = [_normalizar_intervencion(f) for f in res_intentos]
+    intentos = [f for f in intentos if f['lectura_id'] not in extras and f['lectura_id'] not in otras_lecturas]
 
     res_asists = conn.execute(text(
         "SELECT id, lectura_id, usuario_id, comida_id, turno_asignado_id, metodo, registrado_por_cuenta "
         "FROM asistencias WHERE lectura_id=:lid1 OR lectura_id=:lid2 OR usuario_id IN (:u1,:u2,:u3)"
     ), {'lid1': lid_1, 'lid2': lid_2, 'u1': u1, 'u2': u2, 'u3': u3}).mappings().all()
     asistencias = [_normalizar_asistencia(f) for f in res_asists]
+    asistencias = [f for f in asistencias if f['lectura_id'] not in extras and f['lectura_id'] not in otras_lecturas]
 
     if any(a['usuario_id'] == u3 or a['turno_asignado_id'] == a3 for a in asistencias):
         raise c.Abortado("Asistencia ajena o indebida en comensal de reserva qa03")
@@ -500,7 +561,7 @@ def _comprobar_propiedad_multi(conn, datos, actuales, aplicar):
             asist1['id'] is None
             or asist1['lectura_id'] != lid_1
             or asist1['usuario_id'] != u1
-            or asist1['comida_id'] != c.COMIDA
+            or asist1['comida_id'] != c.comida_corrida(datos)
             or asist1['turno_asignado_id'] != a1
             or asist1['metodo'] != 'biometrico'
             or asist1['registrado_por_cuenta'] is not None
@@ -536,7 +597,7 @@ def _comprobar_propiedad_multi(conn, datos, actuales, aplicar):
                 asist2['id'] is None
                 or asist2['lectura_id'] != lid_2
                 or asist2['usuario_id'] != u2
-                or asist2['comida_id'] != c.COMIDA
+                or asist2['comida_id'] != c.comida_corrida(datos)
                 or asist2['turno_asignado_id'] != a2
                 or asist2['metodo'] != 'manual'
                 or asist2['registrado_por_cuenta'] != cocinera2_id
@@ -599,7 +660,7 @@ def comprobar_propiedad(conn, datos, aplicar):
     asistencias = conn.execute(text(
         "SELECT usuario_id, comida_id, turno_asignado_id, registrado_por_cuenta FROM asistencias WHERE lectura_id=:id"
     ), {'id': datos['lectura_id']}).all()
-    if any(uid != c.USUARIO or comida != c.COMIDA or asignacion != c.ASIGNACION or cuenta not in propias
+    if any(uid != c.USUARIO or comida != c.comida_corrida(datos) or asignacion != c.ASIGNACION or cuenta not in propias
            for uid, comida, asignacion, cuenta in asistencias):
         raise c.Abortado("Asistencia ajena a la corrida")
     return fila['fecha'], actuales
@@ -655,6 +716,7 @@ def main():
                 original = date.fromisoformat(datos['fecha_original'])
                 if actual != original:
                     c.cambiar_fecha_corrida(conn, datos, actual, original)
+                c.restaurar_turno_laboratorio(conn, datos)
             despues = contar(conn, filtros, params)
             print(f"Conteos después {'reales' if args.aplicar else '(simulacro, sin cambios)'}: {despues}")
             if args.aplicar and any(v['de_corrida'] for v in despues.values()):

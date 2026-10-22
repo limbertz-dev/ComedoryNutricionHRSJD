@@ -20,12 +20,24 @@ Verifica en modo de solo lectura (sin DML permitido por el auditor):
 
 import argparse
 import json
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import comun as c
+
+
+def _sin_lecturas_enroladas(conn, datos, filas, campo):
+    activos = {f.get('lectura_id') for f in datos['casos'].values()}
+    extras = c.ids_casos_corrida(datos) - activos
+    if datos.get('lecturas_enroladas'):
+        import lector_enrolado
+        extras |= lector_enrolado.validar(conn, datos)
+    if datos.get('lecturas_concurrentes'):
+        import concurrencia
+        extras |= concurrencia.validar(conn, datos)
+    return [f for f in filas if f[campo] not in extras]
 
 
 def verificar_caso_normal(conn, datos, fecha: date):
@@ -45,6 +57,7 @@ def verificar_caso_normal(conn, datos, fecha: date):
         "SELECT id, usuario_id, dispositivo, fecha_hora, resultado, motivo "
         "FROM lecturas_biometricas WHERE id=:lid OR usuario_id=:uid"
     ), {"lid": lid, "uid": uid}).mappings().all()
+    lecturas = _sin_lecturas_enroladas(conn, datos, lecturas, 'id')
     if len(lecturas) != 1:
         raise c.Abortado(
             f"QA 01 (normal): se esperaba 1 lectura biométrica y se encontraron {len(lecturas)}"
@@ -56,7 +69,7 @@ def verificar_caso_normal(conn, datos, fecha: date):
         or lectura["dispositivo"] != c.DISPOSITIVO
         or lectura["resultado"] != "aceptada"
         or lectura["motivo"] is not None
-        or lectura["fecha_hora"].isoformat() != caso.get("momento_lectura")
+        or datetime.fromisoformat(str(lectura["fecha_hora"])).isoformat() != caso.get("momento_lectura")
     ):
         raise c.Abortado("QA 01 (normal): la lectura biométrica no coincide con una marcación reconocida aceptada")
 
@@ -65,6 +78,7 @@ def verificar_caso_normal(conn, datos, fecha: date):
         "metodo, lectura_id, registrado_por_cuenta "
         "FROM asistencias WHERE id=:aid OR lectura_id=:lid OR usuario_id=:uid"
     ), {"aid": aid_asist, "lid": lid, "uid": uid}).mappings().all()
+    asistencias = _sin_lecturas_enroladas(conn, datos, asistencias, 'lectura_id')
     if len(asistencias) != 1:
         raise c.Abortado(
             f"QA 01 (normal): se esperaba 1 asistencia y se encontraron {len(asistencias)}"
@@ -73,9 +87,9 @@ def verificar_caso_normal(conn, datos, fecha: date):
     if (
         asistencia["id"] != aid_asist
         or asistencia["usuario_id"] != uid
-        or asistencia["fecha_comida"] != fecha
-        or asistencia["comida_id"] != c.COMIDA
-        or asistencia["servicio_id"] != spec["servicio_id"]
+        or date.fromisoformat(str(asistencia["fecha_comida"])) != fecha
+        or asistencia["comida_id"] != c.comida_corrida(datos)
+        or asistencia["servicio_id"] not in {spec["servicio_id"], c.PERFILES_QA[uid]['servicio_id']}
         or asistencia["turno_asignado_id"] != aid_turno
         or asistencia["metodo"] != "biometrico"
         or asistencia["lectura_id"] != lid
@@ -104,6 +118,8 @@ def verificar_caso_normal(conn, datos, fecha: date):
 
 
 def verificar_caso_identificacion(conn, datos, fecha: date, cuentas_actuales: dict):
+    with c.app_sin_dotenv():
+        from app.modelos.comedor import CAUSA_IDENTIFICACION
     caso = datos["casos"]["qa02"]
     spec = c.COMENSALES_QA["qa02"]
     uid = spec["usuario_id"]
@@ -124,6 +140,7 @@ def verificar_caso_identificacion(conn, datos, fecha: date, cuentas_actuales: di
         "SELECT id, usuario_id, dispositivo, fecha_hora, resultado, motivo "
         "FROM lecturas_biometricas WHERE id=:lid OR usuario_id=:uid"
     ), {"lid": lid, "uid": uid}).mappings().all()
+    lecturas = _sin_lecturas_enroladas(conn, datos, lecturas, 'id')
     if len(lecturas) != 1:
         raise c.Abortado(
             f"QA 02 (identificación): se esperaba 1 lectura biométrica y se encontraron {len(lecturas)}"
@@ -135,7 +152,7 @@ def verificar_caso_identificacion(conn, datos, fecha: date, cuentas_actuales: di
         or lectura["dispositivo"] != c.DISPOSITIVO
         or lectura["resultado"] != "rechazada"
         or lectura["motivo"] != "no_identificado"
-        or lectura["fecha_hora"].isoformat() != caso.get("momento_lectura")
+        or datetime.fromisoformat(str(lectura["fecha_hora"])).isoformat() != caso.get("momento_lectura")
     ):
         raise c.Abortado(
             "QA 02 (identificación): la lectura original debe conservar usuario_id=None, "
@@ -147,6 +164,7 @@ def verificar_caso_identificacion(conn, datos, fecha: date, cuentas_actuales: di
         "metodo, lectura_id, registrado_por_cuenta "
         "FROM asistencias WHERE lectura_id=:lid OR usuario_id=:uid"
     ), {"lid": lid, "uid": uid}).mappings().all()
+    asistencias = _sin_lecturas_enroladas(conn, datos, asistencias, 'lectura_id')
     if len(asistencias) != 1:
         raise c.Abortado(
             "QA 02 (identificación): se esperaba 1 asistencia vinculada tras la confirmación de cocinera2 "
@@ -155,9 +173,9 @@ def verificar_caso_identificacion(conn, datos, fecha: date, cuentas_actuales: di
     asistencia = asistencias[0]
     if (
         asistencia["usuario_id"] != uid
-        or asistencia["fecha_comida"] != fecha
-        or asistencia["comida_id"] != c.COMIDA
-        or asistencia["servicio_id"] != spec["servicio_id"]
+        or date.fromisoformat(str(asistencia["fecha_comida"])) != fecha
+        or asistencia["comida_id"] != c.comida_corrida(datos)
+        or asistencia["servicio_id"] not in {spec["servicio_id"], c.PERFILES_QA[uid]['servicio_id']}
         or asistencia["turno_asignado_id"] != aid_turno
         or asistencia["metodo"] != "manual"
         or asistencia["lectura_id"] != lid
@@ -172,6 +190,7 @@ def verificar_caso_identificacion(conn, datos, fecha: date, cuentas_actuales: di
         "causa, asistencia_id, comida_id, fecha_comida, nombre_comensal "
         "FROM intervenciones_lectura WHERE lectura_id=:lid OR usuario_id=:uid"
     ), {"lid": lid, "uid": uid}).mappings().all()
+    intervenciones = _sin_lecturas_enroladas(conn, datos, intervenciones, 'lectura_id')
     if len(intervenciones) != 1:
         raise c.Abortado(
             f"QA 02 (identificación): se esperaba 1 intervención registrada y se encontraron {len(intervenciones)}"
@@ -183,10 +202,10 @@ def verificar_caso_identificacion(conn, datos, fecha: date, cuentas_actuales: di
         or interv["cuenta_id"] != cocinera2_id
         or interv["resultado"] != "registrada"
         or interv["motivo_rechazo"] is not None
-        or interv["causa"] != "identificacion_lectura_no_reconocida"
+        or interv["causa"] != CAUSA_IDENTIFICACION
         or interv["asistencia_id"] != asistencia["id"]
-        or interv["comida_id"] != c.COMIDA
-        or interv["fecha_comida"] != fecha
+        or interv["comida_id"] != c.comida_corrida(datos)
+        or date.fromisoformat(str(interv["fecha_comida"])) != fecha
         or interv["nombre_comensal"] != spec["nombre"]
     ):
         raise c.Abortado(
@@ -309,8 +328,29 @@ def verificar_consulta_jefa(conn, datos, fecha: date, cuentas_actuales: dict):
     }
 
 
-def verificar_reserva_qa03(conn):
+def verificar_reserva_qa03(conn, datos=None):
     uid = c.COMENSALES_QA["qa03"]["usuario_id"]
+    if datos and datos.get('lecturas_concurrentes'):
+        import concurrencia
+        ids = concurrencia.validar(conn, datos)
+        if datos.get('lecturas_enroladas'):
+            import lector_enrolado
+            ids |= lector_enrolado.validar(conn, datos)
+        lecturas = conn.execute(text('SELECT id FROM lecturas_biometricas WHERE usuario_id=:uid'), {'uid': uid}).scalars().all()
+        asistencias = conn.execute(text('SELECT lectura_id FROM asistencias WHERE usuario_id=:uid'), {'uid': uid}).scalars().all()
+        intervenciones = conn.execute(text('SELECT lectura_id FROM intervenciones_lectura WHERE usuario_id=:uid'), {'uid': uid}).scalars().all()
+        if set([*lecturas, *asistencias, *intervenciones]) - ids:
+            raise c.Abortado('QA 03 tiene registros ajenos a sus pruebas concurrentes.')
+        return {'caso': 'qa03', 'usuario_id': uid, 'resultado': 'USADO_EN_CONCURRENCIA' if lecturas or asistencias or intervenciones else 'PASA'}
+    if datos and any(f.get('usuario_id') == uid for f in datos.get('lecturas_enroladas', [])):
+        import lector_enrolado
+        ids = lector_enrolado.validar(conn, datos)
+        lecturas = conn.execute(text('SELECT id FROM lecturas_biometricas WHERE usuario_id=:uid'), {'uid': uid}).all()
+        asistencias = conn.execute(text('SELECT lectura_id FROM asistencias WHERE usuario_id=:uid'), {'uid': uid}).all()
+        intervenciones = conn.execute(text('SELECT id FROM intervenciones_lectura WHERE usuario_id=:uid'), {'uid': uid}).all()
+        if any(f[0] not in ids for f in [*lecturas, *asistencias]) or intervenciones:
+            raise c.Abortado('QA 03 tiene registros ajenos a sus lecturas enroladas.')
+        return {'caso': 'qa03', 'usuario_id': uid, 'resultado': 'USADO_EN_LECTURA_ENROLADA'}
     lecturas = c.normalizar_contador(
         conn.execute(
             text("SELECT COUNT(*) FROM lecturas_biometricas WHERE usuario_id=:uid"),
@@ -407,7 +447,7 @@ def ejecutar_comprobaciones(motor, datos, objetivo="todos"):
         if objetivo in ("qa02", "todos"):
             resumen["qa02"] = verificar_caso_identificacion(conn, datos, fecha, cuentas_actuales)
             resumen["consulta_jefa"] = verificar_consulta_jefa(conn, datos, fecha, cuentas_actuales)
-        resumen["qa03"] = verificar_reserva_qa03(conn)
+        resumen["qa03"] = verificar_reserva_qa03(conn, datos)
 
     datos["verificacion_casos"] = resumen
     if (

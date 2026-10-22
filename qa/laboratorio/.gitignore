@@ -1,0 +1,4 @@
+# Estado local del reloj del laboratorio
+estado.json
+__pycache__/
+.pytest_cache/

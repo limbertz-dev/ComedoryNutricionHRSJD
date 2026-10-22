@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Laboratorio QA</title>
+  <link rel="stylesheet" href="/_lab/sistema/tokens.css">
+  <link rel="stylesheet" href="/_lab/sistema/latin-400.css">
+  <link rel="stylesheet" href="/_lab/sistema/latin-700.css">
+  <link rel="stylesheet" href="/_lab/sistema/latin-800.css">
+  <link rel="stylesheet" href="/_lab/panel.css">
+  <script type="module" src="/_lab/panel.js"></script>
+</head>
+<body>
+  <p class="estado-lab">
+    <span class="pildora" id="conexion"><i class="punto"></i><span>Conectando…</span></span>
+    <span class="pildora pildora--tenue">Base <strong id="base-propia">…</strong></span>
+    <span class="pildora pildora--tenue">Turnos <strong id="base-turnos">…</strong> · solo lectura</span>
+  </p>
+
+  <main class="rejilla">
+    <!-- RELOJ -->
+    <section class="tarjeta" aria-labelledby="t-reloj">
+      <header class="tarjeta__cabecera">
+        <h2 id="t-reloj">Reloj del sistema</h2>
+        <div class="segmentado" role="radiogroup" aria-label="Modo del reloj" id="modos">
+          <button type="button" role="radio" data-modo="real">Real</button>
+          <button type="button" role="radio" data-modo="pausado">Pausado</button>
+          <button type="button" role="radio" data-modo="corriendo">En marcha</button>
+        </div>
+      </header>
+
+      <div class="reloj">
+        <output class="reloj__hora" id="hora">--:--:--</output>
+        <div>
+          <p class="reloj__fecha" id="fecha">—</p>
+          <p class="servicio" id="servicio" role="status"><i class="punto"></i><span>Consultando…</span></p>
+        </div>
+      </div>
+
+      <div class="comidas" id="comidas" aria-label="Ir a una comida"></div>
+
+      <form class="ajuste" id="form-reloj">
+        <label>Fecha <input type="date" id="in-fecha" required></label>
+        <label>Hora <input type="time" id="in-hora" step="1" required></label>
+        <button class="boton boton--secundario" type="submit">Aplicar</button>
+      </form>
+
+      <div class="fechas">
+        <p class="rotulo">Días con turnos asignados</p>
+        <div class="fechas__lista" id="fechas"><span class="tenue">Consultando…</span></div>
+      </div>
+    </section>
+
+    <!-- CASOS -->
+    <section class="tarjeta" aria-labelledby="t-casos">
+      <header class="tarjeta__cabecera">
+        <h2 id="t-casos">Casos de prueba</h2>
+        <p class="contadores" id="contadores">—</p>
+      </header>
+      <div class="escenarios">
+        <button type="button" class="escenario escenario--exito" data-escenario="normal">
+          <span class="escenario__icono" aria-hidden="true">✓</span>
+          <span><strong>Entrega normal</strong><small>Alguien con derecho marca su huella</small></span>
+        </button>
+        <button type="button" class="escenario escenario--aviso" data-escenario="duplicado">
+          <span class="escenario__icono" aria-hidden="true">⟳</span>
+          <span><strong>Duplicado</strong><small>La misma persona marca dos veces</small></span>
+        </button>
+        <button type="button" class="escenario escenario--error" data-escenario="sin_derecho">
+          <span class="escenario__icono" aria-hidden="true">✕</span>
+          <span><strong>Sin derecho</strong><small>Alguien sin turno para esta comida</small></span>
+        </button>
+        <button type="button" class="escenario escenario--info" data-escenario="no_reconocida">
+          <span class="escenario__icono" aria-hidden="true">?</span>
+          <span><strong>Huella no reconocida</strong><small>El lector no identifica; cocina completa</small></span>
+        </button>
+        <button type="button" class="escenario escenario--neutro" data-escenario="fuera_horario">
+          <span class="escenario__icono" aria-hidden="true">☾</span>
+          <span><strong>Fuera de horario</strong><small>Reloj a las 03:00 y una lectura</small></span>
+        </button>
+      </div>
+      <div class="ultimo" id="ultimo" role="status" aria-live="polite">
+        <p class="tenue">Elige un caso. El servidor decide derecho, horario y duplicados.</p>
+      </div>
+    </section>
+
+    <!-- PADRÓN -->
+    <section class="tarjeta" aria-labelledby="t-padron">
+      <header class="tarjeta__cabecera">
+        <h2 id="t-padron">Padrón</h2>
+        <span class="contador" id="total-personas">—</span>
+      </header>
+      <div class="filtros">
+        <input type="search" id="buscar" placeholder="Buscar por nombre, legajo o ID" autocomplete="off" aria-label="Buscar persona">
+        <div class="segmentado" role="radiogroup" aria-label="Filtro del padrón" id="filtros">
+          <button type="button" role="radio" data-filtro="con_derecho" aria-checked="true">Con derecho</button>
+          <button type="button" role="radio" data-filtro="sin_derecho">Sin derecho</button>
+          <button type="button" role="radio" data-filtro="todos">Todos</button>
+        </div>
+      </div>
+      <ul class="personas" id="personas"><li class="tenue">Consultando…</li></ul>
+    </section>
+
+    <!-- ACTIVIDAD -->
+    <section class="tarjeta" aria-labelledby="t-actividad">
+      <header class="tarjeta__cabecera">
+        <h2 id="t-actividad">Lecturas del laboratorio</h2>
+        <div class="acciones">
+          <button type="button" class="boton boton--secundario" id="no-reconocida">Huella no reconocida</button>
+          <button type="button" class="boton boton--peligro" id="limpiar">Limpiar</button>
+        </div>
+      </header>
+      <ol class="actividad" id="actividad"><li class="tenue">Sin lecturas del laboratorio.</li></ol>
+    </section>
+
+    <!-- CUENTAS -->
+    <details class="tarjeta tarjeta--ancha" id="seccion-cuentas">
+      <summary><h2>Cuentas de acceso</h2><span class="tenue">Clave temporal y desbloqueo</span></summary>
+      <div class="cuentas" id="cuentas"><p class="tenue">Consultando…</p></div>
+      <div class="clave" id="clave" hidden></div>
+    </details>
+  </main>
+
+  <div class="avisos" id="avisos" aria-live="assertive"></div>
+</body>
+</html>

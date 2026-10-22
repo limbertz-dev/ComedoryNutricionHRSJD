@@ -1,0 +1,39 @@
+﻿<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="qa-control" content="__TOKEN_QA__"><title>Probar el lector</title>
+<link rel="stylesheet" href="/tokens.css"><link rel="stylesheet" href="/panel.css"><script type="module" src="/panel.js"></script>
+</head>
+<body><main>
+<div class="estado-conexion"><span id="conexion" role="status">Consultando laboratorio…</span><div class="controles"><button class="secundario" id="nuevo" type="button">Nuevo ensayo</button><button id="reconectar" type="button">Reconectar</button></div></div>
+<div id="aviso" class="aviso" role="status" aria-live="polite">Consultando el ensayo…</div>
+<p id="advertencias" class="aviso advertencia" role="status" hidden></p>
+<section class="servicios" aria-labelledby="titulo-servicio">
+<div class="titulo-seccion"><h2 id="titulo-servicio">1. Elige la comida</h2><span><output id="reloj">—</output> · <span id="modo-actual">—</span></span></div>
+<div class="comidas" role="group" aria-label="Comida para probar"><button type="button" data-comida="1" aria-pressed="false">Desayuno</button><button type="button" data-comida="2" aria-pressed="false">Almuerzo</button><button type="button" data-comida="3" aria-pressed="false">Té</button><button type="button" data-comida="4" aria-pressed="false">Cena</button></div>
+<p class="ayuda" id="restriccion">Cada comida usa su horario de prueba. Las marcaciones anteriores se conservan.</p>
+</section>
+<section aria-labelledby="titulo-casos"><h2 id="titulo-casos">2. Prueba el recorrido</h2><p class="ayuda">Primero vincula la huella. Después genera una lectura y revisa el resultado en cocina.</p>
+<div class="casos">
+<article class="caso" id="qa01">
+<div class="titulo-caso"><h3>Lectura normal y repetición</h3><span class="persona">QA 01 NORMAL · LEG-QA01</span></div>
+<div class="paso"><div><strong>Registrar la huella</strong><p class="alta-huella">Consultando…</p></div><button class="secundario registrar" data-caso="qa01" type="button">Registrar huella de QA 01</button></div>
+<div class="paso"><div><strong>Leer y volver a intentar</strong><p>La primera lectura entrega comida. La siguiente debe rechazar una segunda ración.</p></div><button class="boton simular" data-caso="qa01" type="button">Leer huella</button></div>
+<div class="resultado"><strong class="estado">Sin simular</strong><p class="detalle">Todavía no se generó una lectura.</p><span class="lectura"></span><p id="resultado-repeticion" role="status" aria-live="polite"></p></div>
+<button class="ver-pantalla" type="button">Ver resultado en cocina</button>
+<details class="revision"><summary>Registrar mi revisión</summary><label><input type="checkbox" class="revisado"> Revisé la entrega en la aplicación</label><div class="acciones"><button class="secundario aprobar" data-caso="qa01" type="button">Aprobar QA 01</button><button class="rechazar" data-caso="qa01" type="button">Marcar falla</button></div><p class="decision">Tu revisión: pendiente</p></details>
+</article>
+<article class="caso" id="qa02">
+<div class="titulo-caso"><h3>Huella no reconocida</h3><span class="persona">QA 02 IDENTIFICACION · LEG-QA02</span></div>
+<div class="paso"><div><strong>Registrar la huella</strong><p class="alta-huella">Consultando…</p></div><button class="secundario registrar" data-caso="qa02" type="button">Registrar huella de QA 02</button></div>
+<div class="paso"><div><strong>Provocar el fallo del lector</strong><p>Si el lector sigue fallando, cocina identifica a la persona y confirma la entrega.</p></div><button class="boton simular" data-caso="qa02" type="button">Simular fallo de huella</button></div>
+<div class="resultado"><strong class="estado">Sin simular</strong><p class="detalle">Todavía no se generó una lectura.</p><span class="lectura"></span></div>
+<button class="ver-pantalla" type="button">Identificar en cocina</button>
+<details class="revision"><summary>Registrar mi revisión</summary><label><input type="checkbox" class="revisado"> Revisé la entrega y quién la aprobó en Supervisión</label><div class="acciones"><button class="secundario aprobar" data-caso="qa02" type="button">Aprobar QA 02</button><button class="rechazar" data-caso="qa02" type="button">Marcar falla</button></div><p class="decision">Tu revisión: pendiente</p></details>
+</article></div>
+<p class="ayuda comprobacion">La jefa consulta las entregas y quién confirmó cada identificación en Supervisión. Registrar una huella no entrega comida.</p>
+</section>
+<div class="pie"><details id="horario-avanzado"><summary>Cambiar fecha u hora</summary><form id="form-horario"><div class="campos"><label>Servicio<select id="servicio-elegido" required><option value="1">Desayuno</option><option value="2">Almuerzo</option><option value="3">Té</option><option value="4">Cena</option></select></label><label>Fecha<input type="date" id="fecha" required></label><label>Hora<input type="time" id="hora" step="1" required></label><label>Reloj<select id="modo"><option value="fijo">Pausado</option><option value="continuo">En marcha</option></select></label></div><div class="acciones"><button type="button" id="hora-sugerida">Usar hora de la comida</button><button class="boton" type="submit" id="aplicar">Aplicar horario</button></div></form></details></div>
+<section id="confirmacion" class="confirmacion" aria-labelledby="titulo-confirmacion" hidden><h2 id="titulo-confirmacion">¿Empezar otro ensayo?</h2><p>Se archivará la evidencia y se limpiarán únicamente las marcaciones de este ensayo QA. Se conservan cuentas, contraseñas y huellas vinculadas.</p><p id="nuevo-horario"></p><div class="acciones"><button class="secundario" id="cancelar-ensayo" type="button">Cancelar</button><button class="boton" id="confirmar-ensayo" type="button">Preparar y continuar</button></div></section>
+</main></body></html>

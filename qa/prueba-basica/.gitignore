@@ -5,3 +5,8 @@ corrida.json.tmp
 corrida.lock
 api.activa
 evidencias/
+huellas_simuladas.json
+huellas_simuladas.json.tmp
+huellas_simuladas.lock
+simulacion_mes.json
+simulacion_dia.json

@@ -56,7 +56,7 @@ def refechar(motor, datos, args):
             with Session(bind=conn) as sesion:
                 if c.es_corrida_multi(datos):
                     for codigo, spec in c.COMENSALES_QA.items():
-                        derecho = buscar_derecho(sesion, spec['usuario_id'], c.COMIDA, fecha)
+                        derecho = buscar_derecho(sesion, spec['usuario_id'], c.comida_corrida(datos), fecha)
                         if derecho is None or derecho.turno_asignado_id != spec['asignacion_id']:
                             raise c.Abortado(
                                 f"Sin derecho al almuerzo para {codigo}; UPDATE revertido"
@@ -66,7 +66,7 @@ def refechar(motor, datos, args):
                             f"comida_id={derecho.comida_id}"
                         )
                 else:
-                    derecho = buscar_derecho(sesion, c.USUARIO, c.COMIDA, fecha)
+                    derecho = buscar_derecho(sesion, c.USUARIO, c.comida_corrida(datos), fecha)
                     if derecho is None or derecho.turno_asignado_id != c.ASIGNACION:
                         raise c.Abortado("Sin derecho al almuerzo por esta asignación; UPDATE revertido")
                     print(f"Derecho confirmado por buscar_derecho: comida_id={derecho.comida_id}")

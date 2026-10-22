@@ -19,7 +19,7 @@
     "try {",
     "  const salud = await pm.sendRequest({ url: String(pm.variables.get('base')).replace(/\\/$/, '') + '/salud', method: 'GET' });",
     "  const datos = salud.json();",
-    "  if (salud.code !== 200 || datos.estado !== 'ok' || datos.entorno !== 'desarrollo' || datos.base_datos !== 'bd_nutricion_escenario_sim' || datos.base_turnos !== 'bd_turnos_escenario_demo' || datos.revision_alembic !== 'e1a7c3b9d5f2') {",
+    "  if (salud.code !== 200 || datos.estado !== 'ok' || datos.entorno !== 'desarrollo' || datos.base_datos !== 'bd_nutricion_escenario_sim' || datos.base_turnos !== 'bd_turnos_escenario_demo' || datos.revision_alembic !== '8d4a2b7c9f10') {",
     "    throw new Error('La API no declara el escenario esperado');",
     "  }",
     "} catch (error) {",

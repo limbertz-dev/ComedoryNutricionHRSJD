@@ -30,7 +30,8 @@ TABLAS_DEMO_INSERCION = (
 def permisos_preparador(aplicar: bool):
     if not aplicar:
         return ()
-    return c.permisos(*((c.DEMO, tabla, "INSERT") for tabla in TABLAS_DEMO_INSERCION))
+    import preparar_perfiles
+    return c.permisos(*((c.DEMO, tabla, "INSERT") for tabla in TABLAS_DEMO_INSERCION)) | preparar_perfiles.permisos()
 
 
 def validar_catalogos_base(conn):
@@ -102,7 +103,7 @@ def inspeccionar_comensal(conn, spec):
         lambda f: (
             f["id"] == uid
             and f["name"] == spec["login"]
-            and f["categoria_id"] == spec["categoria_id"]
+            and f["categoria_id"] in {spec["categoria_id"], c.PERFILES_QA[uid]['categoria_id']}
         ),
         "users",
         codigo,
@@ -142,7 +143,7 @@ def inspeccionar_comensal(conn, spec):
         lambda f: (
             f["id"] == uid
             and f["usuario_id"] == uid
-            and f["servicio_id"] == spec["servicio_id"]
+            and f["servicio_id"] in {spec["servicio_id"], c.PERFILES_QA[uid]['servicio_id']}
             and bool(f["estado"])
             and f["fecha_ingreso"] in (fecha_base, spec["fecha_base"])
         ),
@@ -160,7 +161,7 @@ def inspeccionar_comensal(conn, spec):
         lambda f: (
             f["id"] == aid
             and f["usuario_id"] == uid
-            and f["servicio_id"] == spec["servicio_id"]
+            and f["servicio_id"] in {spec["servicio_id"], c.PERFILES_QA[uid]['servicio_id']}
             and f["fecha"] in (fecha_base, spec["fecha_base"])
             and f["turno_id"] == spec["turno_id"]
         ),
@@ -269,7 +270,7 @@ def verificar_comensales_en_app(conn):
                 or ficha.nombre_completo != spec["nombre"]
                 or ficha.numero_item != spec["legajo"]
                 or ficha.carnet_identidad != spec["carnet_identidad"]
-                or ficha.categoria != "Administrativo"
+                or ficha.categoria != c.PERFILES_QA[spec['usuario_id']]['categoria']
                 or not bool(ficha.tiene_ficha)
             ):
                 raise c.Abortado(
@@ -279,7 +280,7 @@ def verificar_comensales_en_app(conn):
             rel_servicio = sesion.execute(
                 select(UsuarioServicio).where(
                     UsuarioServicio.usuario_id == spec["usuario_id"],
-                    UsuarioServicio.servicio_id == spec["servicio_id"],
+                    UsuarioServicio.servicio_id == c.PERFILES_QA[spec['usuario_id']]['servicio_id'],
                     UsuarioServicio.estado == 1,
                 )
             ).scalars().first()
@@ -294,7 +295,7 @@ def verificar_comensales_en_app(conn):
                 derecho is None
                 or derecho.turno_asignado_id != spec["asignacion_id"]
                 or derecho.comida_id != c.COMIDA
-                or derecho.servicio_id != spec["servicio_id"]
+                or derecho.servicio_id != c.PERFILES_QA[spec['usuario_id']]['servicio_id']
             ):
                 raise c.Abortado(
                     f"Sin derecho al almuerzo confirmado por buscar_derecho para {codigo}"
@@ -328,9 +329,9 @@ def preparar(motor, aplicar=False):
                 "rol_escenario": spec["rol_escenario"],
                 "estado": accion,
             }
-        if aplicar or all(
-            item["estado"] == "existente_idempotente" for item in resumen.values()
-        ):
+        if aplicar:
+            import preparar_perfiles
+            preparar_perfiles.preparar(conn)
             verificar_comensales_en_app(conn)
     print(json.dumps(resumen, ensure_ascii=False, indent=2))
     if aplicar:

@@ -53,7 +53,7 @@ def _leer_v1(motor, datos):
                 raise c.Abortado("Hay una lectura de una corrida anterior")
             momento = reloj.ahora()
             comida = resolver_comida_en_curso(sesion, momento)
-            if comida is None or comida.comida_id != c.COMIDA:
+            if comida is None or comida.comida_id != c.comida_corrida(datos):
                 raise c.Abortado(
                     "El almuerzo ya no está en curso; limpiar y abrir una corrida nueva con otra ancla"
                 )
@@ -119,11 +119,7 @@ def _leer_caso_multi(motor, datos, caso):
         usuario_marcacion = info_caso["usuario_id"]
 
         with Session(motor, expire_on_commit=False) as sesion:
-            ids_registrados = {
-                item["lectura_id"]
-                for item in datos["casos"].values()
-                if item.get("lectura_id") is not None
-            }
+            ids_registrados = c.ids_casos_corrida(datos)
             filas_disp = sesion.execute(
                 text("SELECT id FROM lecturas_biometricas WHERE dispositivo=:d"),
                 {"d": c.DISPOSITIVO},
@@ -133,7 +129,7 @@ def _leer_caso_multi(motor, datos, caso):
 
             momento = reloj.ahora()
             comida = resolver_comida_en_curso(sesion, momento)
-            if comida is None or comida.comida_id != c.COMIDA:
+            if comida is None or comida.comida_id != c.comida_corrida(datos):
                 raise c.Abortado(
                     "El almuerzo ya no está en curso; limpiar y abrir una corrida nueva con otra ancla"
                 )
@@ -250,6 +246,7 @@ def leer(motor, datos, caso=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--referencia', help='Referencia simulada enrolada por el operador; obligatoria desde el laboratorio')
     grupo = parser.add_mutually_exclusive_group()
     grupo.add_argument(
         "--caso",
@@ -270,6 +267,10 @@ def main(argv=None):
     caso = _resolver_argumento_caso(args)
     if caso == "qa03":
         raise c.Abortado("El comensal qa03 está en reserva y no tiene caso ejecutable")
+    if args.referencia is not None:
+        import enrolamiento
+        if caso not in c.CASOS_EJECUTABLES or enrolamiento.resolver(args.referencia) != c.COMENSALES_QA[caso]['usuario_id']:
+            raise c.Abortado('La referencia de huella no esta registrada para la persona de este caso.')
     with c.bloqueo_corrida(), c.entorno_seguro(permisos_caso(caso)) as (motor, huella, servidor):
         datos = c.leer_corrida(servidor)
         c.comprobar_base(datos, huella)

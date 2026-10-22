@@ -342,15 +342,21 @@ def test_admin_aborta_ante_rol_distinto_o_vinculo(datos, reloj_controlado, monke
     sembrar.assert_not_called()
 
 
-def test_permisos_auditor_insert_usuarios_solo_en_modo_admin():
+def test_permisos_auditor_admite_alta_admin_y_api_solo_en_base_sintetica():
     admin_permisos = ejecutar_app.permisos_modo('admin')
     api_permisos = ejecutar_app.permisos_modo('api')
     assert admin_permisos == {
         (c.SIM, 'usuarios_sistema', 'INSERT'),
         (c.SIM, 'usuarios_sistema', 'UPDATE'),
     }
-    assert (c.SIM, 'usuarios_sistema', 'INSERT') not in api_permisos
+    assert (c.SIM, 'usuarios_sistema', 'INSERT') in api_permisos
     assert (c.SIM, 'usuarios_sistema', 'UPDATE') in api_permisos
+    for permisos in (admin_permisos, api_permisos):
+        assert (c.SIM, 'usuarios_sistema', 'DELETE') not in permisos
+        assert all(base == c.SIM for base, _, _ in permisos)
+        c.revisar_sql('INSERT INTO usuarios_sistema (id) VALUES (1)', c.SIM, permisos)
+        with pytest.raises(c.Abortado):
+            c.revisar_sql('INSERT INTO usuarios_sistema (id) VALUES (1)', c.PROTEGIDA, permisos)
 
 
 @pytest.mark.parametrize('en_curso', [True, False])

@@ -29,7 +29,7 @@ import ejecutar_app
 
 PUERTO_POR_DEFECTO = 8001
 BASE_POR_DEFECTO = f"http://127.0.0.1:{PUERTO_POR_DEFECTO}"
-REVISION_ESPERADA = "e1a7c3b9d5f2"
+REVISION_ESPERADA = "8d4a2b7c9f10"
 MOTIVOS_CONOCIDOS = frozenset({
     "cambio_password_pendiente",
     "credenciales_invalidas",
