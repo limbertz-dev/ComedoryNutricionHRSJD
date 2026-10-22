@@ -35,8 +35,14 @@ class Sesion:
                 return fallo.code, {"detail": "Respuesta no válida"}
 
     def ingresar(self, usuario: str) -> None:
+        print(f"Contraseña de la cuenta '{usuario}' en la app (no se ve al escribir; Enter al terminar).")
         clave = getpass.getpass(f"Contraseña de {usuario}: ")
+        if not clave:
+            raise SystemExit("No se escribió ninguna contraseña. Es la clave con que entras a la app.")
         codigo, datos = self.pedir("POST", "/auth/login", {"username": usuario, "password": clave})
+        if codigo == 428:
+            raise SystemExit("Esa es la clave temporal: primero entra a la app en el navegador y "
+                             "cámbiala por la definitiva; después usa la nueva aquí.")
         if codigo != 200 or not datos.get("access"):
             raise SystemExit(f"No se pudo entrar ({codigo}): {datos.get('detail') if datos else ''}")
         self.token = datos["access"]
