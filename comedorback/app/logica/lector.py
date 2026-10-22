@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from app.core import reloj
 from app.core.config import config
 from app.esquemas.marcacion import RespuestaMarcacion
-from app.logica import marcacion
+from app.logica import marcacion, policia
 from app.modelos.heredados import Comensal
 from app.modelos.lector import SolicitudLector, VinculoLector
 
@@ -52,14 +52,15 @@ def dispositivo_de(clave: str | None) -> str | None:
     return encontrado
 
 
-def usuario_de(sesion: Session, identificador: str | None) -> int | None:
+def vinculo_de(sesion: Session, identificador: str | None):
+    """(id, tipo, usuario_id) del vínculo activo, o None."""
     if identificador is None:
         return None
     return sesion.execute(
-        select(VinculoLector.usuario_id).where(
+        select(VinculoLector.id, VinculoLector.tipo, VinculoLector.usuario_id).where(
             VinculoLector.identificador == identificador, VinculoLector.activo == 1
         )
-    ).scalar_one_or_none()
+    ).one_or_none()
 
 
 @dataclass
@@ -86,21 +87,30 @@ def registrar_lectura(
     previo = _guardado(sesion, clave, dispositivo, identificador)
     if previo is not None:
         return previo
-    usuario_id = usuario_de(sesion, identificador)
+    vinculo = vinculo_de(sesion, identificador)
     sesion.rollback()
 
-    resultado = marcacion.registrar_marcacion(
-        sesion, usuario_id=usuario_id, dispositivo=dispositivo, metodo="biometrico"
-    )
+    if vinculo is not None and vinculo.tipo == "policia":
+        # Vía libre, aparte del personal: ver app/logica/policia.py. La ración
+        # y el envío se confirman juntos, en el COMMIT de abajo.
+        respuesta = policia.registrar(sesion, vinculo_id=vinculo.id, dispositivo=dispositivo)
+        lectura_id = None
+    else:
+        usuario_id = vinculo.usuario_id if vinculo is not None else None
+        resultado = marcacion.registrar_marcacion(
+            sesion, usuario_id=usuario_id, dispositivo=dispositivo, metodo="biometrico"
+        )
+        respuesta = RespuestaMarcacion(**vars(resultado)).model_dump(mode="json")
+        lectura_id = resultado.lectura_id
     cuerpo = {
-        **RespuestaMarcacion(**vars(resultado)).model_dump(mode="json"),
+        **respuesta,
         "dispositivo": dispositivo,
-        "vinculado": usuario_id is not None,
+        "vinculado": vinculo is not None,
         "reintento": False,
     }
     sesion.add(SolicitudLector(
         clave=clave, dispositivo=dispositivo, identificador=identificador,
-        lectura_id=resultado.lectura_id, respuesta=cuerpo,
+        lectura_id=lectura_id, respuesta=cuerpo,
     ))
     try:
         sesion.commit()
@@ -132,13 +142,15 @@ def salud(sesion: Session, dispositivo: str) -> dict:
 
 
 def _a_dict(sesion: Session, vinculo: VinculoLector) -> dict:
-    ficha = sesion.get(Comensal, vinculo.usuario_id)
+    policial = vinculo.tipo == "policia"
+    ficha = None if policial else sesion.get(Comensal, vinculo.usuario_id)
     return {
         "id": vinculo.id,
         "identificador": vinculo.identificador,
+        "tipo": vinculo.tipo,
         "usuario_id": vinculo.usuario_id,
-        "nombre": ficha.nombre_completo if ficha else None,
-        "categoria": ficha.categoria if ficha else None,
+        "nombre": policia.NOMBRE if policial else (ficha.nombre_completo if ficha else None),
+        "categoria": "Policías" if policial else (ficha.categoria if ficha else None),
         "activo": bool(vinculo.activo),
         "created_at": vinculo.created_at,
         "updated_at": vinculo.updated_at,
@@ -152,9 +164,13 @@ def listar_vinculos(sesion: Session, *, solo_activos: bool) -> list[dict]:
     return [_a_dict(sesion, v) for v in sesion.execute(consulta).scalars()]
 
 
-def vincular(sesion: Session, *, identificador: str, usuario_id: int, cuenta_id: int) -> dict:
-    """Crea el vínculo, o reactiva uno dado de baja con la persona nueva."""
-    if sesion.get(Comensal, usuario_id) is None:
+def vincular(
+    sesion: Session, *, identificador: str, usuario_id: int | None, cuenta_id: int,
+    plantilla: str | None = None, tipo: str = "personal",
+) -> dict:
+    """Crea el vínculo, o reactiva uno dado de baja con la persona nueva. Uno
+    de policía no apunta a nadie del padrón (`usuario_id` None)."""
+    if tipo == "personal" and sesion.get(Comensal, usuario_id) is None:
         raise LookupError("La persona no figura en el padrón.")
     vinculo = sesion.execute(
         select(VinculoLector).where(VinculoLector.identificador == identificador).with_for_update()
@@ -167,7 +183,9 @@ def vincular(sesion: Session, *, identificador: str, usuario_id: int, cuenta_id:
     if vinculo is None:
         vinculo = VinculoLector(identificador=identificador)
         sesion.add(vinculo)
-    vinculo.usuario_id = usuario_id
+    vinculo.tipo = tipo
+    vinculo.usuario_id = usuario_id if tipo == "personal" else None
+    vinculo.plantilla = plantilla
     vinculo.activo = 1
     vinculo.creado_por_cuenta = cuenta_id
     try:
@@ -179,6 +197,16 @@ def vincular(sesion: Session, *, identificador: str, usuario_id: int, cuenta_id:
         ) from None
     sesion.refresh(vinculo)
     return _a_dict(sesion, vinculo)
+
+
+def plantillas(sesion: Session) -> list[dict]:
+    """Las plantillas de los vínculos activos, para el SDK del puente."""
+    filas = sesion.execute(
+        select(VinculoLector.id, VinculoLector.identificador, VinculoLector.plantilla)
+        .where(VinculoLector.activo == 1, VinculoLector.plantilla.is_not(None))
+        .order_by(VinculoLector.id)
+    ).all()
+    return [{"id": i, "identificador": ident, "plantilla": p} for i, ident, p in filas]
 
 
 def dar_de_baja(sesion: Session, vinculo_id: int) -> dict:

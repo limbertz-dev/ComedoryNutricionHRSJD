@@ -215,6 +215,10 @@ class ComidaDelDia(BaseModel):
     previstas: int = Field(description="Personas distintas con derecho, según aplicar_reglas")
     servidas: int = Field(description="Raciones por fecha_comida, todos los métodos")
     manuales: int = Field(description="De las servidas, las registradas a mano")
+    policias: int = Field(
+        default=0,
+        description="Raciones de policías de esta comida, aparte de las servidas al personal.",
+    )
     rechazos_por_motivo: dict[str, int] = Field(
         description="Siempre no_identificado, sin_derecho y duplicado, en 0 si no hay casos"
     )

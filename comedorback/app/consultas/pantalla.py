@@ -25,6 +25,7 @@ from app.consultas.horarios import estado_en, rige_en, ventanas_del_dia
 from app.consultas.intervenciones import cuentas_por_id
 from app.consultas.servicio import Servicio, VentanasDelDia, evaluar_servicio, comida_de_referencia
 from app.core import reloj
+from app.consultas import raciones
 from app.consultas.perfiles import categoria_permitida_sql
 from app.logica.marcacion import ComidaEnCurso, resolver_comida_en_curso
 from app.modelos.comedor import (
@@ -35,6 +36,7 @@ from app.modelos.comedor import (
     LecturaBiometrica,
 )
 from app.modelos.heredados import Comensal, Comida
+from app.modelos.lector import RacionPolicia
 
 
 @dataclass
@@ -142,6 +144,7 @@ class ComidaDelDia:
     servidas: int
     manuales: int
     rechazos_por_motivo: dict[str, int]
+    policias: int = 0
 
 
 @dataclass
@@ -180,11 +183,12 @@ def _por_categoria(sesion: Session, fecha: date) -> list[ConsumoCategoria]:
     Se listan también las columnas en cero: el gráfico necesita las seis
     barras siempre, o cambia de forma cada vez que alguien marca.
     """
+    r = raciones.fuente()
     conteos = dict(
         sesion.execute(
-            select(Asistencia.categoria_reporte_id, func.count())
-            .where(Asistencia.fecha_comida == fecha)
-            .group_by(Asistencia.categoria_reporte_id)
+            select(r.c.categoria_reporte_id, func.count())
+            .where(r.c.fecha_comida == fecha)
+            .group_by(r.c.categoria_reporte_id)
         ).all()
     )
     columnas = sesion.execute(
@@ -199,10 +203,10 @@ def _por_categoria(sesion: Session, fecha: date) -> list[ConsumoCategoria]:
 
 
 def _totales(sesion: Session, fecha_comida: date, dia: date) -> TotalesDia:
+    """Las raciones del día incluyen las de policías (app/consultas/raciones.py)."""
+    r = raciones.fuente()
     servidas = sesion.execute(
-        select(func.count())
-        .select_from(Asistencia)
-        .where(Asistencia.fecha_comida == fecha_comida)
+        select(func.count()).select_from(r).where(r.c.fecha_comida == fecha_comida)
     ).scalar_one()
 
     por_resultado = dict(
@@ -847,6 +851,11 @@ def comidas_del_dia(
     """
     dia = fecha or reloj.hoy()
     servidas, manuales = _servidas_por_comida(sesion, dia)
+    policias = dict(sesion.execute(
+        select(RacionPolicia.comida_id, func.count())
+        .where(RacionPolicia.fecha_comida == dia)
+        .group_by(RacionPolicia.comida_id)
+    ).all())
     rechazos, sin_comida = _rechazos_por_comida(sesion, dia)
     ahora = reloj.ahora()
     comidas = [
@@ -859,6 +868,7 @@ def comidas_del_dia(
             previstas=contar_personas_con_derecho(sesion, c.comida_id, dia),
             servidas=servidas.get(c.comida_id, 0),
             manuales=manuales.get(c.comida_id, 0),
+            policias=policias.get(c.comida_id, 0),
             rechazos_por_motivo={
                 motivo: rechazos.get((c.comida_id, motivo), 0)
                 for motivo in MOTIVOS_POR_COMIDA

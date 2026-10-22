@@ -26,9 +26,9 @@ from datetime import date
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.consultas import raciones
 from app.core import reloj
 from app.modelos.comedor import (
-    Asistencia,
     CategoriaReporte,
     CoeficienteRacion,
 )
@@ -91,9 +91,8 @@ class Informe:
 
 def _columnas(sesion: Session, desde: date, hasta: date) -> list[Columna]:
     """El estado actual no puede ocultar la clasificacion de una racion servida."""
-    utilizadas = select(Asistencia.categoria_reporte_id).where(
-        Asistencia.fecha_comida.between(desde, hasta)
-    )
+    r = raciones.fuente()
+    utilizadas = select(r.c.categoria_reporte_id).where(r.c.fecha_comida.between(desde, hasta))
     consulta = (
         select(CategoriaReporte.id, CategoriaReporte.nombre, CategoriaReporte.codigo)
         .where(or_(CategoriaReporte.activo == 1, CategoriaReporte.id.in_(utilizadas)))
@@ -104,7 +103,8 @@ def _columnas(sesion: Session, desde: date, hasta: date) -> list[Columna]:
 
 def _comidas(sesion: Session, desde: date, hasta: date) -> list[tuple]:
     """Conservar comidas con entregas del periodo aunque hoy esten desactivadas."""
-    utilizadas = select(Asistencia.comida_id).where(Asistencia.fecha_comida.between(desde, hasta))
+    r = raciones.fuente()
+    utilizadas = select(r.c.comida_id).where(r.c.fecha_comida.between(desde, hasta))
     return sesion.execute(
         select(Comida.id, Comida.nombre)
         .where(or_(Comida.estado == 1, Comida.id.in_(utilizadas)))
@@ -132,20 +132,18 @@ def _rango(gestion: int, mes: int | None) -> tuple[date, date]:
 
 
 def _conteos(sesion: Session, desde: date, hasta: date) -> list[tuple]:
-    """(fecha_comida, comida_id, categoria_reporte_id, cantidad) del período."""
+    """(fecha_comida, comida_id, categoria_reporte_id, cantidad) del período.
+    Personal y policías: ver app/consultas/raciones.py."""
+    r = raciones.fuente()
     consulta = (
         select(
-            Asistencia.fecha_comida,
-            Asistencia.comida_id,
-            Asistencia.categoria_reporte_id,
+            r.c.fecha_comida,
+            r.c.comida_id,
+            r.c.categoria_reporte_id,
             func.count().label("cantidad"),
         )
-        .where(Asistencia.fecha_comida.between(desde, hasta))
-        .group_by(
-            Asistencia.fecha_comida,
-            Asistencia.comida_id,
-            Asistencia.categoria_reporte_id,
-        )
+        .where(r.c.fecha_comida.between(desde, hasta))
+        .group_by(r.c.fecha_comida, r.c.comida_id, r.c.categoria_reporte_id)
     )
     return sesion.execute(consulta).all()
 
@@ -155,12 +153,13 @@ def _totales_de_columna(filas: list[Fila], cantidad: int) -> list[int]:
 
 
 def _sin_clasificar(sesion: Session, desde: date, hasta: date) -> int:
+    r = raciones.fuente()
     consulta = (
         select(func.count())
-        .select_from(Asistencia)
-        .join(CategoriaReporte, CategoriaReporte.id == Asistencia.categoria_reporte_id)
+        .select_from(r)
+        .join(CategoriaReporte, CategoriaReporte.id == r.c.categoria_reporte_id)
         .where(
-            Asistencia.fecha_comida.between(desde, hasta),
+            r.c.fecha_comida.between(desde, hasta),
             CategoriaReporte.codigo == CODIGO_SIN_CLASIFICAR,
         )
     )
@@ -169,21 +168,23 @@ def _sin_clasificar(sesion: Session, desde: date, hasta: date) -> int:
 
 def _sin_coeficiente(sesion: Session, desde: date, hasta: date) -> int:
     """Raciones sin coeficiente vigente ese día: no suman al equivalente."""
+    r = raciones.fuente()
     consulta = (
-        select(func.count(Asistencia.id))
+        select(func.count())
+        .select_from(r)
         .outerjoin(
             CoeficienteRacion,
             and_(
-                CoeficienteRacion.comida_id == Asistencia.comida_id,
-                CoeficienteRacion.vigente_desde <= Asistencia.fecha_comida,
+                CoeficienteRacion.comida_id == r.c.comida_id,
+                CoeficienteRacion.vigente_desde <= r.c.fecha_comida,
                 or_(
                     CoeficienteRacion.vigente_hasta.is_(None),
-                    CoeficienteRacion.vigente_hasta >= Asistencia.fecha_comida,
+                    CoeficienteRacion.vigente_hasta >= r.c.fecha_comida,
                 ),
             ),
         )
         .where(
-            Asistencia.fecha_comida.between(desde, hasta),
+            r.c.fecha_comida.between(desde, hasta),
             CoeficienteRacion.id.is_(None),
         )
     )
@@ -198,14 +199,15 @@ def _grupos(sesion: Session, desde: date, hasta: date) -> list[Grupo]:
     cambia a mitad de año, cada día del informe usa el que estaba vigente ese
     día y los meses ya firmados siguen dando el mismo número.
     """
+    r = raciones.fuente()
     por_dia = (
         select(
-            Asistencia.fecha_comida.label("fecha_comida"),
-            Asistencia.comida_id.label("comida_id"),
+            r.c.fecha_comida.label("fecha_comida"),
+            r.c.comida_id.label("comida_id"),
             func.count().label("cantidad"),
         )
-        .where(Asistencia.fecha_comida.between(desde, hasta))
-        .group_by(Asistencia.fecha_comida, Asistencia.comida_id)
+        .where(r.c.fecha_comida.between(desde, hasta))
+        .group_by(r.c.fecha_comida, r.c.comida_id)
         .subquery("por_dia")
     )
 

@@ -105,6 +105,9 @@ class Api:
     def salud(self) -> dict:
         return self._pedir("GET", "/lector/salud")
 
+    def plantillas(self) -> list[dict]:
+        return self._pedir("GET", "/lector/plantillas")
+
     def leer(self, identificador: str | None, clave_envio: str) -> dict:
         return self._pedir("POST", "/lector/lecturas", {"identificador": identificador}, clave_envio)
 
@@ -207,7 +210,7 @@ def main(argv=None) -> int:
     api = Api(config)
     if not comprobar(api):
         return 2
-    lector = adaptadores.crear(config.adaptador)
+    lector = adaptadores.crear(config.adaptador, api)
     cola: "queue.Queue[Toque | None]" = queue.Queue()
     hilo = threading.Thread(target=trabajador, args=(api, config, cola), daemon=True)
     hilo.start()

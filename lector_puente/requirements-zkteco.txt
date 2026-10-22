@@ -1,0 +1,4 @@
+# Solo para el adaptador zkteco (ZK9500 / ZK4500). Requiere además el
+# «ZKFinger SDK for Windows» de ZKTeco instalado en la PC.
+# pyzkfp es GPLv3: se usa sin modificar, instalado aparte.
+pyzkfp==0.1.5
