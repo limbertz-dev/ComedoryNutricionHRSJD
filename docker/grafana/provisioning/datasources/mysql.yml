@@ -1,0 +1,15 @@
+apiVersion: 1
+datasources:
+  - name: Comedor (MySQL)
+    uid: comedor-mysql
+    type: mysql
+    access: proxy
+    url: db:3306
+    user: ${GRAFANA_DB_USER}
+    jsonData:
+      database: ${NUTRICION_DB}
+      maxOpenConns: 5
+      timezone: America/La_Paz
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD}
+    editable: false

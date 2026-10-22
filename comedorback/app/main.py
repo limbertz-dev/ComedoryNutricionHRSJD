@@ -13,6 +13,7 @@ from app.api import (
     cuentas,
     historial,
     intervenciones,
+    lector,
     monitoreo,
     pantalla,
     personal,
@@ -126,13 +127,17 @@ def crear_app(entorno: str = config.entorno) -> FastAPI:
         (cuentas, "cuentas"),
         (monitoreo, "monitoreo"),
         (intervenciones, "intervenciones"),
+        (lector.vinculos, "lector_vinculos"),
     ]
     for modulo, recurso in routers:
         regla = ACCESO[recurso]
         app.include_router(
-            modulo.router,
+            modulo if isinstance(modulo, APIRouter) else modulo.router,
             dependencies=[Depends(requiere_rol(*regla.completo, lectura=regla.lectura))],
         )
+    # El lector se autentica con su propia clave (X-Lector-Token), no con la
+    # sesión de una persona: no pasa por requiere_rol.
+    app.include_router(lector.router)
     app.include_router(diagnostico)
     return app
 

@@ -1,1 +1,6 @@
 * text=auto
+
+# Los scripts que corren dentro de los contenedores (Linux) van siempre con LF.
+*.sh text eol=lf
+docker/** text eol=lf
+docker-compose.yml text eol=lf

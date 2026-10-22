@@ -4,7 +4,6 @@ import re
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.core.autorizacion import ErrorAuth, requiere_rol
@@ -38,6 +37,10 @@ MATRIZ = [
     ("GET", "/pantalla/lecturas-por-identificar", None, {"cocinera"}),
     ("GET", "/auth/yo", None, TODOS),
     ("GET", "/monitoreo/estado", None, {"sistemas"}),
+    # Vínculos huella -> persona del lector real: jefatura.
+    ("GET", "/lector/vinculos", None, JEFATURA),
+    ("POST", "/lector/vinculos", {"identificador": "1", "usuario_id": 1}, JEFATURA),
+    ("DELETE", "/lector/vinculos/1", None, JEFATURA),
 ]
 
 # Lo único que responde sin token de acceso.
@@ -46,6 +49,14 @@ RUTAS_PUBLICAS = {
     ("POST", "/auth/login"),
     ("POST", "/auth/refresh"),  # el token viaja en el cuerpo
     ("POST", "/auth/cambio-password"),  # acepta el temporal; se prueba aparte
+}
+
+# Las del aparato: entran con la clave del lector (X-Lector-Token) y no aceptan
+# ningún token de persona. Se prueban en test_lector.py.
+RUTAS_LECTOR = {
+    ("GET", "/lector/salud"),
+    ("POST", "/lector/lecturas"),
+    ("GET", "/lector/plantillas"),
 }
 
 
@@ -76,12 +87,16 @@ def test_matriz_rol_por_endpoint(tokens, rol, metodo, ruta, cuerpo, permitidos):
 
 
 def _rutas_de_la_app():
-    for ruta in app.routes:
-        if not isinstance(ruta, APIRoute):
-            continue
-        camino = re.sub(r"\{[^}]+\}", "1", ruta.path)
-        for metodo in sorted(ruta.methods - {"HEAD", "OPTIONS"}):
-            yield metodo, camino
+    # Desde el esquema OpenAPI y no desde app.routes: en FastAPI 0.141 los
+    # routers incluidos quedan envueltos y app.routes no expone sus APIRoute,
+    # con lo que estas pruebas recorrían cero rutas sin fallar.
+    rutas = [
+        (metodo.upper(), re.sub(r"\{[^}]+\}", "1", camino))
+        for camino, operaciones in app.openapi()["paths"].items()
+        for metodo in operaciones
+    ]
+    assert len(rutas) > 30, "No se encontraron las rutas de la app."
+    yield from sorted(rutas)
 
 
 def test_toda_ruta_no_publica_exige_token():
@@ -105,6 +120,10 @@ def test_temporal_no_autoriza_nada(cliente, crear_usuario):
         if (metodo, camino) in RUTAS_PUBLICAS:
             continue
         r = cliente.request(metodo, camino, json={}, headers=encabezado(temporal))
+        if (metodo, camino) in RUTAS_LECTOR:
+            if r.status_code != 401:
+                abiertas.append((metodo, camino, r.status_code))
+            continue
         if r.status_code != 403 or r.json().get("motivo") != "cambio_password_pendiente":
             abiertas.append((metodo, camino, r.status_code))
     assert abiertas == []

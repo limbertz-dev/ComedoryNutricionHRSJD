@@ -78,6 +78,10 @@ ACCESO: dict[str, Regla] = {
     "admin": Regla(completo=ADMINISTRACION),
     # Reglas versionadas: solo root. Jefa y cocinera reciben 403 en /reglas/*.
     "reglas": Regla(completo=ADMINISTRACION),
+    # Vínculos huella -> persona del lector real: jefatura. Las lecturas del
+    # aparato (/lector/salud, /lector/lecturas) no usan sesión humana: entran
+    # con la clave del lector (app/api/lector.py).
+    "lector_vinculos": Regla(completo=JEFATURA),
     # Intervenciones de cocina (GET /intervenciones-cocina): solo la jefa.
     # Sistemas y cocinera reciben 403. El POST que las crea vive bajo
     # /asistencias y lo restringe `usuario_identificador`.

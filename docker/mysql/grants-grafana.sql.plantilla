@@ -1,0 +1,12 @@
+-- Lo aplica la API al terminar de migrar (las tablas recién existen ahí).
+-- Grafana: solo SELECT, solo lo que muestran los tableros.
+GRANT SELECT ON `{NUTRICION}`.asistencias TO '{GRAFANA}'@'%';
+GRANT SELECT ON `{NUTRICION}`.raciones_policia TO '{GRAFANA}'@'%';
+GRANT SELECT ON `{NUTRICION}`.lecturas_biometricas TO '{GRAFANA}'@'%';
+GRANT SELECT ON `{NUTRICION}`.intervenciones_lectura TO '{GRAFANA}'@'%';
+GRANT SELECT ON `{NUTRICION}`.categorias_reporte TO '{GRAFANA}'@'%';
+GRANT SELECT ON `{NUTRICION}`.coeficientes_racion TO '{GRAFANA}'@'%';
+GRANT SELECT ON `{NUTRICION}`.solicitudes_lector TO '{GRAFANA}'@'%';
+GRANT SELECT (id, username, nombre, rol) ON `{NUTRICION}`.usuarios_sistema TO '{GRAFANA}'@'%';
+GRANT SELECT ON `{TURNOS}`.comidas TO '{GRAFANA}'@'%';
+GRANT SELECT ON `{NUTRICION}`.v_comidas TO '{GRAFANA}'@'%';
