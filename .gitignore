@@ -57,3 +57,9 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Docker: el volcado real de turnos nunca va al repositorio. El escenario
+# sintético de demo (ids 900001+, sin datos del hospital) sí.
+docker/mysql/turnos-real/*
+!docker/mysql/turnos-real/LEEME.txt
+!docker/mysql/demo/turnos_demo_sintetico.sql

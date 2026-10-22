@@ -1,0 +1,489 @@
+{
+ "uid": "comedor-raciones",
+ "title": "Comedor · Raciones y lector",
+ "tags": [
+  "comedor"
+ ],
+ "timezone": "America/La_Paz",
+ "schemaVersion": 39,
+ "version": 1,
+ "editable": false,
+ "refresh": "1m",
+ "time": {
+  "from": "now-30d",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "id": 1,
+   "title": "Raciones de hoy",
+   "type": "stat",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "Personal + policías, por fecha de la comida.",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT (SELECT COUNT(*) FROM asistencias WHERE fecha_comida = CURDATE()) + (SELECT COUNT(*) FROM raciones_policia WHERE fecha_comida = CURDATE()) AS raciones"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 2,
+   "title": "Policías hoy",
+   "type": "stat",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "",
+   "gridPos": {
+    "x": 6,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT COUNT(*) AS policias FROM raciones_policia WHERE fecha_comida = CURDATE()"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 3,
+   "title": "Lecturas rechazadas hoy",
+   "type": "stat",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "",
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT COUNT(*) AS rechazadas FROM lecturas_biometricas WHERE resultado = 'rechazada' AND DATE(fecha_hora) = CURDATE()"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 20
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 4,
+   "title": "Minutos desde la última lectura",
+   "type": "stat",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "Si sube durante un horario de comida, revisar el lector y el puente de cocina.",
+   "gridPos": {
+    "x": 18,
+    "y": 0,
+    "w": 6,
+    "h": 4
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT TIMESTAMPDIFF(MINUTE, GREATEST(COALESCE((SELECT MAX(fecha_hora) FROM lecturas_biometricas), '2000-01-01'), COALESCE((SELECT MAX(fecha_hora) FROM raciones_policia), '2000-01-01')), NOW()) AS minutos"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "m",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 60
+       },
+       {
+        "color": "red",
+        "value": 240
+       }
+      ]
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 5,
+   "title": "Raciones por día",
+   "type": "timeseries",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 24,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "time_series",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT TIMESTAMP(r.fecha_comida) AS time, r.origen AS metric, COUNT(*) AS value FROM (SELECT fecha_comida, comida_id, categoria_reporte_id, 'Personal' AS origen FROM asistencias UNION ALL SELECT fecha_comida, comida_id, categoria_reporte_id, 'Policías' FROM raciones_policia) r WHERE $__timeFilter(r.fecha_comida) GROUP BY 1, 2 ORDER BY 1"
+    }
+   ],
+   "options": {},
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 70,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 6,
+   "title": "Raciones por comida (periodo)",
+   "type": "barchart",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT c.nombre AS comida, SUM(r.origen = 'Personal') AS personal, SUM(r.origen = 'Policías') AS policias FROM (SELECT fecha_comida, comida_id, categoria_reporte_id, 'Personal' AS origen FROM asistencias UNION ALL SELECT fecha_comida, comida_id, categoria_reporte_id, 'Policías' FROM raciones_policia) r JOIN v_comidas c ON c.id = r.comida_id WHERE $__timeFilter(r.fecha_comida) GROUP BY c.id, c.nombre ORDER BY c.id"
+    }
+   ],
+   "options": {
+    "stacking": "normal",
+    "xField": "comida"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 7,
+   "title": "Raciones por columna del informe (periodo)",
+   "type": "barchart",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "",
+   "gridPos": {
+    "x": 12,
+    "y": 12,
+    "w": 12,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT cr.nombre AS columna, COUNT(*) AS raciones FROM (SELECT fecha_comida, comida_id, categoria_reporte_id, 'Personal' AS origen FROM asistencias UNION ALL SELECT fecha_comida, comida_id, categoria_reporte_id, 'Policías' FROM raciones_policia) r JOIN categorias_reporte cr ON cr.id = r.categoria_reporte_id WHERE $__timeFilter(r.fecha_comida) GROUP BY cr.id, cr.nombre, cr.orden ORDER BY cr.orden"
+    }
+   ],
+   "options": {
+    "xField": "columna"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 8,
+   "title": "Lecturas rechazadas por motivo (periodo)",
+   "type": "piechart",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "",
+   "gridPos": {
+    "x": 0,
+    "y": 20,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT motivo, COUNT(*) AS lecturas FROM lecturas_biometricas WHERE resultado = 'rechazada' AND $__timeFilter(fecha_hora) GROUP BY motivo"
+    }
+   ],
+   "options": {
+    "pieType": "donut",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": true
+    },
+    "legend": {
+     "displayMode": "table",
+     "placement": "right",
+     "values": [
+      "value"
+     ]
+    }
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 9,
+   "title": "Intervenciones de cocina por cocinera (periodo)",
+   "type": "barchart",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "",
+   "gridPos": {
+    "x": 8,
+    "y": 20,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT u.username AS cocinera, SUM(i.resultado = 'registrada') AS registradas, SUM(i.resultado = 'rechazada') AS rechazadas FROM intervenciones_lectura i JOIN usuarios_sistema u ON u.id = i.cuenta_id WHERE $__timeFilter(i.momento) GROUP BY u.username ORDER BY u.username"
+    }
+   ],
+   "options": {
+    "xField": "cocinera"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 10,
+   "title": "Lecturas por lector (periodo)",
+   "type": "table",
+   "datasource": {
+    "type": "mysql",
+    "uid": "comedor-mysql"
+   },
+   "description": "",
+   "gridPos": {
+    "x": 16,
+    "y": 20,
+    "w": 8,
+    "h": 8
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "mysql",
+      "uid": "comedor-mysql"
+     },
+     "format": "table",
+     "rawQuery": true,
+     "editorMode": "code",
+     "rawSql": "SELECT dispositivo AS lector, COUNT(*) AS lecturas, SUM(resultado = 'aceptada') AS aceptadas, MAX(fecha_hora) AS ultima FROM lecturas_biometricas WHERE $__timeFilter(fecha_hora) GROUP BY dispositivo ORDER BY lecturas DESC"
+    }
+   ],
+   "options": {},
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  }
+ ],
+ "description": "Solo lectura. Personal y policías se suman como en los informes de la app."
+}

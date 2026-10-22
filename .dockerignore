@@ -1,0 +1,13 @@
+# Nada de entornos, dependencias, credenciales ni datos al contexto de build.
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+lector_puente
+qa
+.git

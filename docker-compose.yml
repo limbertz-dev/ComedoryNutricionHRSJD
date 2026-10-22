@@ -1,0 +1,133 @@
+# Sistema de Comedor y Nutrición Hospitalaria: MySQL, API, frontend y Grafana.
+#
+#   copy docker\compose.env.example .env     (completar las claves)
+#   docker compose up -d --build
+#
+#   App:      http://localhost:8080
+#   API:      http://localhost:8000/docs
+#   Grafana:  http://localhost:3000   (admin / GRAFANA_ADMIN_PASSWORD)
+#   MySQL:    localhost:3307          (el 3306 suele estar ocupado por Laragon)
+#
+# Base de turnos: si docker/mysql/turnos-real/ tiene el volcado del hospital
+# (NUNCA va al repositorio) se carga ese; si no, el escenario SINTÉTICO de demo.
+# Solo se carga la primera vez que se crea el volumen `db-datos`.
+#
+# Primera cuenta (clave temporal, se muestra una vez):
+#   docker compose exec api python -m app.semillas.admin --username jefa --rol jefa
+
+name: comedor
+
+x-zona: &zona
+  TZ: America/La_Paz
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      <<: *zona
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Falta MYSQL_ROOT_PASSWORD en .env}
+      NUTRICION_DB: ${NUTRICION_DB:-bd_nutricion}
+      TURNOS_DB: ${TURNOS_DB:-bd_proyecto_backend}
+      APP_USER: ${APP_DB_USER:-comedor}
+      APP_PASSWORD: ${APP_DB_PASSWORD:?Falta APP_DB_PASSWORD en .env}
+      GRAFANA_USER: ${GRAFANA_DB_USER:-grafana_lector}
+      GRAFANA_PASSWORD: ${GRAFANA_DB_PASSWORD:?Falta GRAFANA_DB_PASSWORD en .env}
+    command: ["--default-time-zone=-04:00"]
+    volumes:
+      - db-datos:/var/lib/mysql
+      - ./docker/mysql/initdb:/docker-entrypoint-initdb.d:ro
+      - ./docker/mysql/demo:/turnos-demo:ro
+      - ./docker/mysql/turnos-real:/turnos-real:ro
+    ports:
+      - "${MYSQL_PUERTO:-3307}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *zona
+      ENTORNO: ${ENTORNO:-produccion}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: ${APP_DB_USER:-comedor}
+      DB_PASSWORD: ${APP_DB_PASSWORD}
+      DB_NAME: ${NUTRICION_DB:-bd_nutricion}
+      DB_NAME_TURNOS: ${TURNOS_DB:-bd_proyecto_backend}
+      AUTH_JWT_SECRETO: ${AUTH_JWT_SECRETO:?Falta AUTH_JWT_SECRETO en .env}
+      ORIGENES_PERMITIDOS: ${ORIGENES_PERMITIDOS:-http://localhost:8080,http://127.0.0.1:8080}
+      LECTORES: ${LECTORES:-}
+    ports:
+      - "${API_PUERTO:-8000}:8000"
+
+  # Una sola vez, después de migrar: permisos de solo lectura de Grafana, tabla
+  # por tabla (las tablas recién existen cuando la API terminó de migrar).
+  permisos:
+    image: mysql:8.4
+    restart: "no"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD}
+      NUTRICION_DB: ${NUTRICION_DB:-bd_nutricion}
+      TURNOS_DB: ${TURNOS_DB:-bd_proyecto_backend}
+      GRAFANA_USER: ${GRAFANA_DB_USER:-grafana_lector}
+    volumes:
+      - ./docker/mysql/grants-grafana.sql.plantilla:/grants.sql.plantilla:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        sed -e "s/{NUTRICION}/$$NUTRICION_DB/g" -e "s/{TURNOS}/$$TURNOS_DB/g" -e "s/{GRAFANA}/$$GRAFANA_USER/g"
+        /grants.sql.plantilla | mysql -h db -uroot && echo "Permisos de Grafana aplicados."
+
+  front:
+    build:
+      context: .
+      dockerfile: docker/front/Dockerfile
+      args:
+        # La dirección de la API vista desde el NAVEGADOR de quien usa la app.
+        VITE_API_URL: ${API_URL_PUBLICA:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${FRONT_PUERTO:-8080}:80"
+
+  grafana:
+    image: grafana/grafana-oss:11.6.0
+    restart: unless-stopped
+    depends_on:
+      permisos:
+        condition: service_completed_successfully
+    environment:
+      <<: *zona
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Falta GRAFANA_ADMIN_PASSWORD en .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/comedor.json
+      NUTRICION_DB: ${NUTRICION_DB:-bd_nutricion}
+      GRAFANA_DB_USER: ${GRAFANA_DB_USER:-grafana_lector}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD}
+    volumes:
+      - grafana-datos:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PUERTO:-3000}:3000"
+
+volumes:
+  db-datos:
+  grafana-datos:
