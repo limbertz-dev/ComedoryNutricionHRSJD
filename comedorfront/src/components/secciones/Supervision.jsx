@@ -11,6 +11,9 @@ import IntervencionesCocina from './IntervencionesCocina.jsx';
 import HuellasRegistradas from './HuellasRegistradas.jsx';
 import './Supervision.css';
 
+/** Filas por consulta: alcanza para el día completo del comedor (≈450 lecturas). */
+export const LIMITE_SUPERVISION = 1000;
+
 const ETIQUETAS_MOTIVOS = {
   no_identificado: 'Huella no reconocida (no identificado)',
   sin_derecho: 'Sin derecho en este turno',
@@ -230,7 +233,7 @@ export default function Supervision({
         tab = pestanaPorDefecto(diaServidor.comidas);
         setPestana(tab);
       }
-      const ultimas = await obtenerUltimasMarcaciones({ fecha, limite: 100, comidaId: tab, signal });
+      const ultimas = await obtenerUltimasMarcaciones({ fecha, limite: LIMITE_SUPERVISION, comidaId: tab, signal });
       if (signal?.aborted) return;
       setDia(diaServidor);
       setMarcaciones(ultimas);
@@ -484,8 +487,8 @@ export default function Supervision({
           <p className="supervision__conteo" role="status">
             {`${marcacionesFiltradas.length} de ${marcaciones.length} ${marcaciones.length === 1 ? 'marcación' : 'marcaciones'}`}
           </p>
-          {marcaciones.length >= 100 ? (
-            <p className="supervision__nota-truncada" role="status">Mostrando las últimas 100</p>
+          {marcaciones.length >= LIMITE_SUPERVISION ? (
+            <p className="supervision__nota-truncada" role="status">{`Mostrando las últimas ${LIMITE_SUPERVISION}`}</p>
           ) : null}
           {hayFiltros ? (
             <Boton variante="fantasma" tamano="sm" onClick={limpiarFiltros}>Limpiar filtros</Boton>

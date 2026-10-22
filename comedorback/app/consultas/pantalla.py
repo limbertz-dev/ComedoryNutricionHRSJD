@@ -397,7 +397,7 @@ def ultimas_marcaciones(
     una asistencia vinculada por una intervención de cocina: sale como su
     lectura, con la decisión original intacta y el resultado final aparte.
 
-    Es una ventana de lo más reciente (`limite`, hasta 100), no un cursor:
+    Es una ventana de lo más reciente (`limite`, hasta 1000), no un cursor:
     entre dos consultas pueden pasar más eventos de los que caben.
 
     `rol` y `cuenta_id` deciden lo que se ve de las intervenciones (ver
