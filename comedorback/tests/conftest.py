@@ -84,6 +84,10 @@ def tablas_auth_limpias():
         # y asistencias: se vacía primero, o los DELETE de abajo y los de las
         # demás pruebas reventarían por la FK.
         sesion.execute(text("DELETE FROM intervenciones_lectura"))
+        # Lo mismo con el lector real: las solicitudes apuntan a lecturas y los
+        # vínculos a la cuenta que los creó.
+        sesion.execute(text("DELETE FROM solicitudes_lector"))
+        sesion.execute(text("DELETE FROM vinculos_lector"))
         # R2 deja solo la versión base (2000-01-01): los tests que asumen
         # 12 h y enfermería excluida no se enteran de versiones de otro test.
         sesion.execute(
