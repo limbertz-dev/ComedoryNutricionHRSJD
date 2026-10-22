@@ -363,6 +363,8 @@ def main():
     with c.bloqueo_corrida(), c.entorno_seguro(permitidas) as (motor, _huella, _servidor), c.app_sin_dotenv():
         if args.limpiar:
             limpiar(motor, args.aplicar)
+            if args.aplicar:
+                MANIFIESTO.unlink()
         else:
             simular(motor, args.fecha or fecha_del_laboratorio(), args.comensales, args.semilla, args.aplicar)
         if args.aplicar:
