@@ -14,22 +14,27 @@ import {
   ajustarAnchos,
   banner,
   cabecera,
+  casillaFormulario,
   celda,
   columna,
   configurarImpresion,
   filaDatos,
   filaTotales,
   formula,
+  FORMATO_CIFRA,
+  FORMATO_COEFICIENTE,
+  FORMATO_CONTEO,
   FORMATO_DECIMAL,
   FORMATO_DIA,
   FORMATO_ENTERO,
   FORMATO_PORCENTAJE,
   FORMATO_PROMEDIO,
   generarLibroEnSegundoPlano,
-  notaAlPie,
+  logoFormulario,
   nuevaHoja,
-  tarjetaCierre,
+  textoFormulario,
 } from './excelEstilos.js';
+import { LOGO_HOSPITAL } from './membrete.js';
 
 const NOMBRE_SISTEMA = 'Sistema de Comedor y Nutrición Hospitalaria';
 
@@ -423,8 +428,8 @@ const FORMATO_AVISO = new Intl.NumberFormat('es-BO');
 function textoSinClasificar(cantidad) {
   const cifra = FORMATO_AVISO.format(cantidad);
   return cantidad === 1
-    ? `${cifra} ración servida a personal sin categoría asignada en el formulario. No está incluida en las columnas de arriba — queda pendiente de clasificar.`
-    : `${cifra} raciones servidas a personal sin categoría asignada en el formulario. No están incluidas en las columnas de arriba — quedan pendientes de clasificar.`;
+    ? `${cifra} ración pendiente de clasificación. Está incluida en el total del informe.`
+    : `${cifra} raciones pendientes de clasificación. Están incluidas en el total del informe.`;
 }
 
 function textoSinCoeficiente(cantidad) {
@@ -471,12 +476,18 @@ export function notasDeInforme(informe) {
 function cabeceraFormulario(doc, informe, margen) {
   const ancho = doc.internal.pageSize.getWidth();
 
+  /* Logo del hospital a la izquierda del membrete; es lo único en color. */
+  const altoLogo = 40;
+  const anchoLogo = (LOGO_HOSPITAL.ancho * altoLogo) / LOGO_HOSPITAL.alto;
+  doc.addImage(`data:image/png;base64,${LOGO_HOSPITAL.base64}`, 'PNG', margen, 24, anchoLogo, altoLogo);
+  const xMembrete = margen + anchoLogo + 8;
+
   doc.setTextColor(...RGB_NEGRO);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
-  doc.text(ENCABEZADO_FORMULARIO[0], margen, 44);
+  doc.text(ENCABEZADO_FORMULARIO[0], xMembrete, 42);
   doc.setFontSize(8.5);
-  doc.text(ENCABEZADO_FORMULARIO[1], margen, 56);
+  doc.text(ENCABEZADO_FORMULARIO[1], xMembrete, 54);
 
   /* El título va en su propia línea: centrado a la altura del membrete se
      solapaba con el nombre del hospital. */
@@ -530,7 +541,7 @@ function coeficientesFormulario(doc, informe, margen, desdeY) {
     doc.text(`${grupo.etiqueta.toUpperCase()} :`, margen, y);
 
     doc.text(cifraFormulario(grupo.servidas), xServidas, y, { align: 'right' });
-    doc.text(`X ${grupo.coeficiente.toFixed(2)}`, xCoeficiente, y);
+    doc.text(grupo.coeficienteVariable ? 'Variable' : `X ${grupo.coeficiente.toFixed(2)}`, xCoeficiente, y);
     doc.text('=', xIgual, y);
 
     doc.setFont('helvetica', 'bold');
@@ -754,21 +765,15 @@ export function exportarInformePdf(informe) {
 /* ------------------------------------------------- Excel de los informes */
 
 /*
- * El Excel del informe no es una copia del PDF: el PDF es el formulario en
- * papel, y esta hoja es la herramienta de trabajo del Servicio de Estadística.
- * Por eso lleva la identidad verde del sistema y, sobre todo, fórmulas nativas
- * en todos los totales: quien reciba el archivo puede corregir una celda y ver
- * recalcularse la columna, el total del mes y el promedio por día, sin que
- * nadie tenga que rehacer las cuentas a mano.
+ * El Excel del informe es el mismo formulario que el PDF, en una sola hoja:
+ * membrete con el logo, la tabla en blanco y negro y, debajo, los
+ * coeficientes de ración completa con las cifras de cierre. Lo que el Excel
+ * agrega son las fórmulas nativas: quien reciba el archivo puede corregir una
+ * celda y ver recalcularse la fila, la columna, el equivalente y el promedio
+ * por día, sin rehacer las cuentas a mano.
  */
 
-const HOJA_RACIONES = 'Raciones';
-const HOJA_COEFICIENTES = 'Coeficientes';
-
-/* El mismo sello que cierra el PDF del formulario. */
-function pieImpreso(generado) {
-  return `Generado automáticamente por el ${NOMBRE_SISTEMA} · ${generado}`;
-}
+const HOJA_INFORME = 'Informe';
 
 /** Días (o meses) con registro, que es entre lo que se saca el promedio. */
 function registradosDelInforme(informe) {
@@ -776,233 +781,307 @@ function registradosDelInforme(informe) {
 }
 
 /**
- * El mensual cierra en raciones completas equivalentes, que son decimales
- * aunque un mes concreto dé redondo; el resto cierra en raciones contadas.
+ * El formulario cierra en raciones completas equivalentes, que son decimales
+ * aunque un mes concreto dé redondo; las planillas cierran en raciones contadas.
  */
 function formatoDeCierre(informe, valor) {
   if (esFormulario(informe)) return FORMATO_DECIMAL;
-  return Number.isInteger(valor) ? FORMATO_ENTERO : FORMATO_DECIMAL;
+  return Number.isInteger(valor) ? FORMATO_CONTEO : FORMATO_DECIMAL;
 }
 
 /**
- * Las dos tarjetas de cierre, siempre calculadas por Excel:
- * la primera apunta a la celda que ya tiene el total (el total general de la
- * tabla, o el equivalente de la hoja de coeficientes) y la segunda divide esa
- * misma celda entre los días o meses registrados.
+ * Columnas del bloque de coeficientes, alineadas a la derecha de la tabla como
+ * en el PDF: servidas, «X coeficiente», «=», equivalente y la aclaración.
+ * Con pocas categorías la tabla es angosta y el bloque se sale por la derecha
+ * antes que pisar la columna de los rótulos.
  */
-function cierreConFormulas(hoja, desdeFila, informe, referenciaTotal, columnas) {
-  const registrados = registradosDelInforme(informe);
-  const [total, promedio] = informe.cierre;
+function columnasDeCierre(columnas) {
+  const servidas = Math.max(2, columnas - 5);
+  return {
+    servidas,
+    coeficiente: servidas + 1,
+    igual: servidas + 2,
+    equivalente: servidas + 3,
+    detalle: servidas + 4,
+  };
+}
 
-  tarjetaCierre(hoja, desdeFila, {
-    rotulo: total.rotulo,
-    valor: formula(referenciaTotal, total.valor),
-    detalle: total.detalle,
-    formato: formatoDeCierre(informe, total.valor),
+/** Membrete: logo, hospital y servicio; título; período y gestión. */
+function membreteExcel(libro, hoja, informe, columnas) {
+  logoFormulario(libro, hoja, LOGO_HOSPITAL);
+
+  /* La sangría deja el nombre a la derecha del logo, en la misma línea. */
+  hoja.getRow(1).height = 18;
+  hoja.getRow(2).height = 16;
+  textoFormulario(hoja.getCell(1, 1), ENCABEZADO_FORMULARIO[0], { tamano: 10, negrita: true, indent: 8 });
+  textoFormulario(hoja.getCell(2, 1), ENCABEZADO_FORMULARIO[1], { tamano: 8.5, negrita: true, indent: 8 });
+  hoja.getRow(3).height = 14;
+
+  hoja.mergeCells(4, 1, 4, columnas);
+  hoja.getRow(4).height = 24;
+  textoFormulario(hoja.getCell(4, 1), informe.titulo.toUpperCase(), {
+    tamano: 13, negrita: true, horizontal: 'center',
   });
 
-  tarjetaCierre(hoja, desdeFila + 1, {
-    rotulo: promedio.rotulo,
-    /* Sin registros no hay división posible: se deja la cifra tal cual. */
-    valor: registrados > 0
-      ? formula(`${celda(desdeFila, 2)}/${registrados}`, promedio.valor)
-      : promedio.valor,
-    detalle: promedio.detalle,
-    formato: FORMATO_PROMEDIO,
-  });
-
-  let fila = desdeFila + 2;
-  const notas = notasDeInforme(informe);
-  if (notas.length > 0) {
-    fila += 1;
-    notaAlPie(hoja, fila, 'Notas:', columnas);
-    notas.forEach((nota) => {
-      fila += 1;
-      notaAlPie(hoja, fila, nota, columnas);
+  hoja.getRow(5).height = 22;
+  textoFormulario(
+    hoja.getCell(5, 1),
+    `${informe.encabezado.rotulo}   ${informe.encabezado.valor}`,
+    { tamano: 11, negrita: true },
+  );
+  /* En el resumen anual el período ya es la gestión: no se repite. */
+  if (informe.tipo !== 'gestion') {
+    textoFormulario(hoja.getCell(5, columnas), `GESTIÓN : ${informe.gestion}`, {
+      tamano: 10, negrita: true, horizontal: 'right',
     });
   }
+  hoja.getRow(6).height = 8;
+  return 7;
+}
+
+/**
+ * Cabecera de la tabla. El formulario lleva la del papel, en dos pisos
+ * (TIEMPOS DE COMIDA | P E R S O N A L sobre las categorías | TOTAL); las
+ * planillas, una sola fila. Devuelve la primera fila de datos.
+ */
+function cabeceraExcel(hoja, informe, desde, columnas) {
+  const titulo = (celdaTitulo, texto) => casillaFormulario(celdaTitulo, texto, { tamano: 8.5, negrita: true });
+
+  if (!esFormulario(informe)) {
+    hoja.getRow(desde).height = 30;
+    informe.encabezados.forEach((texto, indice) => titulo(hoja.getCell(desde, indice + 1), texto.toUpperCase()));
+    return desde + 1;
+  }
+
+  hoja.getRow(desde).height = 22;
+  hoja.getRow(desde + 1).height = 30;
+  /* Combinar no propaga el borde: cada celda del bloque se enmarca aparte. */
+  for (let col = 1; col <= columnas; col += 1) {
+    titulo(hoja.getCell(desde, col), null);
+    titulo(hoja.getCell(desde + 1, col), null);
+  }
+  hoja.mergeCells(desde, 1, desde + 1, 1);
+  hoja.mergeCells(desde, 2, desde, columnas - 1);
+  hoja.mergeCells(desde, columnas, desde + 1, columnas);
+  hoja.getCell(desde, 1).value = 'TIEMPOS DE COMIDA';
+  hoja.getCell(desde, 2).value = 'P E R S O N A L';
+  hoja.getCell(desde, columnas).value = 'TOTAL';
+  informe.categorias.forEach((categoria, indice) => {
+    hoja.getCell(desde + 1, indice + 2).value = categoria.toUpperCase();
+  });
+  return desde + 2;
+}
+
+/**
+ * Cuerpo y fila de totales. El total de cada fila y de cada columna son
+ * `SUM()`, no cifras pegadas.
+ */
+function tablaExcel(hoja, informe, primera, columnas) {
+  const esRegistro = informe.tipo === 'registro';
+  const filas = filasDeInforme(informe);
+  const filaDeTiempo = new Map();
+
+  filas.forEach((fila, indice) => {
+    const numero = primera + indice;
+    hoja.getRow(numero).height = 20;
+    /* Los días todavía sin registrar se dejan en blanco, como en el cuaderno. */
+    const registrado = fila.registrado !== false;
+    if (fila.tiempo) filaDeTiempo.set(normalizarRotulo(fila.tiempo), numero);
+
+    /* El día va como número con formato «00» y no como el texto "01": así
+       Excel no lo marca con el aviso de «número almacenado como texto». */
+    casillaFormulario(hoja.getCell(numero, 1), esRegistro ? fila.dia : fila.rotulo.toUpperCase(), {
+      negrita: true,
+      horizontal: esRegistro ? 'center' : 'left',
+      formato: esRegistro ? FORMATO_DIA : undefined,
+    });
+    fila.celdas.forEach((valor, indice2) => {
+      casillaFormulario(hoja.getCell(numero, indice2 + 2), registrado ? valor : null, { formato: FORMATO_CIFRA });
+    });
+    casillaFormulario(
+      hoja.getCell(numero, columnas),
+      registrado ? formula(`SUM(${celda(numero, 2)}:${celda(numero, columnas - 1)})`, fila.total) : null,
+      { formato: FORMATO_CIFRA },
+    );
+  });
+
+  const ultima = primera + filas.length - 1;
+  const filaTotal = ultima + 1;
+  const sumaColumna = (col, resultado) => (filas.length > 0
+    ? formula(`SUM(${columna(col)}${primera}:${columna(col)}${ultima})`, resultado)
+    : resultado);
+
+  hoja.getRow(filaTotal).height = 22;
+  casillaFormulario(hoja.getCell(filaTotal, 1), 'TOTAL', { negrita: true, horizontal: 'left' });
+  informe.totalesPorCategoria.forEach((valor, indice) => {
+    casillaFormulario(hoja.getCell(filaTotal, indice + 2), sumaColumna(indice + 2, valor), {
+      negrita: true, formato: FORMATO_CIFRA,
+    });
+  });
+  casillaFormulario(hoja.getCell(filaTotal, columnas), sumaColumna(columnas, informe.totalGeneral), {
+    negrita: true, formato: FORMATO_CONTEO,
+  });
+
+  return { filaTotal, filaDeTiempo };
+}
+
+function normalizarRotulo(texto) {
+  return String(texto ?? '').trim().toLowerCase();
+}
+
+/**
+ * Coeficientes (solo el formulario): cada tiempo de comida toma sus servidas
+ * del total de su fila en la tabla y el equivalente es una multiplicación
+ * real, así que cambiar un coeficiente recalcula el informe. Con coeficientes
+ * mixtos en el período no hay una sola multiplicación posible: se deja el
+ * equivalente que calculó el sistema por vigencia.
+ */
+function coeficientesExcel(hoja, informe, desde, columnas, tabla) {
+  const pos = columnasDeCierre(columnas);
+  let fila = desde;
+
+  hoja.getRow(fila).height = 20;
+  textoFormulario(
+    hoja.getCell(fila, 1),
+    'COEFICIENTES ASIGNADOS A LOS TIEMPOS DE COMIDA PARA REDUCIR A RACIÓN COMPLETA',
+    { tamano: 9.5, negrita: true },
+  );
+  fila += 1;
+
+  const primera = fila;
+  informe.grupos.forEach((grupo, indice) => {
+    hoja.getRow(fila).height = 18;
+    textoFormulario(hoja.getCell(fila, 1), `${grupo.etiqueta.toUpperCase()} :`);
+
+    const enTabla = tabla.filaDeTiempo.get(normalizarRotulo(grupo.etiqueta));
+    textoFormulario(
+      hoja.getCell(fila, pos.servidas),
+      enTabla ? formula(celda(enTabla, columnas), grupo.servidas) : grupo.servidas,
+      { horizontal: 'right', formato: FORMATO_CIFRA },
+    );
+    textoFormulario(
+      hoja.getCell(fila, pos.coeficiente),
+      grupo.coeficienteVariable ? 'Variable' : grupo.coeficiente,
+      { horizontal: 'center', formato: FORMATO_COEFICIENTE },
+    );
+    textoFormulario(hoja.getCell(fila, pos.igual), '=', { horizontal: 'center' });
+    textoFormulario(
+      hoja.getCell(fila, pos.equivalente),
+      grupo.coeficienteVariable
+        ? grupo.equivalente
+        : formula(`${celda(fila, pos.servidas)}*${celda(fila, pos.coeficiente)}`, grupo.equivalente),
+      { negrita: true, horizontal: 'right', formato: FORMATO_DECIMAL },
+    );
+    /* Raya de suma bajo el último equivalente, como la del papel. */
+    if (indice === informe.grupos.length - 1) {
+      hoja.getCell(fila, pos.equivalente).border = { bottom: { style: 'thin', color: { argb: 'FF000000' } } };
+    }
+    fila += 1;
+  });
+
+  return { siguiente: fila, primera, ultima: fila - 1, pos };
+}
+
+/** TOTAL RACIONES y RACIONES DÍA, siempre calculadas por Excel. */
+function cierreExcel(hoja, informe, desde, columnas, referenciaTotal) {
+  const pos = columnasDeCierre(columnas);
+  const registrados = registradosDelInforme(informe);
+  const [total, promedio] = informe.cierre;
+  const filaTotal = desde;
+
+  const linea = (fila, dato, valor, formato) => {
+    hoja.getRow(fila).height = 20;
+    textoFormulario(hoja.getCell(fila, 1), dato.rotulo.toUpperCase(), { negrita: true });
+    textoFormulario(hoja.getCell(fila, pos.igual), '=', { negrita: true, horizontal: 'center' });
+    textoFormulario(hoja.getCell(fila, pos.equivalente), valor, { negrita: true, horizontal: 'right', formato });
+    if (dato.detalle) textoFormulario(hoja.getCell(fila, pos.detalle), `(${dato.detalle})`, { tamano: 8.5 });
+  };
+
+  linea(filaTotal, total, referenciaTotal ? formula(referenciaTotal, total.valor) : total.valor,
+    formatoDeCierre(informe, total.valor));
+  linea(
+    filaTotal + 1,
+    promedio,
+    /* Sin registros no hay división posible: se deja la cifra tal cual. */
+    registrados > 0
+      ? formula(`${celda(filaTotal, pos.equivalente)}/${registrados}`, promedio.valor)
+      : promedio.valor,
+    FORMATO_PROMEDIO,
+  );
+  return filaTotal + 2;
+}
+
+/** Notas de advertencia y el sello del sistema, fuera de la rejilla. */
+function pieExcel(hoja, informe, desde, columnas) {
+  let fila = desde;
+  notasDeInforme(informe).forEach((nota) => {
+    fila += 1;
+    hoja.mergeCells(fila, 1, fila, columnas);
+    textoFormulario(hoja.getCell(fila, 1), `NOTA: ${nota}`, { tamano: 8.5 });
+    hoja.getCell(fila, 1).alignment = { horizontal: 'left', vertical: 'top', wrapText: true };
+    hoja.getRow(fila).height = nota.length > 110 ? 26 : 15;
+  });
+
+  fila += 2;
+  textoFormulario(
+    hoja.getCell(fila, 1),
+    `Generado automáticamente por el ${NOMBRE_SISTEMA} · ${informe.generado}`,
+    { tamano: 8.5 },
+  );
   return fila;
 }
 
 /**
- * Hoja principal: la tabla del informe con la misma forma que en pantalla.
- * El total de cada fila y de cada columna son `SUM()`, no cifras pegadas.
- */
-function hojaDelInforme(libro, informe) {
-  const encabezados = informe.encabezados;
-  const columnas = encabezados.length;
-  const colTotal = columnas;
-  const filas = filasDeInforme(informe);
-
-  const hoja = nuevaHoja(libro, HOJA_RACIONES);
-  const filaCabecera = banner(hoja, columnas, {
-    sistema: NOMBRE_SISTEMA.toUpperCase(),
-    titulo: informe.titulo,
-    subtitulo: `${informe.periodo.principal} · ${informe.periodo.secundario}  |  Generado: ${informe.generado}`,
-  });
-  cabecera(hoja, filaCabecera, encabezados);
-
-  /* El día va como número con formato «00» y no como el texto "01": así Excel
-     no lo marca con el aviso de «número almacenado como texto». */
-  const esRegistro = informe.tipo === 'registro';
-  const primera = filaCabecera + 1;
-  filas.forEach((fila, indice) => {
-    const numero = primera + indice;
-    /* Los días todavía sin registrar se dejan en blanco, como en el cuaderno. */
-    const registrado = fila.registrado !== false;
-    filaDatos(hoja, numero, [
-      esRegistro ? fila.dia : fila.rotulo,
-      ...fila.celdas.map((valor) => (registrado ? valor : null)),
-      registrado
-        ? formula(`SUM(${celda(numero, 2)}:${celda(numero, colTotal - 1)})`, fila.total)
-        : null,
-    ], {
-      formatoRotulo: esRegistro ? FORMATO_DIA : undefined,
-      rotuloCentrado: esRegistro,
-      /* La columna «Total» va en su propia banda, como en el original. */
-      columnaDestacada: colTotal,
-    });
-  });
-
-  const ultima = primera + filas.length - 1;
-  const sumaColumna = (indice, resultado) =>
-    formula(`SUM(${columna(indice)}${primera}:${columna(indice)}${ultima})`, resultado);
-
-  const filaTotal = ultima + 1;
-  filaTotales(hoja, filaTotal, [
-    'Total',
-    ...informe.totalesPorCategoria.map((valor, indice) => sumaColumna(indice + 2, valor)),
-    sumaColumna(colTotal, informe.totalGeneral),
-  ]);
-
-  hoja.autoFilter = {
-    from: { row: filaCabecera, column: 1 },
-    to: { row: ultima, column: columnas },
-  };
-
-  /* Angosto a propósito: la tabla tiene que caber en un A4 al imprimirse. */
-  ajustarAnchos(hoja, encabezados.map((titulo, indice) => [
-    titulo,
-    ...(indice === 0 ? filas.map((fila) => fila.rotulo) : []),
-  ]), { minimo: 10, maximo: 12, primera: 18 });
-
-  return { hoja, columnas, filaTotal, colTotal, primera };
-}
-
-/**
- * Hoja de coeficientes (solo el informe mensual): la reducción a ración
- * completa, con las servidas tomadas de la hoja anterior y el equivalente
- * como multiplicación real. Cambiar un coeficiente aquí recalcula el mes.
- */
-function hojaDeCoeficientes(libro, informe, racionesInfo) {
-  const encabezados = ['Tiempo de comida', 'Servidas', 'Coeficiente', 'Equivalente'];
-  const hoja = nuevaHoja(libro, HOJA_COEFICIENTES);
-
-  const filaCabecera = banner(hoja, encabezados.length, {
-    sistema: NOMBRE_SISTEMA.toUpperCase(),
-    titulo: 'Coeficientes para reducir a ración completa',
-    subtitulo: `${informe.periodo.principal} · ${informe.periodo.secundario}`,
-  });
-  cabecera(hoja, filaCabecera, encabezados);
-
-  const normalizar = (texto) => String(texto ?? '').trim().toLowerCase();
-  const primera = filaCabecera + 1;
-
-  informe.grupos.forEach((grupo, indice) => {
-    const numero = primera + indice;
-    /* Las servidas son el total de ese tiempo de comida en la otra hoja: se
-       enlazan en vez de repetirse, para que las dos hojas no se separen. */
-    const enTabla = informe.filas.findIndex((fila) => normalizar(fila.tiempo) === normalizar(grupo.etiqueta));
-    const servidas = enTabla >= 0
-      ? formula(
-        `${HOJA_RACIONES}!${celda(racionesInfo.primera + enTabla, racionesInfo.colTotal)}`,
-        grupo.servidas,
-      )
-      : grupo.servidas;
-
-    filaDatos(hoja, numero, [
-      grupo.etiqueta,
-      servidas,
-      grupo.coeficiente,
-      formula(`${celda(numero, 2)}*${celda(numero, 3)}`, grupo.equivalente),
-    ]);
-    hoja.getCell(numero, 3).numFmt = FORMATO_PROMEDIO;
-    hoja.getCell(numero, 4).numFmt = FORMATO_DECIMAL;
-  });
-
-  const ultima = primera + informe.grupos.length - 1;
-  const filaTotal = ultima + 1;
-  const [total, promedio] = informe.cierre;
-  const registrados = registradosDelInforme(informe);
-
-  filaTotales(hoja, filaTotal, [
-    total.rotulo,
-    null,
-    null,
-    formula(`SUM(D${primera}:D${ultima})`, total.valor),
-  ], { formato: FORMATO_DECIMAL });
-
-  tarjetaCierre(hoja, filaTotal + 1, {
-    rotulo: promedio.rotulo,
-    valor: registrados > 0
-      ? formula(`D${filaTotal}/${registrados}`, promedio.valor)
-      : promedio.valor,
-    formato: FORMATO_PROMEDIO,
-    /* Debajo del equivalente, que es de donde sale. */
-    columnaValor: 4,
-  });
-
-  configurarImpresion(hoja, {
-    ultimaFila: filaTotal + 1,
-    ultimaColumna: encabezados.length,
-    pie: pieImpreso(informe.generado),
-  });
-
-  ajustarAnchos(hoja, [
-    [...encabezados.slice(0, 1), ...informe.grupos.map((grupo) => grupo.etiqueta), total.rotulo, promedio.rotulo],
-    ['Servidas'],
-    ['Coeficiente'],
-    ['Equivalente'],
-  ], { minimo: 14, primera: 28 });
-
-  return { filaTotal };
-}
-
-/**
- * Libro .xlsx del informe abierto: una hoja con la tabla tal cual se ve y,
- * cuando el informe los tiene, otra con los coeficientes de ración completa.
+ * Libro .xlsx del informe abierto: una sola hoja con el formulario completo,
+ * en blanco y negro como el PDF.
  *
  * La generación es asíncrona (ExcelJS se carga bajo demanda), pero el nombre
  * del archivo se devuelve de inmediato: la UI lo muestra sin esperar.
  *
- * @param {object} informe  salida de cualquiera de los tres informes
+ * @param {object} informe  salida de cualquiera de los informes
  * @returns {string} nombre del archivo generado
  */
 export function exportarInformeExcel(informe) {
   const archivo = `${informe.archivo}.xlsx`;
 
   generarLibroEnSegundoPlano(archivo, (libro) => {
-    const raciones = hojaDelInforme(libro, informe);
-    const tieneCoeficientes = Array.isArray(informe.grupos) && informe.grupos.length > 0;
-    const coeficientes = tieneCoeficientes ? hojaDeCoeficientes(libro, informe, raciones) : null;
+    const columnas = informe.encabezados.length;
+    const hoja = nuevaHoja(libro, HOJA_INFORME, { cuadricula: false });
 
-    /* El cierre del mensual cuelga de la hoja de coeficientes; el del registro
-       diario y el de la gestión, del total general de su propia tabla. */
-    const referenciaTotal = coeficientes
-      ? `${HOJA_COEFICIENTES}!D${coeficientes.filaTotal}`
-      : celda(raciones.filaTotal, raciones.colTotal);
+    const inicioTabla = membreteExcel(libro, hoja, informe, columnas);
+    const primera = cabeceraExcel(hoja, informe, inicioTabla, columnas);
+    const tabla = tablaExcel(hoja, informe, primera, columnas);
 
-    const ultimaFila = cierreConFormulas(
-      raciones.hoja, raciones.filaTotal + 2, informe, referenciaTotal, raciones.columnas,
-    );
+    let fila = tabla.filaTotal + 2;
+    let referenciaTotal = celda(tabla.filaTotal, columnas);
+    if (esFormulario(informe)) {
+      const tieneGrupos = Array.isArray(informe.grupos) && informe.grupos.length > 0;
+      if (tieneGrupos) {
+        const bloque = coeficientesExcel(hoja, informe, fila, columnas, tabla);
+        const col = columna(bloque.pos.equivalente);
+        referenciaTotal = `SUM(${col}${bloque.primera}:${col}${bloque.ultima})`;
+        fila = bloque.siguiente + 1;
+      } else {
+        referenciaTotal = null;
+      }
+    }
+    fila = cierreExcel(hoja, informe, fila, columnas, referenciaTotal);
+    const ultimaFila = pieExcel(hoja, informe, fila, columnas);
 
-    /* Como el formulario de papel: el mensual apaisado, las planillas de días
-       y de meses en vertical, y todo en una sola hoja A4. */
-    configurarImpresion(raciones.hoja, {
+    hoja.getColumn(1).width = 24;
+    for (let col = 2; col < columnas; col += 1) {
+      hoja.getColumn(col).width = esFormulario(informe) ? 14 : 11;
+    }
+    hoja.getColumn(columnas).width = 11;
+
+    /* Como el PDF: el formulario apaisado, las planillas de días y de meses en
+       vertical, y todo en una sola hoja A4. */
+    configurarImpresion(hoja, {
       orientacion: esFormulario(informe) ? 'landscape' : 'portrait',
       ultimaFila,
-      ultimaColumna: raciones.columnas,
-      pie: pieImpreso(informe.generado),
+      /* La aclaración del cierre ocupa dos columnas: si la tabla es angosta,
+         el área de impresión se estira para no cortarla. */
+      ultimaColumna: Math.max(columnas, columnasDeCierre(columnas).detalle + 1),
     });
   });
 

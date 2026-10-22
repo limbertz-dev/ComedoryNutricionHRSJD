@@ -8,6 +8,9 @@
  * en cada celda, las bandas verdes de cabecera, las filas altas y el todo
  * centrado. No hay cebrado ni tipografía de color: el papel no los tiene.
  *
+ * Los informes de raciones ya no usan las bandas verdes: salen en blanco y
+ * negro, igual que el PDF (ver «Formulario en blanco y negro», más abajo).
+ *
  * ExcelJS se carga con `import()` dentro de `generarLibro()` a propósito: la
  * librería pesa y solo hace falta cuando alguien pulsa «Excel», y así los
  * tests de Node pueden importar exportaciones.js sin arrastrar un bundle de
@@ -306,6 +309,55 @@ export function configurarImpresion(hoja, {
   }
 }
 
+/* ------------------------------------------- Formulario en blanco y negro */
+
+/*
+ * Los informes de raciones ya no usan las bandas verdes: el Excel sale igual
+ * que el PDF del formulario —blanco y negro, rejilla negra, misma tipografía
+ * de palo seco— para que se puedan imprimir uno u otro sin que se note la
+ * diferencia. Lo único con color es el logo del membrete.
+ */
+
+export const FUENTE_FORMULARIO = 'Arial';
+
+/* Las cifras en cero se leen «-», como en el papel, pero la celda sigue
+   siendo el número 0: las sumas y los filtros no se rompen. Sin separador de
+   miles, como el PDF. */
+export const FORMATO_CIFRA = '0;-0;"-"';
+export const FORMATO_CONTEO = '0';
+export const FORMATO_COEFICIENTE = '"X "0.00';
+
+/** Texto suelto, fuera de la rejilla. */
+export function textoFormulario(celdaTexto, valor, {
+  tamano = 10, negrita = false, horizontal = 'left', formato, indent,
+} = {}) {
+  if (valor !== null && valor !== undefined) celdaTexto.value = valor;
+  celdaTexto.font = { name: FUENTE_FORMULARIO, size: tamano, bold: negrita, color: { argb: ARGB.negro } };
+  celdaTexto.alignment = { horizontal, vertical: 'middle', ...(indent ? { indent } : {}) };
+  if (formato) celdaTexto.numFmt = formato;
+}
+
+/** Casilla de la tabla: fondo blanco y rejilla negra en las cuatro caras. */
+export function casillaFormulario(celdaTabla, valor, {
+  tamano = 9, negrita = false, horizontal = 'center', formato,
+} = {}) {
+  textoFormulario(celdaTabla, valor, { tamano, negrita, horizontal, formato });
+  celdaTabla.alignment = {
+    horizontal, vertical: 'middle', wrapText: true, ...(horizontal === 'left' ? { indent: 1 } : {}),
+  };
+  celdaTabla.border = BORDE_TABLA;
+}
+
+/** Logo del membrete en la esquina superior izquierda, a `alto` píxeles. */
+export function logoFormulario(libro, hoja, { base64, ancho, alto: altoOriginal }, { alto = 44 } = {}) {
+  const imagen = libro.addImage({ base64, extension: 'png' });
+  hoja.addImage(imagen, {
+    tl: { col: 0.08, row: 0.12 },
+    ext: { width: Math.round((ancho * alto) / altoOriginal), height: alto },
+    editAs: 'oneCell',
+  });
+}
+
 /** Referencia de celda: `celda(2, 9)` → `"I2"`. */
 export function celda(fila, col) {
   return `${columna(col)}${fila}`;
@@ -316,9 +368,9 @@ export function formula(texto, resultado) {
   return { formula: texto, result: resultado };
 }
 
-/** Hoja nueva con la cuadrícula visible, como el resto del sistema. */
-export function nuevaHoja(libro, nombre) {
-  return libro.addWorksheet(nombre, { views: [{ showGridLines: true }] });
+/** Hoja nueva; el formulario la pide sin cuadrícula, como el papel. */
+export function nuevaHoja(libro, nombre, { cuadricula = true } = {}) {
+  return libro.addWorksheet(nombre, { views: [{ showGridLines: cuadricula }] });
 }
 
 /**

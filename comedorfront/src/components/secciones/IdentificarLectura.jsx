@@ -56,7 +56,12 @@ export default function IdentificarLectura({
   }
   const identificador = identificadorExterno ?? propio.current;
   const montado = useRef(true);
-  useEffect(() => () => { montado.current = false; }, []);
+  useEffect(() => {
+    // StrictMode ejecuta setup -> cleanup -> setup en desarrollo.
+    // Cada setup debe habilitar de nuevo la recepción del resultado asíncrono.
+    montado.current = true;
+    return () => { montado.current = false; };
+  }, []);
 
   /* Al cambiar de lectura desde Marcaciones del turno, limpia búsqueda y
      selección previa para no preseleccionar ni arrastrar otro comensal. */
@@ -123,6 +128,10 @@ export default function IdentificarLectura({
   const servicio = pendientes?.servicio ?? null;
   const total = pendientes?.total ?? 0;
 
+  if (pendientes && lecturas.length === 0 && abierta === null && sinResolver.length === 0 && !error && !aviso) {
+    return null;
+  }
+
   return (
     <section
       className={`identificar${abierta !== null ? ' identificar--abierta' : ''}`}
@@ -177,12 +186,6 @@ export default function IdentificarLectura({
 
       {!pendientes && !error ? (
         <p className="identificar__estado" role="status">Consultando huellas por identificar…</p>
-      ) : null}
-
-      {pendientes && lecturas.length === 0 && abierta === null && sinResolver.length === 0 ? (
-        <p className="identificar__estado" role="status">
-          No hay huellas sin reconocer pendientes en este servicio.
-        </p>
       ) : null}
 
       {lecturas.length > 0 ? (

@@ -7,6 +7,8 @@ import { obtenerDiaPersonal, obtenerLecturasPorIdentificar, obtenerUltimasMarcac
 import { LIMITE_MARCACIONES_COCINA, programarCicloCocina } from '../../cocinaEnVivo.js';
 import { crearIdentificador, revisionesCambiadas } from '../../identificacion.js';
 import IdentificarLectura from './IdentificarLectura.jsx';
+import RegistrarHuella from './RegistrarHuella.jsx';
+import { ENROLAMIENTO_QA_ACTIVO } from '../../config.js';
 import useConsultaApi from '../../hooks/useConsultaApi.js';
 import Boton from '../ui/Boton.jsx';
 import { IconoBuscar, IconoCheck, IconoEquis, IconoHuella } from '../ui/Iconos.jsx';
@@ -230,6 +232,8 @@ export default function PantallaEnVivo({
   turno,
   recargarEstado,
   puedeIdentificar = false,
+  puedeEnrolar = ENROLAMIENTO_QA_ACTIVO,
+  registroHuellaInicial = false,
   personal = [],
   cargandoPadron = false,
   errorPadron = '',
@@ -239,6 +243,29 @@ export default function PantallaEnVivo({
   lecturaAbiertaInicial = null,
   identificador: identificadorExterno = null,
 }) {
+  const [registrandoHuella, setRegistrandoHuella] = useState(registroHuellaInicial);
+  const [casoHuella, setCasoHuella] = useState(null);
+  const nuevoRef = useRef(null);
+
+  function cerrarRegistroHuella() {
+    setRegistrandoHuella(false);
+    if (casoHuella) window.dispatchEvent(new Event('qa:volver-simulador'));
+    else nuevoRef.current?.focus();
+    setCasoHuella(null);
+  }
+
+  useEffect(() => {
+    if (!puedeEnrolar || !puedeIdentificar) return undefined;
+    function abrirCaso(evento) {
+      const { caso, usuarioId } = evento.detail ?? {};
+      if (!['qa01', 'qa02'].includes(caso) || !Number.isSafeInteger(usuarioId) || usuarioId <= 0) return;
+      evento.preventDefault();
+      setCasoHuella({ caso, usuarioId });
+      setRegistrandoHuella(true);
+    }
+    window.addEventListener('qa:registrar-huella', abrirCaso);
+    return () => window.removeEventListener('qa:registrar-huella', abrirCaso);
+  }, [puedeEnrolar, puedeIdentificar]);
   /*
    * Lo que se muestra como «recién ocurrido»: la marcación que envió esta
    * pantalla (`evento`, de App) o la novedad que trajo el ciclo. Al montar,
@@ -251,7 +278,7 @@ export default function PantallaEnVivo({
 
   /* El flash es la reacción a una marcación en vivo, nunca a elegir una
      fila de la lista. */
-  const mostrarFlash = enVivo?.flash === true;
+  const mostrarFlash = enVivo?.flash === true && !registrandoHuella;
 
   /* Fila de la lista elegida a mano (por su clave): mientras haya una, manda
      sobre la marcación en vivo en el escenario y en la barra de comidas. */
@@ -261,10 +288,10 @@ export default function PantallaEnVivo({
   const [busqueda, setBusqueda] = useState('');
 
   /* Tiempo de comida por el que se acota la tarjeta de marcaciones. Arranca
-     en la comida vigente del turno (o Desayuno si no hay una vigente válida);
+     en la comida vigente o la ultima cerrada, segun el servidor;
      el filtrado es local, sobre lo ya cargado para la fecha elegida, así que
      cambiar de chip nunca dispara una consulta nueva. */
-  const [filtroComida, setFiltroComida] = useState(() => comidaValida(pantalla?.comida) ?? COMIDAS_FILTRO[0]);
+  const [filtroComida, setFiltroComida] = useState(() => comidaValida(pantalla?.comida));
 
   /* Una vez que la nutricionista elige un chip a mano, el turno ya no debe
      pisarle la elección: solo se sincroniza automáticamente hasta el primer
@@ -318,11 +345,12 @@ export default function PantallaEnVivo({
   const recargarEstadoRef = useRef(recargarEstado);
   recargarEstadoRef.current = recargarEstado;
   const ciclo = useRef(null);
+  const fechaMarcaciones = pantalla?.fecha_comida ?? null;
 
   useEffect(() => {
     const control = programarCicloCocina({
       consultarMarcaciones: ({ signal }) => obtenerUltimasMarcaciones({
-        limite: LIMITE_MARCACIONES_COCINA, signal,
+        limite: LIMITE_MARCACIONES_COCINA, fecha: fechaMarcaciones ?? undefined, signal,
       }),
       // App ya pide el estado al montar la sección.
       refrescarEstado: ({ origen, signal }) => (origen === 'inicial'
@@ -371,7 +399,7 @@ export default function PantallaEnVivo({
       control.cancelar();
       ciclo.current = null;
     };
-  }, []);
+  }, [fechaMarcaciones, puedeIdentificar]);
 
   /*
    * Marcación enviada desde esta pantalla: pasa a ser lo «recién ocurrido»,
@@ -403,7 +431,7 @@ export default function PantallaEnVivo({
   const filasFiltradas = useMemo(() => {
     const termino = busqueda.trim().toLowerCase();
     return filas.filter((fila) => {
-      const coincideComida = fila.comida?.toLowerCase() === filtroComida.toLowerCase();
+      const coincideComida = filtroComida === null || fila.comida?.toLowerCase() === filtroComida.toLowerCase();
       if (!coincideComida) return false;
       if (!termino) return true;
       const nombre = fila.persona?.nombre?.toLowerCase() ?? '';
@@ -493,11 +521,11 @@ export default function PantallaEnVivo({
   }
 
   const origenMostrado = etiquetaDeOrigen(eventoMostrado?.origen);
-  const mostrarResultado = eventoMostrado !== null && lecturaAbiertaEfectiva === null;
+  const mostrarResultado = eventoMostrado !== null && lecturaAbiertaEfectiva === null && !registrandoHuella;
   const personaMostrada = eventoMostrado?.persona;
 
   /* Comidas del día de hoy del comensal mostrado o del comensal elegido al identificar. */
-  const usuarioIdConsultar = (lecturaAbiertaEfectiva !== null ? idPersonaEnIdentificacion : null)
+  const usuarioIdConsultar = registrandoHuella ? null : (lecturaAbiertaEfectiva !== null ? idPersonaEnIdentificacion : null)
     ?? personaMostrada?.id
     ?? null;
   const consultarDia = useCallback(
@@ -553,14 +581,29 @@ export default function PantallaEnVivo({
                   fueraDeHorario={pantalla?.fuera_de_horario}
                   turno={turno}
                 />
+                {puedeIdentificar && puedeEnrolar ? (
+                  <Boton variante="secundario" className="escenario__nuevo" anchoCompleto
+                    ref={nuevoRef} aria-label="Nuevo registro de huella"
+                    aria-expanded={registrandoHuella} aria-controls="escenario-principal"
+                    onClick={() => { setCasoHuella(null); setRegistrandoHuella(true); }}>
+                    <span aria-hidden="true">+</span> Nuevo
+                  </Boton>
+                ) : null}
               </div>
 
               <div
+                id="escenario-principal"
                 className={`escenario__principal${
                   puedeIdentificar ? ' escenario__principal--cocina' : ''
-                }${lecturaAbiertaEfectiva !== null ? ' escenario__principal--identificando' : ''}`}
+                }${lecturaAbiertaEfectiva !== null || registrandoHuella ? ' escenario__principal--identificando' : ''}`}
               >
-                {puedeIdentificar ? (
+                {registrandoHuella && puedeIdentificar && puedeEnrolar ? (
+                  <RegistrarHuella key={casoHuella?.caso ?? 'libre'}
+                    onCerrar={cerrarRegistroHuella} onLectura={() => ciclo.current?.solicitar()}
+                    usuarioRequerido={casoHuella?.usuarioId ?? null} elegidoInicial={casoHuella?.usuarioId ?? ''}
+                    volverAlSimulador={casoHuella !== null} />
+                ) : null}
+                {puedeIdentificar && !registrandoHuella ? (
                   <IdentificarLectura
                     pendientes={pendientes}
                     error={errorPendientes}
@@ -575,14 +618,14 @@ export default function PantallaEnVivo({
                   />
                 ) : null}
 
-                {lecturaAbiertaEfectiva === null && eventoMostrado === null ? (
+                {!registrandoHuella && lecturaAbiertaEfectiva === null && eventoMostrado === null ? (
                   <div className="escenario__estado">
                     <span className="escenario__huella">
                       <IconoHuella tamano={104} />
                     </span>
                     <p className="escenario__titulo-estado">{pantalla?.fuera_de_horario ? 'Fuera de horario' : 'Esperando marcación'}</p>
                     <p className="escenario__ayuda">
-                      {pantalla?.fuera_de_horario ? 'No hay una comida vigente. El registro de asistencias está deshabilitado.' : 'Aquí se mostrará el resultado de la marcación.'}
+                      {pantalla?.fuera_de_horario ? `No hay una comida vigente. ${pantalla.comida ? `Se muestra ${pantalla.comida}, el último servicio. ` : ''}El registro de asistencias está deshabilitado.` : 'Aquí se mostrará el resultado de la marcación.'}
                     </p>
                   </div>
                 ) : null}
@@ -721,7 +764,7 @@ export default function PantallaEnVivo({
               <p className="historial__vacio">
                 {busqueda.trim()
                   ? `No se encontraron marcaciones para «${busqueda}» en ${filtroComida}.`
-                  : `No se registraron marcaciones de ${filtroComida} hoy.`}
+                  : filtroComida ? `No se registraron marcaciones de ${filtroComida} en la fecha del servicio.` : 'Consultando el servicio y sus marcaciones…'}
               </p>
             ) : (
               <ul className="historial">

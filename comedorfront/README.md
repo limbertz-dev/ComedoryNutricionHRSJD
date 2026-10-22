@@ -34,10 +34,10 @@ http://127.0.0.1:5173). Su instalación se explica en ../comedorback/README.md.
 | obtenerUsuarioActual | GET /auth/yo | Rol de la sesión guardada al abrir la app |
 | obtenerCuentas | GET /admin/cuentas | Todas las cuentas, con vínculo, nombre y último ingreso (Administración) |
 | buscarCandidatos | GET /admin/candidatos | Personas del padrón para vincular, búsqueda de 2+ letras |
-| crearCuenta | POST /admin/cuentas | Crea la cuenta desde el padrón {rol, usuario_turnos_id} o sin vínculo {rol, username, nombre}; 201 con clave_temporal |
+| crearCuenta | POST /admin/cuentas | Crea la cuenta desde el padrón {rol, usuario_turnos_id, password} o sin vínculo {rol, username, nombre, password}; 201 {cuenta}, lista para ingresar |
 | desactivarCuenta | POST /admin/cuentas/{id}/desactivar | Da de baja la cuenta y cierra sus sesiones |
 | reactivarCuenta | POST /admin/cuentas/{id}/reactivar | Reactiva la cuenta |
-| reiniciarClaveCuenta | POST /admin/cuentas/{id}/reiniciar-clave | Clave temporal nueva, se muestra una sola vez |
+| cambiarClaveCuenta | POST /admin/cuentas/{id}/clave | Root fija la contraseña nueva {password}; se cierran las sesiones de esa cuenta |
 | obtenerCuentasLectura | GET /cuentas | Cuentas para la vista de solo lectura de la jefa (sin cuentas sistemas) |
 | obtenerReglasDerecho | GET /reglas/derecho | Versión vigente y todas las versiones de parámetros |
 | obtenerNovedadesDisponibles | GET /reglas/derecho/novedades | Tipos de novedad que se pueden marcar |
@@ -71,12 +71,13 @@ registrar, autorizar ni modificar raciones (el permiso manual de la API no
 cambió; solo la pantalla dejó de usarlo).
 
 Administración (solo sistemas) muestra la tabla de cuentas —usuario, nombre,
-rol, vínculo, estado y último ingreso— con «Reiniciar clave» y
-«Desactivar»/«Reactivar», cada acción con confirmación; en la propia cuenta no
+rol, vínculo, estado y último ingreso— con «Cambiar clave» y
+«Desactivar»/«Reactivar» (estas dos con confirmación); en la propia cuenta no
 aparece «Desactivar». «Nueva cuenta» se crea desde el padrón (el usuario es el
 login del sistema de turnos, en solo lectura) o sin vínculo (usuario y nombre
-a mano). La clave temporal se muestra una sola vez en el diálogo, con botón
-Copiar, y nunca se guarda en el navegador.
+a mano). Root escribe la contraseña definitiva (dos veces, con «Mostrar»): la
+cuenta entra con ella sin cambio obligatorio, y la contraseña nunca se guarda
+en el navegador ni vuelve del servidor.
 
 Reglas del sistema (solo sistemas) edita horarios y parámetros del derecho
 con vigencia por fecha: dos pestañas, Horarios de comida y Derecho a comer.
@@ -153,8 +154,7 @@ diario, usando fecha_comida cuando está disponible.
 Reportes muestra una sola vista, el formulario de Estadística, pedida por rango
 de fechas a /reportes/informe: «este mes» y «esta gestión» son rangos. Un rango
 sin raciones se presenta vacío, sin cifras de demostración. Excel y PDF salen de
-ese mismo informe (exportarInformeExcel / exportarInformePdf). La vista no ofrece
-pestaña ni acceso a «Reportes de pacientes»: llegarán con su módulo. El selector de
+ese mismo informe (exportarInformeExcel / exportarInformePdf). El selector de
 fechas, el período, Excel y PDF miden lo mismo (`--alto-control` en tokens.css) y la
 línea secundaria del período (días o gestión) va en la misma fila: no agranda el control.
 

@@ -348,9 +348,8 @@ test('diaLegible lee el calendario local y descarta fechas que no existen', () =
 
 /* ---------------------------------------------------------------- Reportes */
 
-test('Reportes ya no ofrece la pestaña ni el acceso a reportes de pacientes', () => {
+test('Reportes muestra una sola vista: el informe del personal con Excel y PDF', () => {
   const html = renderToStaticMarkup(h(Reportes, { ahora: new Date(2026, 8, 28, 12) }));
-  assert.doesNotMatch(html, /pacientes/i);
   assert.doesNotMatch(html, /reportes__selector|selector-reporte|aria-pressed/);
   assert.doesNotMatch(html, /Tipo de reporte/);
   /* Se conserva el informe del personal y sus dos exportaciones. */
@@ -359,10 +358,6 @@ test('Reportes ya no ofrece la pestaña ni el acceso a reportes de pacientes', (
   assert.match(html, /<span class="boton__texto">PDF<\/span>/);
   assert.match(html, /FECHA INICIAL/);
   assert.match(html, /FECHA FINAL/);
-});
-
-test('el código de Reportes no menciona reportes de pacientes ni importa su estilo retirado', () => {
-  assert.doesNotMatch(leer('../src/components/secciones/Reportes.jsx').replace(/\/\*[\s\S]*?\*\//g, ''), /pacientes|Reportes\.css/i);
 });
 
 test('el período del informe es una sola línea y no agranda el control', () => {

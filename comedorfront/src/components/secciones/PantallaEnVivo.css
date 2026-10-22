@@ -293,6 +293,19 @@
   width: 100%;
 }
 
+.escenario__gauge .escenario__nuevo {
+  margin-top: var(--e-5);
+  margin-bottom: auto;
+  min-height: var(--alto-control);
+  color: var(--c-acento-oscuro);
+  border-color: var(--c-borde-fuerte);
+}
+
+.escenario__nuevo:focus-visible {
+  outline: 2px solid var(--c-acento-oscuro);
+  outline-offset: 3px;
+}
+
 /* ---------- Modo manual ---------- */
 /*
  * Autoriza una ración sin pasar por el lector: vive debajo del contador de
@@ -363,6 +376,7 @@
 }
 
 .escenario__principal--identificando {
+  align-items: stretch;
   text-align: left;
 }
 

@@ -30,6 +30,7 @@ import {
 } from './permisos.js';
 import { escucharSesion } from './sesion.js';
 import { obtenerEstadoPantalla, obtenerPersonal } from './api.js';
+import { ENROLAMIENTO_QA_ACTIVO } from './config.js';
 
 import useConsultaApi from './hooks/useConsultaApi.js';
 import useSesion, { ProveedorSesion } from './hooks/useSesion.js';
@@ -117,7 +118,7 @@ export function Panel({ rol, usuario = null }) {
   }, [seccionActiva, usaComedor]);
   const { datos: pantalla, cargando: cargandoEstado, error: errorEstado, recargar: recargarEstado } = useConsultaApi(consultaEstado);
 
-  const turno = pantalla?.fuera_de_horario ? 'Fuera de horario' : pantalla?.comida ?? 'Consultando…';
+  const turno = pantalla?.comida ?? (pantalla?.fuera_de_horario ? 'Sin servicio' : 'Consultando…');
 
   useEffect(() => {
     if (!usaComedor) return undefined;
@@ -205,6 +206,7 @@ export function Panel({ rol, usuario = null }) {
           {permitida && seccionActiva === 'supervision' ? (
             <Supervision
               puedeConsultarIntervenciones={puedeConsultarIntervenciones(rol)}
+              puedeConsultarHuellas={rol === 'jefa' && ENROLAMIENTO_QA_ACTIVO}
             />
           ) : null}
 

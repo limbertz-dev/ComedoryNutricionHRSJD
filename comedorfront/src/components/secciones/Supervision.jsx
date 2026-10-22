@@ -8,6 +8,7 @@ import {
 } from '../../api.js';
 import { diaLegible } from '../../dias.js';
 import IntervencionesCocina from './IntervencionesCocina.jsx';
+import HuellasRegistradas from './HuellasRegistradas.jsx';
 import './Supervision.css';
 
 const ETIQUETAS_MOTIVOS = {
@@ -181,6 +182,7 @@ export function programarRefrescoSupervision({ cargarDatos, intervaloMs = 30000 
 export default function Supervision({
   fecha,
   puedeConsultarIntervenciones = false,
+  puedeConsultarHuellas = false,
   cargandoInicial = true,
   errorInicial = null,
   comidasIniciales = null,
@@ -188,6 +190,7 @@ export default function Supervision({
   actualizadoInicial = null,
   errorRefrescoInicial = '',
   intervencionesIniciales = undefined,
+  huellasIniciales = undefined,
 }) {
   const [cargando, setCargando] = useState(cargandoInicial);
   const [actualizando, setActualizando] = useState(false);
@@ -282,12 +285,17 @@ export default function Supervision({
     () => filtrarMarcaciones(marcaciones, { resultado: filtroResultado, busqueda }),
     [marcaciones, filtroResultado, busqueda],
   );
+  // Las altas no dependen del dia ni de la comida seleccionada.
+  const registroHuellas = puedeConsultarHuellas ? <HuellasRegistradas
+    version={actualizado?.getTime?.() ?? 0} inicial={huellasIniciales}
+  /> : null;
 
   /* Estados puros: Carga, Error y Vacío */
   if (cargando) {
     return (
       <div className="supervision">
         <p className="supervision__estado" role="status">Cargando supervisión…</p>
+        {registroHuellas}
       </div>
     );
   }
@@ -299,6 +307,7 @@ export default function Supervision({
           <p>{error}</p>
           <Boton onClick={() => cargarDatos()}>Reintentar supervisión</Boton>
         </div>
+        {registroHuellas}
       </div>
     );
   }
@@ -322,6 +331,7 @@ export default function Supervision({
           </Boton>
         </div>
         {avisos}
+        {registroHuellas}
       </div>
     );
   }
@@ -541,6 +551,7 @@ export default function Supervision({
           inicial={intervencionesIniciales}
         />
       ) : null}
+      {registroHuellas}
     </div>
   );
 }

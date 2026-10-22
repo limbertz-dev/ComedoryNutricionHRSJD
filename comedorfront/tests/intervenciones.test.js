@@ -628,11 +628,14 @@ test('una huella que salió de la lista ya no se puede confirmar', () => {
   assert.match(html, /<button[^>]*disabled=""[^>]*><span class="boton__icono">[\s\S]*?Confirmar entrega/);
 });
 
-test('cocina distingue cargando, vacío, sin servicio y error', () => {
+test('cocina oculta el bloque vacío y conserva la carga y los errores', () => {
   assert.match(renderToStaticMarkup(h(IdentificarLectura, {})), /Consultando huellas por identificar/);
   const vacio = renderToStaticMarkup(h(IdentificarLectura, { pendientes: { servicio: null, total: 0, truncado: false, lecturas: [] } }));
-  assert.match(vacio, /No hay un servicio en curso/);
-  assert.match(vacio, /No hay huellas sin reconocer pendientes/);
+  assert.equal(vacio, '');
+  const sinPendientes = renderToStaticMarkup(h(IdentificarLectura, {
+    pendientes: { servicio: { comida: 'Almuerzo', fin: '2026-10-15T15:00:00' }, total: 0, truncado: false, lecturas: [] },
+  }));
+  assert.equal(sinPendientes, '');
   const error = renderToStaticMarkup(h(IdentificarLectura, { error: 'No se pudieron cargar las huellas por identificar.' }));
   assert.match(error, /role="alert"/);
 });
@@ -696,7 +699,7 @@ test('columna lateral solo contiene Marcaciones del turno y la identificación s
   assert.match(lateralHtml, /Marcaciones del turno/);
   assert.doesNotMatch(lateralHtml, /Huellas por identificar|class="identificar/);
 
-  const centralMatch = html.match(/<div class="escenario__principal[^"]*">([\s\S]*?)<\/div>/);
+  const centralMatch = html.match(/<div\b[^>]*class="escenario__principal[^"]*"[^>]*>([\s\S]*?)<\/div>/);
   assert.ok(centralMatch, 'debe existir el área central');
   assert.match(centralMatch[1], /Huellas por identificar/);
 });
@@ -722,6 +725,7 @@ test('al abrir una lectura pendiente en las marcaciones, el área central despli
         clave_evento: 'lectura_biometrica:101',
         usuario_id: null,
         nombre: 'Huella no reconocida',
+        persona: { nombre: 'Huella no reconocida', categoria: 'Sin identificar' },
         categoria: 'Sin identificar',
         valido: false,
         resultado: 'rechazada',

@@ -17,3 +17,8 @@ export function resolverApiBaseUrl(env) {
 }
 
 export const API_BASE_URL = resolverApiBaseUrl(import.meta.env);
+
+/** Captura simulada disponible solo en el arranque independiente de QA. */
+export const ENROLAMIENTO_QA_ACTIVO = Boolean(
+  import.meta.env?.DEV && globalThis.document?.getElementById('qa-abrir'),
+);

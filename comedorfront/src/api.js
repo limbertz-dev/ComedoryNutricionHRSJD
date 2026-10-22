@@ -366,6 +366,91 @@ export async function obtenerPeriodos({ signal } = {}) {
   }
 }
 
+/** Perfiles permitidos para enrolar, con su servicio vigente. Solo QA. */
+export async function obtenerPersonasEnrolamiento({ signal } = {}) {
+  const personas = await solicitarApi('/_qa/enrolamiento/personas', { signal });
+  if (!Array.isArray(personas) || personas.some(p => !Number.isSafeInteger(p?.id) || p.id <= 0
+    || typeof p.nombre !== 'string' || typeof p.legajo !== 'string'
+    || typeof p.categoria !== 'string' || typeof p.huella_registrada !== 'boolean')) {
+    throw new Error('No se pudo leer el padrón para registrar la huella. Vuelve a cargarlo.');
+  }
+  return personas.map(p => ({ ...p, servicio: p.servicio ?? 'Sin servicio' }));
+}
+
+/** Registro de vinculos de huella: consulta de la jefa en el laboratorio. */
+export async function obtenerRegistrosHuellas({ busqueda = '', limite = 50, desplazamiento = 0, signal } = {}) {
+  if (typeof busqueda !== 'string' || busqueda.trim().length > 100
+    || !Number.isInteger(limite) || limite < 1 || limite > 100
+    || !Number.isInteger(desplazamiento) || desplazamiento < 0) {
+    throw new Error('Revisa la búsqueda del registro de huellas.');
+  }
+  const consulta = new URLSearchParams({ busqueda: busqueda.trim(), limite: String(limite), desplazamiento: String(desplazamiento) });
+  try {
+    const pagina = await solicitarApi(`/_qa/enrolamiento/registros?${consulta}`, { signal });
+    const id = valor => Number.isSafeInteger(valor) && valor > 0;
+    const texto = valor => valor === null || typeof valor === 'string';
+    if (!pagina || pagina.modo !== 'simulado' || !Array.isArray(pagina.datos)
+      || !Number.isSafeInteger(pagina.total) || pagina.total < 0
+      || pagina.limite !== limite || pagina.desplazamiento !== desplazamiento
+      || pagina.datos.length > limite || pagina.datos.length > Math.max(0, pagina.total - desplazamiento)
+      || pagina.datos.some(f => !id(f?.comensal?.usuario_id) || !id(f?.cuenta?.id)
+        || typeof f.comensal.disponible !== 'boolean' || typeof f.cuenta.disponible !== 'boolean'
+        || !['nombre', 'legajo', 'categoria', 'servicio'].every(c => texto(f.comensal[c]))
+        || !texto(f.cuenta.usuario) || !texto(f.cuenta.nombre)
+        || typeof f.registrada_en !== 'string' || !/(Z|[+-]\d{2}:\d{2})$/.test(f.registrada_en)
+        || !Number.isFinite(Date.parse(f.registrada_en)))) {
+      throw new Error('La respuesta del registro de huellas no es válida.');
+    }
+    return pagina;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error(`No se pudo consultar el registro de huellas. ${error.message}`, { cause: error });
+  }
+}
+
+/** Captura sintética autenticada e idempotente. No registra ninguna ración. */
+export async function capturarHuellaQa(usuarioId, clave, { signal } = {}) {
+  if (!Number.isSafeInteger(usuarioId) || usuarioId <= 0 || !esClaveIdempotencia(clave)) {
+    throw new Error('Selecciona una persona antes de capturar la huella.');
+  }
+  try {
+    const dato = await solicitarApi('/_qa/enrolamiento/capturas', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': clave },
+      body: JSON.stringify({ usuario_id: usuarioId }), signal, motivosLocales: ['perfil_no_autorizado'],
+    });
+    if (dato?.usuario_id !== usuarioId || dato.modo !== 'simulado'
+      || typeof dato.referencia !== 'string' || !dato.referencia.startsWith('SIM-HUELLA-')
+      || !esClaveIdempotencia(dato.referencia.slice(11)) || typeof dato.ya_registrada !== 'boolean') {
+      throw new Error('No se pudo confirmar el vínculo. Verifica el registro de la misma persona.');
+    }
+    return dato;
+  } catch (error) {
+    if (error instanceof ErrorApi && typeof error.datos?.detail === 'string') {
+      error.message = error.datos.detail;
+    }
+    throw error;
+  }
+}
+
+/** Lee la referencia registrada y deja que el servidor decida derecho y duplicados. Solo QA. */
+export async function leerHuellaQa(referencia, clave) {
+  if (typeof referencia !== 'string' || !referencia.startsWith('SIM-HUELLA-')
+    || !esClaveIdempotencia(referencia.slice(11)) || !esClaveIdempotencia(clave)) {
+    throw new Error('Primero registra la huella de prueba de la persona.');
+  }
+  const dato = await solicitarApi('/_qa/enrolamiento/lecturas', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': clave },
+    body: JSON.stringify({ referencia }),
+  });
+  if (dato?.modo !== 'simulado' || typeof dato.valido !== 'boolean'
+    || !Number.isSafeInteger(dato.usuario_id) || dato.usuario_id <= 0
+    || !Number.isSafeInteger(dato.lectura_id) || dato.lectura_id <= 0
+    || (dato.valido && (!Number.isSafeInteger(dato.asistencia_id) || dato.asistencia_id <= 0))) {
+    throw new Error('No se pudo confirmar la lectura. Verifica con la misma solicitud.');
+  }
+  return dato;
+}
+
 /** Error HTTP con el código y el cuerpo JSON de la respuesta, si lo trae. */
 export class ErrorApi extends Error {
   constructor(mensaje, status, datos, retryAfter = null) {
@@ -824,7 +909,8 @@ function validarGrupoCoeficiente(grupo) {
   if (typeof grupo?.grupo !== 'string' || grupo.grupo.length === 0
     || !esEnteroNoNegativo(grupo.servidas)
     || typeof grupo.coeficiente !== 'number' || Number.isNaN(grupo.coeficiente) || grupo.coeficiente < 0
-    || typeof grupo.equivalente !== 'number' || Number.isNaN(grupo.equivalente) || grupo.equivalente < 0) {
+    || typeof grupo.equivalente !== 'number' || Number.isNaN(grupo.equivalente) || grupo.equivalente < 0
+    || (grupo.coeficientes_mixtos !== undefined && typeof grupo.coeficientes_mixtos !== 'boolean')) {
     throw new Error('La API devolvió un grupo de coeficiente inválido.');
   }
 }
@@ -1010,6 +1096,7 @@ export async function obtenerInformeMensual({
       etiqueta: grupo.grupo,
       servidas: grupo.servidas,
       coeficiente: grupo.coeficiente,
+      ...(grupo.coeficientes_mixtos ? { coeficienteVariable: true } : {}),
       equivalente: grupo.equivalente,
     }));
     const totalEquivalente = dato.total_equivalente ?? 0;
@@ -1261,6 +1348,7 @@ export async function obtenerInformeRaciones({ desde, hasta, hoy = new Date(), s
       etiqueta: grupo.grupo,
       servidas: grupo.servidas,
       coeficiente: grupo.coeficiente,
+      ...(grupo.coeficientes_mixtos ? { coeficienteVariable: true } : {}),
       equivalente: grupo.equivalente,
     }));
     const totalEquivalente = dato.total_equivalente ?? 0;
@@ -1769,10 +1857,10 @@ export async function obtenerEstadoMonitoreo({ signal } = {}) {
  *
  * GET  /admin/cuentas → [CuentaApi]
  * GET  /admin/candidatos?busqueda=&limite= → [CandidatoApi] (2+ caracteres)
- * POST /admin/cuentas {rol, usuario_turnos_id} | {rol, username, nombre}
- *   → 201 {cuenta, clave_temporal}
+ * POST /admin/cuentas {rol, usuario_turnos_id, password}
+ *   | {rol, username, nombre, password} → 201 {cuenta}
  * POST /admin/cuentas/{id}/desactivar | /reactivar → CuentaApi
- * POST /admin/cuentas/{id}/reiniciar-clave → {cuenta, clave_temporal}
+ * POST /admin/cuentas/{id}/clave {password} → {cuenta}
  *
  * CuentaApi = {id, username, rol, activo, debe_cambiar,
  *   usuario_turnos_id|null, vinculada, nombre|null, categoria|null,
@@ -1780,9 +1868,9 @@ export async function obtenerEstadoMonitoreo({ signal } = {}) {
  * CandidatoApi = {usuario_turnos_id, login, nombre, categoria,
  *   cuenta_id|null}
  *
- * Los motivos del backend se traducen a español claro para la jefatura;
- * la clave temporal se entrega tal cual y solo vive en memoria mientras
- * su diálogo está abierto (nunca se guarda ni se registra).
+ * Los motivos del backend se traducen a español claro. Root escribe la
+ * contraseña definitiva: la cuenta entra con ella sin cambio obligatorio, y
+ * la contraseña nunca vuelve del servidor ni se guarda en el navegador.
  * ------------------------------------------------------------------ */
 
 /** Roles que puede tener una cuenta devuelta por la API. */
@@ -1800,10 +1888,16 @@ const MOTIVOS_ADMIN = {
   rol_no_permitido: 'Solo se pueden crear cuentas de Cocinera o Jefa.',
   no_puede_desactivarse_a_si_misma: 'No puede desactivar su propia cuenta.',
   ultima_cuenta_sistemas: 'No se puede desactivar: es la última cuenta de Sistemas.',
+  cuenta_eliminada: 'Esta cuenta fue eliminada de la lista y no se puede reactivar.',
+  nombre_del_padron: 'El nombre de esta cuenta se administra desde el padrón.',
+  rol_sistemas_protegido: 'El rol de una cuenta de Sistemas no se puede cambiar desde este formulario.',
+  password_rechazada: 'La contraseña no cumple las reglas: al menos 8 caracteres y distinta del usuario.',
 };
 
 /** Texto claro del motivo, o null si no es un motivo conocido. */
-function mensajeDeMotivoAdmin(motivo) {
+function mensajeDeMotivoAdmin(motivo, detalle) {
+  // Una contraseña rechazada trae del servidor la regla exacta que no cumple.
+  if (motivo === 'password_rechazada' && typeof detalle === 'string' && detalle) return detalle;
   return typeof motivo === 'string' ? MOTIVOS_ADMIN[motivo] ?? null : null;
 }
 
@@ -1854,12 +1948,18 @@ function adaptarCandidato(dato) {
   };
 }
 
-function adaptarCuentaConClave(dato) {
-  if (!dato || typeof dato !== 'object'
-    || typeof dato.clave_temporal !== 'string' || dato.clave_temporal.length === 0) {
-    throw new Error('La API devolvió una clave temporal inválida.');
+function adaptarCuentaRespuesta(dato) {
+  if (!dato || typeof dato !== 'object') {
+    throw new Error('La API devolvió una cuenta inválida.');
   }
-  return { cuenta: adaptarCuenta(dato.cuenta), claveTemporal: dato.clave_temporal };
+  return { cuenta: adaptarCuenta(dato.cuenta) };
+}
+
+/** La contraseña que escribe root: texto no vacío; las reglas las decide el servidor. */
+function exigirClave(password) {
+  if (typeof password !== 'string' || password.length === 0) {
+    throw new Error('Escriba la contraseña de la cuenta.');
+  }
 }
 
 /** GET /admin/cuentas: todas las cuentas del comedor. */
@@ -1899,28 +1999,30 @@ export async function buscarCandidatos(busqueda, { limite = 20, signal } = {}) {
 }
 
 /**
- * POST /admin/cuentas: crea la cuenta y devuelve su clave temporal.
- * Desde el padrón: {rol, usuarioTurnosId}. Sin vínculo: {rol, username, nombre}.
+ * POST /admin/cuentas: crea la cuenta con la contraseña que elige root.
+ * Desde el padrón: {rol, usuarioTurnosId, password}. Sin vínculo:
+ * {rol, username, nombre, password}. La cuenta queda lista para ingresar.
  */
-export async function crearCuenta({ rol, usuarioTurnosId = null, username = '', nombre = '' } = {}, { signal } = {}) {
+export async function crearCuenta({ rol, usuarioTurnosId = null, username = '', nombre = '', password = '' } = {}, { signal } = {}) {
   if (!ROLES_CUENTA_NUEVA.includes(rol)) {
     throw new Error(MOTIVOS_ADMIN.rol_no_permitido);
   }
+  exigirClave(password);
   let cuerpo;
   if (usuarioTurnosId !== null && usuarioTurnosId !== undefined) {
     if (!Number.isInteger(usuarioTurnosId) || usuarioTurnosId <= 0) {
       throw new Error('Elija una persona del padrón.');
     }
-    cuerpo = { rol, usuario_turnos_id: usuarioTurnosId };
+    cuerpo = { rol, usuario_turnos_id: usuarioTurnosId, password };
   } else {
     const usuario = typeof username === 'string' ? username.trim().toLowerCase() : '';
     const nombreLimpio = typeof nombre === 'string' ? nombre.trim() : '';
     if (!usuario) throw new Error('Escriba el nombre de usuario.');
     if (!nombreLimpio) throw new Error('Escriba el nombre de la persona.');
-    cuerpo = { rol, username: usuario, nombre: nombreLimpio };
+    cuerpo = { rol, username: usuario, nombre: nombreLimpio, password };
   }
   try {
-    return adaptarCuentaConClave(await solicitarApi('/admin/cuentas', {
+    return adaptarCuentaRespuesta(await solicitarApi('/admin/cuentas', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cuerpo),
@@ -1928,7 +2030,7 @@ export async function crearCuenta({ rol, usuarioTurnosId = null, username = '', 
     }));
   } catch (error) {
     if (signal?.aborted) throw error;
-    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo);
+    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo, error.datos?.detail);
     if (mensaje) throw new Error(mensaje);
     throw new Error(`No se pudo crear la cuenta. ${error.message}`);
   }
@@ -1958,21 +2060,63 @@ export function reactivarCuenta(id, { signal } = {}) {
   return cambiarEstadoCuenta(id, `/admin/cuentas/${id}/reactivar`, 'No se pudo reactivar la cuenta.', { signal });
 }
 
-/** POST /admin/cuentas/{id}/reiniciar-clave: nueva clave temporal de un solo uso. */
-export async function reiniciarClaveCuenta(id, { signal } = {}) {
+/** PATCH /admin/cuentas/{id}: conserva usuario, contraseña e historial. */
+export async function editarCuenta(id, cambios, { signal } = {}) {
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Cuenta inválida.');
+  const cuerpo = {};
+  if (cambios?.nombre !== undefined) {
+    if (typeof cambios.nombre !== 'string' || !cambios.nombre.trim() || cambios.nombre.trim().length > 100) {
+      throw new Error('Escriba un nombre de hasta 100 caracteres.');
+    }
+    cuerpo.nombre = cambios.nombre.trim();
+  }
+  if (cambios?.rol !== undefined) {
+    if (!['cocinera', 'jefa', 'sistemas'].includes(cambios.rol)) throw new Error('Rol inválido.');
+    cuerpo.rol = cambios.rol;
+  }
+  if (!Object.keys(cuerpo).length) throw new Error('No hay cambios para guardar.');
+  try {
+    return adaptarCuenta(await solicitarApi(`/admin/cuentas/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cuerpo), signal,
+    }));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo, error.datos?.detail);
+    throw new Error(mensaje || `No se pudo editar la cuenta. ${error.message}`);
+  }
+}
+
+/** Baja lógica: desactiva y oculta; conserva la cuenta y su historial. */
+export async function eliminarCuenta(id, { signal } = {}) {
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Cuenta inválida.');
+  try {
+    await solicitarApi(`/admin/cuentas/${id}`, { method: 'DELETE', signal });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo, error.datos?.detail);
+    throw new Error(mensaje || `No se pudo eliminar la cuenta. ${error.message}`);
+  }
+}
+
+/** POST /admin/cuentas/{id}/clave: root fija la contraseña nueva; se cierran sus sesiones. */
+export async function cambiarClaveCuenta(id, password, { signal } = {}) {
   if (!Number.isInteger(id) || id <= 0) {
     throw new Error('Cuenta inválida.');
   }
+  exigirClave(password);
   try {
-    return adaptarCuentaConClave(await solicitarApi(`/admin/cuentas/${id}/reiniciar-clave`, {
+    return adaptarCuentaRespuesta(await solicitarApi(`/admin/cuentas/${id}/clave`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
       signal,
     }));
   } catch (error) {
     if (signal?.aborted) throw error;
-    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo);
+    const mensaje = mensajeDeMotivoAdmin(error.datos?.motivo, error.datos?.detail);
     if (mensaje) throw new Error(mensaje);
-    throw new Error(`No se pudo reiniciar la clave. ${error.message}`);
+    throw new Error(`No se pudo cambiar la contraseña. ${error.message}`);
   }
 }
 

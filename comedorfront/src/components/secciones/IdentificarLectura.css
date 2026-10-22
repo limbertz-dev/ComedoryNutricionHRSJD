@@ -19,14 +19,15 @@
 }
 
 .identificar--abierta {
-  gap: var(--e-2);
-  max-width: 54rem;
-  margin: auto;
-  padding: var(--e-3) var(--e-4);
-  background: var(--c-superficie);
-  border-color: var(--c-borde-fuerte);
-  border-radius: var(--r-lg);
-  box-shadow: 0 4px 16px rgba(18, 35, 61, 0.05);
+  flex: 1 0 auto;
+  gap: var(--e-3);
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .identificar__cabecera {
@@ -160,6 +161,39 @@
   background: var(--c-superficie-2);
   border: 1px solid var(--c-borde);
   border-radius: var(--r-md);
+}
+
+/* La lectura abierta forma parte del escenario, sin una tarjeta dentro de otra. */
+.identificar--abierta .identificar__panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--e-4);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.identificar--abierta .identificar__lectura-bloque,
+.identificar--abierta .identificar__identidad {
+  padding: var(--e-4);
+  border: 0;
+  border-left: 3px solid var(--c-aviso);
+  border-radius: 0;
+}
+
+.identificar--abierta .identificar__identidad {
+  border-left-color: var(--c-exito);
+}
+
+.identificar--abierta .identificar__identidad--vacia {
+  border-left-color: var(--c-borde-fuerte);
+}
+
+.identificar--abierta .identificar__acciones {
+  margin-top: auto;
+  padding-top: var(--e-3);
 }
 
 .identificar__paso {

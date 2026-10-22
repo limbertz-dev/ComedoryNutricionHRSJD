@@ -8,8 +8,7 @@ la **jefa de nutrición** del hospital. Stack de producción: **React (frontend)
 
 Nació como mockup de alta fidelidad y ya no lo es: todas las pantallas consultan FastAPI y no
 hay datos ficticios ni de respaldo. Cubre **únicamente el Módulo Personal / Comensales**
-(control de acceso al comedor del personal). El módulo de Pacientes existe en el plan del
-sistema pero todavía no se implementa.
+(control de acceso al comedor del personal).
 
 La referencia de endpoints, adaptadores y reglas de presentación es `README.md`.
 
@@ -48,15 +47,15 @@ Secciones del sidebar (`src/navegacion.js`):
    lector, cada conteo con su período (`GET /pantalla/estado`, `src/resumen.js`).
 4. **Historial de comidas** — historial diario y mensual por comensal, paginado.
 5. **Reportes** — formulario de Estadística por rango de fechas (`GET /reportes/informe`)
-   con exportación a Excel y PDF. Sin pestaña ni acceso a reportes de pacientes: llegan
-   con su módulo.
+   con exportación a Excel y PDF.
 6. **Reglas del sistema** — solo para sistemas: pestañas Horarios de comida y
    Derecho a comer para programar cambios con «vigente desde» (hoy o futuro) y
    motivo; solo se elimina lo programado (`GET|POST|DELETE /reglas/*`).
 7. **Administración de cuentas** — solo para sistemas: tabla de cuentas
-   (usuario, nombre, rol, vínculo, estado, último ingreso) con «Reiniciar
+   (usuario, nombre, rol, vínculo, estado, último ingreso) con «Cambiar
    clave» y «Desactivar»/«Reactivar» con confirmación; «Nueva cuenta» desde el
-   padrón o sin vínculo (`GET|POST /admin/*`, clave temporal de un solo uso).
+   padrón o sin vínculo (`GET|POST /admin/*`). Root escribe la contraseña
+   definitiva: la cuenta entra sin cambio obligatorio.
 8. **Cuentas** — solo lectura para la jefa: usuario, nombre, rol, estado y
    último ingreso, sin las cuentas de sistemas (`GET /cuentas`).
 
