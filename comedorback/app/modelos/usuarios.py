@@ -56,6 +56,10 @@ class UsuarioSistema(Base):
         comment="1 = clave temporal: el ingreso solo habilita el cambio de clave.",
     )
     activo: Mapped[bool] = mapped_column(TINYINT(1), default=1)
+    eliminada_en: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, deferred=True,
+        comment="Baja lógica: oculta la cuenta sin borrar su identidad ni registros. UTC.",
+    )
     version_token: Mapped[int] = mapped_column(
         Integer,
         default=0,

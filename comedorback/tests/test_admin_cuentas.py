@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import func, inspect, select
 
 from app.consultas.derecho import aplicar_reglas, no_es_enfermeria
+from app.consultas.perfiles import categoria_permitida_sql
 from app.core.db import SesionLocal, motor
 from app.modelos.heredados import Comensal, ComidaPorTurno
 from conftest import encabezado, ingresar
@@ -29,6 +30,8 @@ CLAVES_CUENTA = {
 }
 
 CLAVES_CANDIDATO = {"usuario_turnos_id", "login", "nombre", "categoria", "cuenta_id"}
+
+CLAVE = "clave-elegida-1"
 
 
 @pytest.fixture
@@ -65,18 +68,8 @@ def _persona_usable(excluir=()) -> tuple | None:
     return None
 
 
-def _hacer_usable(cliente, username: str, temporal: str) -> str:
-    """Login con la temporal (428) + cambio de clave. Devuelve un access."""
-    r = cliente.post("/auth/login", json={"username": username, "password": temporal})
-    assert r.status_code == 428, r.text
-    token = r.json()["temporal"]
-    r = cliente.post(
-        "/auth/cambio-password",
-        json={"password_nueva": "nueva-clave-1"},
-        headers=encabezado(token),
-    )
-    assert r.status_code == 200, r.text
-    return r.json()["access"]
+def _login(cliente, username: str, clave: str):
+    return cliente.post("/auth/login", json={"username": username, "password": clave})
 
 
 # --- matriz de permisos -----------------------------------------------------
@@ -90,7 +83,7 @@ def _hacer_usable(cliente, username: str, temporal: str) -> str:
         ("POST", "/admin/cuentas", {"rol": "jefa", "username": "x", "nombre": "X"}),
         ("POST", "/admin/cuentas/1/desactivar", None),
         ("POST", "/admin/cuentas/1/reactivar", None),
-        ("POST", "/admin/cuentas/1/reiniciar-clave", None),
+        ("POST", "/admin/cuentas/1/clave", {"password": CLAVE}),
     ],
 )
 @pytest.mark.parametrize("rol", ["jefa", "cocinera"])
@@ -121,7 +114,7 @@ def test_crear_cuenta_vinculada(cliente, root):
         pytest.skip("el padrón no tiene logins usables como username")
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "cocinera", "usuario_turnos_id": persona.usuario_id},
+        json={"password": CLAVE, "rol": "cocinera", "usuario_turnos_id": persona.usuario_id},
         headers=root,
     )
     assert r.status_code == 201, r.text
@@ -130,11 +123,11 @@ def test_crear_cuenta_vinculada(cliente, root):
     assert cuenta["username"] == persona.login.strip().lower()
     assert cuenta["rol"] == "cocinera"
     assert cuenta["activo"] is True
-    assert cuenta["debe_cambiar"] is True
+    assert cuenta["debe_cambiar"] is False
     assert cuenta["vinculada"] is True
     assert cuenta["usuario_turnos_id"] == persona.usuario_id
     assert cuenta["nombre"] == persona.nombre_completo
-    assert r.json()["clave_temporal"]
+    assert set(r.json()) == {"cuenta"}
 
     r = cliente.get("/admin/cuentas", headers=root)
     assert r.status_code == 200, r.text
@@ -144,7 +137,7 @@ def test_crear_cuenta_vinculada(cliente, root):
 def test_crear_cuenta_sin_vinculo(cliente, root):
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "jefa", "username": "JefaSimulada", "nombre": "Jefa Simulada"},
+        json={"password": CLAVE, "rol": "jefa", "username": "JefaSimulada", "nombre": "Jefa Simulada"},
         headers=root,
     )
     assert r.status_code == 201, r.text
@@ -155,19 +148,50 @@ def test_crear_cuenta_sin_vinculo(cliente, root):
     assert cuenta["usuario_turnos_id"] is None
     assert cuenta["nombre"] == "Jefa Simulada"
     assert cuenta["categoria"] is None
-    assert r.json()["clave_temporal"]
+    assert cuenta["debe_cambiar"] is False
+    assert set(r.json()) == {"cuenta"}
+
+    # Entra directo con la clave que eligió root: sin 428 ni cambio obligatorio.
+    r = _login(cliente, "jefasimulada", CLAVE)
+    assert r.status_code == 200, r.text
+    assert r.json()["debe_cambiar"] is False
+
+
+@pytest.mark.parametrize(
+    "clave,username",
+    [("corta", "x-corta"), ("a" * 73, "x-larga"), ("Cocinera4", "cocinera4")],
+)
+def test_crear_cuenta_clave_rechazada(cliente, root, clave, username):
+    r = cliente.post(
+        "/admin/cuentas",
+        json={"password": clave, "rol": "cocinera", "username": username, "nombre": "C"},
+        headers=root,
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["motivo"] == "password_rechazada"
+    nombres = {c["username"] for c in cliente.get("/admin/cuentas", headers=root).json()}
+    assert username not in nombres
+
+
+def test_crear_cuenta_sin_clave_422(cliente, root):
+    r = cliente.post(
+        "/admin/cuentas",
+        json={"rol": "cocinera", "username": "sin-clave", "nombre": "C"},
+        headers=root,
+    )
+    assert r.status_code == 422, r.text
 
 
 def test_crear_username_en_uso(cliente, root):
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "jefa", "username": "dupli", "nombre": "D"},
+        json={"password": CLAVE, "rol": "jefa", "username": "dupli", "nombre": "D"},
         headers=root,
     )
     assert r.status_code == 201, r.text
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "cocinera", "username": "DUPLI", "nombre": "D2"},
+        json={"password": CLAVE, "rol": "cocinera", "username": "DUPLI", "nombre": "D2"},
         headers=root,
     )
     assert r.status_code == 409, r.text
@@ -181,6 +205,7 @@ def test_crear_vinculada_username_en_uso(cliente, root):
     r = cliente.post(
         "/admin/cuentas",
         json={
+            "password": CLAVE,
             "rol": "jefa",
             "username": persona.login.strip(),
             "nombre": "Ocupa el login",
@@ -190,7 +215,7 @@ def test_crear_vinculada_username_en_uso(cliente, root):
     assert r.status_code == 201, r.text
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "cocinera", "usuario_turnos_id": persona.usuario_id},
+        json={"password": CLAVE, "rol": "cocinera", "usuario_turnos_id": persona.usuario_id},
         headers=root,
     )
     assert r.status_code == 409, r.text
@@ -203,13 +228,13 @@ def test_crear_persona_ya_tiene_cuenta(cliente, root):
         pytest.skip("el padrón no tiene logins usables como username")
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "jefa", "usuario_turnos_id": persona.usuario_id},
+        json={"password": CLAVE, "rol": "jefa", "usuario_turnos_id": persona.usuario_id},
         headers=root,
     )
     assert r.status_code == 201, r.text
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "cocinera", "usuario_turnos_id": persona.usuario_id},
+        json={"password": CLAVE, "rol": "cocinera", "usuario_turnos_id": persona.usuario_id},
         headers=root,
     )
     assert r.status_code == 409, r.text
@@ -221,7 +246,7 @@ def test_crear_vinculada_persona_inexistente(cliente, root):
         mayor = sesion.execute(select(func.max(Comensal.usuario_id))).scalar_one()
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "jefa", "usuario_turnos_id": (mayor or 0) + 1},
+        json={"password": CLAVE, "rol": "jefa", "usuario_turnos_id": (mayor or 0) + 1},
         headers=root,
     )
     assert r.status_code == 404, r.text
@@ -243,7 +268,7 @@ def test_crear_vinculada_login_invalido(cliente, root):
         pytest.skip("el padrón no tiene logins vacíos ni mayores de 50")
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "jefa", "usuario_turnos_id": mala.usuario_id},
+        json={"password": CLAVE, "rol": "jefa", "usuario_turnos_id": mala.usuario_id},
         headers=root,
     )
     assert r.status_code == 422, r.text
@@ -254,7 +279,7 @@ def test_crear_vinculada_login_invalido(cliente, root):
 def test_crear_cuenta_rol_no_permitido(cliente, root, rol):
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": rol, "username": "x1", "nombre": "X"},
+        json={"password": CLAVE, "rol": rol, "username": "x1", "nombre": "X"},
         headers=root,
     )
     assert r.status_code == 422, r.text
@@ -317,7 +342,7 @@ def test_candidatos_busca_en_nombre_y_login(cliente, root):
 
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "jefa", "usuario_turnos_id": persona.usuario_id},
+        json={"password": CLAVE, "rol": "jefa", "usuario_turnos_id": persona.usuario_id},
         headers=root,
     )
     assert r.status_code == 201, r.text
@@ -342,12 +367,12 @@ def test_candidatos_busqueda_corta_422(cliente, root):
 def test_desactivar_cierra_sesiones(cliente, root):
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "cocinera", "username": "coci-sesion", "nombre": "C"},
+        json={"password": CLAVE, "rol": "cocinera", "username": "coci-sesion", "nombre": "C"},
         headers=root,
     )
     assert r.status_code == 201, r.text
     cuenta_id = r.json()["cuenta"]["id"]
-    access = _hacer_usable(cliente, "coci-sesion", r.json()["clave_temporal"])
+    access = _login(cliente, "coci-sesion", CLAVE).json()["access"]
     assert cliente.get("/auth/yo", headers=encabezado(access)).status_code == 200
 
     r = cliente.post(f"/admin/cuentas/{cuenta_id}/desactivar", headers=root)
@@ -364,34 +389,51 @@ def test_desactivar_cierra_sesiones(cliente, root):
     # La sesión vieja sigue muerta: reactivar no resucita tokens.
     assert cliente.get("/auth/yo", headers=encabezado(access)).status_code == 401
     # Pero la cuenta sirve de nuevo.
-    r = cliente.post(
-        "/auth/login", json={"username": "coci-sesion", "password": "nueva-clave-1"}
-    )
-    assert r.status_code == 200, r.text
+    assert _login(cliente, "coci-sesion", CLAVE).status_code == 200
 
 
-def test_reiniciar_clave_pide_cambio_en_el_proximo_login(cliente, root):
+def test_cambiar_clave_entra_directo_y_cierra_sesiones(cliente, root):
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "jefa", "username": "jefa-clave", "nombre": "J"},
+        json={"password": CLAVE, "rol": "jefa", "username": "jefa-clave", "nombre": "J"},
         headers=root,
     )
     assert r.status_code == 201, r.text
     cuenta_id = r.json()["cuenta"]["id"]
-    vieja = r.json()["clave_temporal"]
+    access = _login(cliente, "jefa-clave", CLAVE).json()["access"]
 
-    r = cliente.post(f"/admin/cuentas/{cuenta_id}/reiniciar-clave", headers=root)
+    r = cliente.post(
+        f"/admin/cuentas/{cuenta_id}/clave", json={"password": "otra-clave-2"}, headers=root
+    )
     assert r.status_code == 200, r.text
-    assert r.json()["cuenta"]["debe_cambiar"] is True
-    nueva = r.json()["clave_temporal"]
-    assert nueva
+    assert set(r.json()) == {"cuenta"}
+    assert r.json()["cuenta"]["debe_cambiar"] is False
 
-    r = cliente.post("/auth/login", json={"username": "jefa-clave", "password": vieja})
-    assert r.status_code == 401, r.text
-    r = cliente.post("/auth/login", json={"username": "jefa-clave", "password": nueva})
-    assert r.status_code == 428, r.text
-    assert r.json()["motivo"] == "cambio_password_pendiente"
-    assert r.json()["temporal"]
+    # La sesión abierta con la clave vieja se cierra.
+    assert cliente.get("/auth/yo", headers=encabezado(access)).status_code == 401
+    assert _login(cliente, "jefa-clave", CLAVE).status_code == 401
+    r = _login(cliente, "jefa-clave", "otra-clave-2")
+    assert r.status_code == 200, r.text
+    assert r.json()["debe_cambiar"] is False
+
+
+def test_cambiar_clave_rechazada_no_cambia_nada(cliente, root):
+    r = cliente.post(
+        "/admin/cuentas",
+        json={"password": CLAVE, "rol": "jefa", "username": "jefa-corta", "nombre": "J"},
+        headers=root,
+    )
+    cuenta_id = r.json()["cuenta"]["id"]
+    r = cliente.post(f"/admin/cuentas/{cuenta_id}/clave", json={"password": "corta"}, headers=root)
+    assert r.status_code == 422, r.text
+    assert r.json()["motivo"] == "password_rechazada"
+    assert _login(cliente, "jefa-corta", CLAVE).status_code == 200
+
+
+def test_cambiar_clave_de_cuenta_inexistente_404(cliente, root):
+    r = cliente.post("/admin/cuentas/999999999/clave", json={"password": CLAVE}, headers=root)
+    assert r.status_code == 404, r.text
+    assert r.json()["motivo"] == "cuenta_inexistente"
 
 
 def test_no_puede_desactivarse_a_si_misma(cliente, root):
@@ -434,7 +476,7 @@ def test_ultimo_ingreso(cliente, root):
     assert cuentas["root"]["ultimo_ingreso"] is not None
     r = cliente.post(
         "/admin/cuentas",
-        json={"rol": "jefa", "username": "jefa-nueva", "nombre": "J"},
+        json={"password": CLAVE, "rol": "jefa", "username": "jefa-nueva", "nombre": "J"},
         headers=root,
     )
     assert r.status_code == 201, r.text
@@ -450,6 +492,7 @@ def _verdad_padron(limite=200) -> dict:
         filas = sesion.execute(
             select(Comensal)
             .where(no_es_enfermeria(Comensal.categoria))
+            .where(categoria_permitida_sql(Comensal.categoria))
             .order_by(
                 Comensal.nombre_completo.is_(None),
                 Comensal.nombre_completo,
