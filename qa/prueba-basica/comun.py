@@ -330,6 +330,27 @@ def app_sin_dotenv():
         yield
 
 
+def retirar_marca_api_huerfana(puerto=8001, gracia=120):
+    """Quita api.activa si quedó de una API cerrada a la fuerza (ventana cerrada sin Ctrl+C).
+
+    Solo con el puerto libre y la marca más vieja que `gracia` segundos: una API
+    que está arrancando crea la marca antes de escuchar y no se confunde con una huérfana.
+    """
+    import socket
+    marca = CARPETA / 'api.activa'
+    if not marca.exists():
+        return False
+    with socket.socket() as conexion:
+        conexion.settimeout(.5)
+        if conexion.connect_ex(('127.0.0.1', puerto)) == 0:
+            return False
+    if time.time() - marca.stat().st_mtime < gracia:
+        return False
+    marca.unlink()
+    print('Se retiró api.activa de una API anterior que se cerró sin Ctrl+C (puerto libre).', flush=True)
+    return True
+
+
 @contextmanager
 def bloqueo_corrida():
     ruta = CARPETA / "corrida.lock"

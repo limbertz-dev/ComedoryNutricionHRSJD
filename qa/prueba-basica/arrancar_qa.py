@@ -85,6 +85,8 @@ def main():
     node = shutil.which('node')
     if node is None:
         raise c.Abortado('No se encontró Node.js para iniciar el frontend QA.')
+    if not ocupado(8002):
+        c.retirar_marca_api_huerfana()
     propios = []
     try:
         if ocupado(8002):

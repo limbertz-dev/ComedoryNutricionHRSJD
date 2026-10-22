@@ -79,6 +79,9 @@ class Laboratorio:
             text=True, encoding='utf-8', errors='replace', timeout=90,
         )
         if resultado.returncode:
+            # El motivo va a la consola del laboratorio; c.ejecutar ya lo deja sin SQL ni parámetros.
+            motivo = resultado.stderr.strip().splitlines()[-1:] or ['sin mensaje']
+            print(f'{archivo} falló: {motivo[0]}', file=sys.stderr, flush=True)
             # No enviar a HTTP SQL, parámetros o salida arbitraria de otro proceso.
             raise c.Abortado(
                 f'No se pudo completar {archivo}. Se conserva el diario; '
@@ -446,6 +449,7 @@ def main():
         raise c.Abortado('El laboratorio requiere la rama qa y ENTORNO=desarrollo.')
     if puerto_ocupado(8002):
         raise c.Abortado('El laboratorio ya está abierto en http://127.0.0.1:8002.')
+    c.retirar_marca_api_huerfana()
     with c.entorno_seguro() as (motor, huella, servidor), c.app_sin_dotenv():
         control = Laboratorio(motor, servidor, huella)
         control.diario()
