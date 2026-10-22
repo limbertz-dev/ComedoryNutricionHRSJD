@@ -13,9 +13,6 @@ hospital entero. Cuando se conecte, el conector real va aquí, dentro de
 - Si el SIH no responde, la API sigue funcionando: quien llame a
   `cliente_sih()` atrapa `SIHNoConfigurado` o el error de conexión y muestra
   el aviso, sin tumbar la pantalla.
-
-Una primera versión de ese conector (app/core/db_sih.py, pymssql) quedó en la
-rama feature/pacientes y sirve de referencia.
 """
 
 from app.core.config import config

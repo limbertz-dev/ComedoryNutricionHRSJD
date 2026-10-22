@@ -13,14 +13,14 @@ const CIRCUNFERENCIA = 2 * Math.PI * RADIO;
  * Nunca baja "de golpe", ni siquiera con marcaciones encadenadas.
  */
 export default function GaugeRaciones({ cupo, fueraDeHorario, turno }) {
-  const disponibles = Boolean(cupo) && !fueraDeHorario;
+  const disponibles = Boolean(cupo);
   const restantesAnimadas = useValorAnimado(cupo?.restantes ?? 0, 900);
   const proporcion = disponibles ? Math.max(0, Math.min(1, 1 - cupo.porcentaje / 100)) : 0;
   const offset = CIRCUNFERENCIA * (1 - proporcion);
 
   const critico = disponibles && cupo.restantes === 0;
   const bajo = disponibles && !critico && cupo.porcentaje >= 66;
-  const colorArco = !disponibles ? 'var(--c-texto-2)' : critico ? 'var(--c-error)' : bajo ? 'var(--c-aviso)' : 'var(--c-acento)';
+  const colorArco = !disponibles || fueraDeHorario ? 'var(--c-texto-2)' : critico ? 'var(--c-error)' : bajo ? 'var(--c-aviso)' : 'var(--c-acento)';
 
   return (
     <figure className="gauge">
@@ -47,7 +47,7 @@ export default function GaugeRaciones({ cupo, fueraDeHorario, turno }) {
       </div>
 
       <figcaption className="gauge__pie">
-        <span className="gauge__rotulo">{fueraDeHorario ? 'Fuera de horario' : 'Raciones restantes'}</span>
+        <span className="gauge__rotulo">{fueraDeHorario ? 'Último servicio · Cerrado' : 'Raciones restantes'}</span>
         <span className="gauge__detalle">
           {disponibles ? `${turno} · ${cupo.servidas} servidas` : 'Estado del comedor'}
         </span>
@@ -55,7 +55,7 @@ export default function GaugeRaciones({ cupo, fueraDeHorario, turno }) {
 
       {/* Lectura accesible equivalente, sin depender del color. */}
       <p className="solo-lectores" role="status">
-        {!disponibles ? 'No hay un cupo vigente disponible.' : `Quedan ${cupo.restantes} de ${cupo.previstas} raciones previstas para ${turno}.`}
+        {!disponibles ? 'No hay un cupo vigente disponible.' : fueraDeHorario ? `${turno}: servicio cerrado, ${cupo.servidas} raciones servidas. No se permiten entregas.` : `Quedan ${cupo.restantes} de ${cupo.previstas} raciones previstas para ${turno}.`}
       </p>
     </figure>
   );

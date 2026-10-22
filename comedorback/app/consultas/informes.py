@@ -66,6 +66,7 @@ class Grupo:
     servidas: int
     coeficiente: float
     equivalente: float
+    coeficientes_mixtos: bool = False
 
 
 @dataclass
@@ -88,13 +89,27 @@ class Informe:
     total_equivalente: float | None = None
 
 
-def _columnas(sesion: Session) -> list[Columna]:
+def _columnas(sesion: Session, desde: date, hasta: date) -> list[Columna]:
+    """El estado actual no puede ocultar la clasificacion de una racion servida."""
+    utilizadas = select(Asistencia.categoria_reporte_id).where(
+        Asistencia.fecha_comida.between(desde, hasta)
+    )
     consulta = (
         select(CategoriaReporte.id, CategoriaReporte.nombre, CategoriaReporte.codigo)
-        .where(CategoriaReporte.activo == 1)
-        .order_by(CategoriaReporte.orden)
+        .where(or_(CategoriaReporte.activo == 1, CategoriaReporte.id.in_(utilizadas)))
+        .order_by(CategoriaReporte.orden, CategoriaReporte.id)
     )
     return [Columna(*fila) for fila in sesion.execute(consulta).all()]
+
+
+def _comidas(sesion: Session, desde: date, hasta: date) -> list[tuple]:
+    """Conservar comidas con entregas del periodo aunque hoy esten desactivadas."""
+    utilizadas = select(Asistencia.comida_id).where(Asistencia.fecha_comida.between(desde, hasta))
+    return sesion.execute(
+        select(Comida.id, Comida.nombre)
+        .where(or_(Comida.estado == 1, Comida.id.in_(utilizadas)))
+        .order_by(Comida.id)
+    ).all()
 
 
 def _situacion(gestion: int, mes: int | None, hoy: date) -> str:
@@ -232,6 +247,7 @@ def _grupos(sesion: Session, desde: date, hasta: date) -> list[Grupo]:
                 servidas=int(servidas),
                 coeficiente=coeficiente,
                 equivalente=round(float(equivalente), 2),
+                coeficientes_mixtos=coef_min != coef_max,
             )
         )
     return grupos
@@ -271,9 +287,9 @@ def _armar(
 
 def registro_diario(sesion: Session, gestion: int, mes: int) -> Informe:
     """La planilla del cuaderno: una fila por día del mes."""
-    columnas = _columnas(sesion)
-    indice = {c.id: i for i, c in enumerate(columnas)}
     desde, hasta = _rango(gestion, mes)
+    columnas = _columnas(sesion, desde, hasta)
+    indice = {c.id: i for i, c in enumerate(columnas)}
     hoy = reloj.hoy()
 
     filas = [
@@ -290,15 +306,10 @@ def registro_diario(sesion: Session, gestion: int, mes: int) -> Informe:
 
 def informe_mensual(sesion: Session, gestion: int, mes: int) -> Informe:
     """El formulario de Estadística: tiempos de comida × categorías."""
-    columnas = _columnas(sesion)
-    indice = {c.id: i for i, c in enumerate(columnas)}
     desde, hasta = _rango(gestion, mes)
-
-    comidas = sesion.execute(
-        select(Comida.id, Comida.nombre)
-        .where(Comida.estado == 1)
-        .order_by(Comida.id)
-    ).all()
+    columnas = _columnas(sesion, desde, hasta)
+    indice = {c.id: i for i, c in enumerate(columnas)}
+    comidas = _comidas(sesion, desde, hasta)
     posicion = {cid: i for i, (cid, _) in enumerate(comidas)}
 
     filas = [Fila(etiqueta=nombre, celdas=[0] * len(columnas)) for _, nombre in comidas]
@@ -324,14 +335,10 @@ def informe_rango(sesion: Session, desde: date, hasta: date) -> Informe:
     if desde > hasta:
         raise ValueError("'desde' no puede ser posterior a 'hasta'")
 
-    columnas = _columnas(sesion)
+    columnas = _columnas(sesion, desde, hasta)
     indice = {c.id: i for i, c in enumerate(columnas)}
 
-    comidas = sesion.execute(
-        select(Comida.id, Comida.nombre)
-        .where(Comida.estado == 1)
-        .order_by(Comida.id)
-    ).all()
+    comidas = _comidas(sesion, desde, hasta)
     posicion = {cid: i for i, (cid, _) in enumerate(comidas)}
 
     filas = [Fila(etiqueta=nombre, celdas=[0] * len(columnas)) for _, nombre in comidas]
@@ -369,9 +376,9 @@ def informe_rango(sesion: Session, desde: date, hasta: date) -> Informe:
 
 def resumen_gestion(sesion: Session, gestion: int) -> Informe:
     """El año entero, un mes por fila."""
-    columnas = _columnas(sesion)
-    indice = {c.id: i for i, c in enumerate(columnas)}
     desde, hasta = _rango(gestion, None)
+    columnas = _columnas(sesion, desde, hasta)
+    indice = {c.id: i for i, c in enumerate(columnas)}
     hoy = reloj.hoy()
 
     filas = [

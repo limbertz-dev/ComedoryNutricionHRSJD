@@ -14,7 +14,9 @@ Variables de .env (todas opcionales salvo el secreto fuera de desarrollo):
     AUTH_REFRESH_HORAS        vida del token de renovación (12, un turno largo)
     AUTH_TEMPORAL_MINUTOS     vida del token de cambio obligatorio de clave (10)
     AUTH_BCRYPT_RONDAS        costo de bcrypt (12; los tests usan 4)
-    AUTH_INTENTOS_MAXIMOS     fallidos que bloquean la cuenta (5)
+    AUTH_INTENTOS_MAXIMOS     fallidos que bloquean la cuenta (0 = sin bloqueo,
+                              el valor por omisión: un bloqueo en plena hora
+                              de comida dejaría a la cocina sin operar)
     AUTH_VENTANA_MINUTOS      en cuántos minutos tienen que caer esos fallidos (15)
     AUTH_BLOQUEO_MINUTOS      cuánto dura el bloqueo (15)
 """
@@ -58,7 +60,7 @@ class AjustesSeguridad(BaseSettings):
 
     bcrypt_rondas: int = 12
 
-    intentos_maximos: int = 5
+    intentos_maximos: int = 0
     ventana_minutos: int = 15
     bloqueo_minutos: int = 15
 

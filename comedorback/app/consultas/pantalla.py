@@ -23,8 +23,9 @@ from app.consultas.derecho import (
 )
 from app.consultas.horarios import estado_en, rige_en, ventanas_del_dia
 from app.consultas.intervenciones import cuentas_por_id
-from app.consultas.servicio import Servicio, VentanasDelDia, evaluar_servicio
+from app.consultas.servicio import Servicio, VentanasDelDia, evaluar_servicio, comida_de_referencia
 from app.core import reloj
+from app.consultas.perfiles import categoria_permitida_sql
 from app.logica.marcacion import ComidaEnCurso, resolver_comida_en_curso
 from app.modelos.comedor import (
     Asistencia,
@@ -237,9 +238,11 @@ def estado(
         ahora = reloj.ahora()
         momento = datetime.combine(fecha or ahora.date(), hora or ahora.time())
     comida = resolver_comida_en_curso(sesion, momento)
-    fecha_comida = comida.fecha_comida if comida else momento.date()
+    referencia = comida or comida_de_referencia(sesion, momento)
+    fecha_comida = referencia.fecha_comida if referencia else momento.date()
+    dia_totales = comida.fecha_comida if comida else momento.date()
 
-    consulta_padron = select(func.count()).select_from(Comensal)
+    consulta_padron = select(func.count()).select_from(Comensal).where(categoria_permitida_sql(Comensal.categoria))
     if excluye_enfermeria_hoy(sesion):
         consulta_padron = consulta_padron.where(
             no_es_enfermeria(Comensal.categoria)
@@ -249,13 +252,13 @@ def estado(
     return Estado(
         momento=momento,
         fecha_comida=fecha_comida,
-        comida_id=comida.comida_id if comida else None,
-        comida=comida.comida if comida else None,
+        comida_id=referencia.comida_id if referencia else None,
+        comida=referencia.comida if referencia else None,
         fuera_de_horario=comida is None,
-        cupo=_cupo(sesion, comida) if comida else None,
+        cupo=_cupo(sesion, referencia) if referencia else None,
         padron=padron,
-        totales_del_dia=_totales(sesion, fecha_comida, momento.date()),
-        por_categoria=_por_categoria(sesion, fecha_comida),
+        totales_del_dia=_totales(sesion, dia_totales, momento.date()),
+        por_categoria=_por_categoria(sesion, dia_totales),
     )
 
 
@@ -394,7 +397,7 @@ def ultimas_marcaciones(
     una asistencia vinculada por una intervención de cocina: sale como su
     lectura, con la decisión original intacta y el resultado final aparte.
 
-    Es una ventana de lo más reciente (`limite`, hasta 100), no un cursor:
+    Es una ventana de lo más reciente (`limite`, hasta 1000), no un cursor:
     entre dos consultas pueden pasar más eventos de los que caben.
 
     `rol` y `cuenta_id` deciden lo que se ve de las intervenciones (ver

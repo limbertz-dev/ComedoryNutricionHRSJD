@@ -18,6 +18,7 @@ class GrupoCoeficiente(BaseModel):
     grupo: str
     servidas: int
     coeficiente: float
+    coeficientes_mixtos: bool = Field(default=False, description="El periodo usa varias versiones; no multiplicar todo por un unico coeficiente")
     equivalente: float = Field(
         description="servidas x coeficiente, calculado día por día con el coeficiente vigente"
     )

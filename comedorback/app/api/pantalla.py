@@ -72,14 +72,15 @@ def ultimas_marcaciones(
         int | None,
         Query(description="Filtrar por ID de comida"),
     ] = None,
-    limite: Annotated[int, Query(ge=1, le=100)] = 20,
+    # 1000 cubre un día completo del comedor (≈450 lecturas con el padrón real).
+    limite: Annotated[int, Query(ge=1, le=1000)] = 20,
 ) -> list[Marcacion]:
     """Incluye los rechazos: son justamente lo que la persona parada frente al
     lector necesita ver.
 
     Cada fila trae `origen` y `clave_evento` ('<origen>:<id>'): `id` se
     repite entre lecturas y asistencias manuales, la clave no. Es una ventana
-    de lo más reciente (hasta 100 filas), no un cursor: no garantiza entregar
+    de lo más reciente (hasta 1000 filas), no un cursor: no garantiza entregar
     todos los eventos ocurridos entre dos consultas.
 
     Intervenciones de cocina: `decision_original` es lo que decidió el lector

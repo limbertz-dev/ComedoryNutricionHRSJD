@@ -127,7 +127,7 @@ def test_sin_token_401(cliente):
     assert r.json()["motivo"] == "falta_token"
 
 
-@pytest.mark.parametrize("limite", [0, 101, -1])
+@pytest.mark.parametrize("limite", [0, 1001, -1])
 def test_limite_fuera_de_rango_422(cliente, tokens, limite):
     r = cliente.get(RUTA, params={"limite": limite}, headers=tokens["jefa"])
     assert r.status_code == 422
@@ -203,7 +203,7 @@ def test_claves_unicas_estables_y_en_orden(cliente, lector, tokens):
     ]
     primera = _lista(cliente, jefa, fecha=fecha.isoformat())
     segunda = _lista(cliente, coci, fecha=fecha.isoformat())
-    tercera = _lista(cliente, jefa, fecha=fecha.isoformat(), limite=100)
+    tercera = _lista(cliente, jefa, fecha=fecha.isoformat(), limite=1000)
     assert _claves(primera) == _claves(segunda) == _claves(tercera) == esperadas
     for fila in primera:
         assert set(fila) == CAMPOS

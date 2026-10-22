@@ -628,11 +628,14 @@ test('una huella que salió de la lista ya no se puede confirmar', () => {
   assert.match(html, /<button[^>]*disabled=""[^>]*><span class="boton__icono">[\s\S]*?Confirmar entrega/);
 });
 
-test('cocina distingue cargando, vacío, sin servicio y error', () => {
+test('cocina oculta el bloque vacío y conserva la carga y los errores', () => {
   assert.match(renderToStaticMarkup(h(IdentificarLectura, {})), /Consultando huellas por identificar/);
   const vacio = renderToStaticMarkup(h(IdentificarLectura, { pendientes: { servicio: null, total: 0, truncado: false, lecturas: [] } }));
-  assert.match(vacio, /No hay un servicio en curso/);
-  assert.match(vacio, /No hay huellas sin reconocer pendientes/);
+  assert.equal(vacio, '');
+  const sinPendientes = renderToStaticMarkup(h(IdentificarLectura, {
+    pendientes: { servicio: { comida: 'Almuerzo', fin: '2026-10-15T15:00:00' }, total: 0, truncado: false, lecturas: [] },
+  }));
+  assert.equal(sinPendientes, '');
   const error = renderToStaticMarkup(h(IdentificarLectura, { error: 'No se pudieron cargar las huellas por identificar.' }));
   assert.match(error, /role="alert"/);
 });
@@ -655,18 +658,176 @@ test('una huella identificada por cocina se muestra como entrega, sin decir que 
   assert.match(evento.detalle, /no reconoció la huella/);
 });
 
-test('los paneles de cocina y jefa no montan huellas por identificar', () => {
+test('el panel de la cocinera monta las huellas por identificar; jefa y sistemas no pueden operarla', () => {
   const localOriginal = globalThis.localStorage;
-  globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  const montar = (rol, guardada = null) => {
+    globalThis.localStorage = { getItem: () => guardada, setItem: () => {}, removeItem: () => {} };
+    return renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol, usuario: `${rol}.test` })));
+  };
   try {
-    const cocina = renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol: 'cocinera', usuario: 'cocina.test' })));
-    assert.doesNotMatch(cocina, /Huellas por identificar|Confirmar entrega/);
-    const jefa = renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol: 'jefa', usuario: 'jefa.test' })));
-    assert.doesNotMatch(jefa, /Huellas por identificar|Confirmar entrega/);
+    const cocina = montar('cocinera');
+    assert.match(cocina, /Huellas por identificar/);
+    assert.match(cocina, /Consultando huellas por identificar…/);
+    assert.doesNotMatch(cocina, /Intervenciones de cocina/);
+
+    for (const guardada of [null, 'vivo']) {
+      const jefa = montar('jefa', guardada);
+      assert.doesNotMatch(jefa, /Huellas por identificar|Confirmar entrega|Identificar a la persona/);
+      assert.match(jefa, /Cargando supervisión…/);
+    }
+
+    for (const guardada of [null, 'vivo', 'supervision']) {
+      const sistemas = montar('sistemas', guardada);
+      assert.doesNotMatch(sistemas, /Huellas por identificar|Confirmar entrega|Identificar a la persona|Intervenciones de cocina/);
+      assert.match(sistemas, /Reglas del sistema/);
+    }
   } finally {
     if (localOriginal === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = localOriginal;
   }
+});
+
+test('columna lateral solo contiene Marcaciones del turno y la identificación se integra al área central', () => {
+  const html = renderToStaticMarkup(h(PantallaEnVivo, {
+    pantalla: null,
+    turno: 'Cena',
+    puedeIdentificar: true,
+  }));
+  const lateralMatch = html.match(/<aside class="vivo__lateral">([\s\S]*?)<\/aside>/);
+  assert.ok(lateralMatch, 'debe existir la columna lateral');
+  const lateralHtml = lateralMatch[1];
+  assert.match(lateralHtml, /Marcaciones del turno/);
+  assert.doesNotMatch(lateralHtml, /Huellas por identificar|class="identificar/);
+
+  const centralMatch = html.match(/<div\b[^>]*class="escenario__principal[^"]*"[^>]*>([\s\S]*?)<\/div>/);
+  assert.ok(centralMatch, 'debe existir el área central');
+  assert.match(centralMatch[1], /Huellas por identificar/);
+});
+
+test('al abrir una lectura pendiente en las marcaciones, el área central despliega el flujo en 3 pasos sin preselección', () => {
+  const pendiente = {
+    id: 101,
+    hora: '12:14:22',
+    comida: 'Almuerzo',
+    dispositivo: 'LECTOR-01',
+    hasta: '15:00:00',
+    resuelta: false,
+    decisionOriginal: { resultado: 'rechazada', motivo: 'no_identificado' },
+  };
+  const html = renderToStaticMarkup(h(PantallaEnVivo, {
+    pantalla: null,
+    turno: 'Almuerzo',
+    puedeIdentificar: true,
+    marcacionesIniciales: [
+      {
+        id: 101,
+        origen: 'lectura_biometrica',
+        clave_evento: 'lectura_biometrica:101',
+        usuario_id: null,
+        nombre: 'Huella no reconocida',
+        persona: { nombre: 'Huella no reconocida', categoria: 'Sin identificar' },
+        categoria: 'Sin identificar',
+        valido: false,
+        resultado: 'rechazada',
+        motivo: 'no_identificado',
+        dispositivo: 'LECTOR-01',
+        fecha_hora: '2026-10-15T12:14:22',
+        comida_id: 2,
+        comida: 'Almuerzo',
+        estado_final: 'sin_racion',
+        puede_identificar: true,
+        identificable_hasta: '2026-10-15T15:00:00',
+      },
+    ],
+    pendientesIniciales: {
+      servicio: { comida_id: 2, comida: 'Almuerzo' },
+      total: 1,
+      truncado: false,
+      lecturas: [pendiente],
+    },
+    lecturaAbiertaInicial: 101,
+    personal: [ANA],
+  }));
+
+  assert.match(html, /1\. Lectura seleccionada/);
+  assert.match(html, /Huella no reconocida de las <strong>12:14:22<\/strong>/);
+  assert.match(html, /El lector no reconoció la huella: la identidad aún se desconoce y esto no demuestra falta de turno/);
+  assert.match(html, /2\. Buscar y elegir comensal del padrón/);
+  assert.match(html, /Seleccione a la persona…/);
+  assert.match(html, /3\. Sin comensal preseleccionado: busque por nombre o legajo y elija a la persona para confirmar la entrega\./);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>[\s\S]*?Confirmar entrega/);
+  assert.doesNotMatch(html, /<textarea|[Nn]ota|[Mm]otivo/);
+});
+
+test('distingue huella no reconocida de falta de turno sin asumir falta de derecho', () => {
+  const eventoNoReconocido = eventoDeFila({
+    clave: 'lectura_biometrica:101',
+    origen: 'lectura_biometrica',
+    valido: false,
+    hora: '12:14:22',
+    titulo: 'Huella no reconocida',
+    persona: { id: null, nombre: 'Huella no reconocida' },
+    motivo: 'no_identificado',
+    puedeIdentificar: true,
+  });
+  assert.equal(eventoNoReconocido.sinIdentificar, true);
+  assert.match(eventoNoReconocido.detalle, /no reconoció la huella — identidad aún no determinada \(no implica falta de turno\)/);
+  assert.doesNotMatch(eventoNoReconocido.detalle, /sin derecho|no habilitada para este turno/);
+
+  const eventoSinDerecho = eventoDeFila({
+    clave: 'lectura_biometrica:102',
+    origen: 'lectura_biometrica',
+    valido: false,
+    hora: '12:15:00',
+    titulo: 'Ana Lucía Mendoza Vargas',
+    persona: { id: 50, nombre: 'Ana Lucía Mendoza Vargas' },
+    motivo: 'sin_derecho',
+    puedeIdentificar: false,
+  });
+  assert.equal(eventoSinDerecho.sinIdentificar, false);
+  assert.equal(eventoSinDerecho.detalle, 'Marcación no habilitada para este turno');
+});
+
+test('un intento por verificar mantiene la identidad bloqueada y permite recuperar sin duplicar', () => {
+  const identificadorIncierto = {
+    pendiente: (id) => (id === 101 ? {
+      lecturaId: 101,
+      usuarioId: 99,
+      persona: ANA,
+      clave: CLAVE,
+      estado: 'incierto',
+      lectura: { id: 101, hora: '12:14:22', comida: 'Almuerzo' },
+    } : null),
+    pendientes: () => [{
+      lecturaId: 101,
+      usuarioId: 99,
+      persona: ANA,
+      clave: CLAVE,
+      estado: 'incierto',
+      lectura: { id: 101, hora: '12:14:22', comida: 'Almuerzo' },
+    }],
+    enVuelo: () => false,
+    confirmar: async () => {},
+    verificar: async () => {},
+  };
+  const html = renderToStaticMarkup(h(IdentificarLectura, {
+    pendientes: pendientesFixture([lecturaUi(101, '12:14:22')]),
+    personal: [ANA],
+    abierta: 101,
+    identificador: identificadorIncierto,
+    avisoInicial: {
+      tipo: 'aviso',
+      titulo: 'No se pudo confirmar si quedó registrada',
+      detalle: 'Verifique la entrega: se repite la misma solicitud con la misma persona y, si ya quedó, se recupera sin duplicarla.',
+    },
+  }));
+  assert.match(html, /No se pudo confirmar si quedó registrada/);
+  assert.match(html, /Entrega por verificar con esta persona\. No se puede elegir a otra hasta verificarla\./);
+  assert.match(html, /Identidad del intento por verificar/);
+  assert.match(html, /Ana Gomez/);
+  assert.match(html, /Médico · Legajo M-99/);
+  assert.match(html, /Verificar entrega/);
+  assert.doesNotMatch(html, /<select/);
 });
 
 /* ------------------------------------------------------- consulta de jefa */

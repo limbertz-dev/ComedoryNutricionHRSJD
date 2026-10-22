@@ -21,6 +21,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.consultas.derecho import excluye_enfermeria_hoy, no_es_enfermeria
+from app.consultas.perfiles import categoria_permitida_sql
 from app.modelos.comedor import CategoriaReporte, CategoriaReporteMap
 from app.modelos.heredados import Comensal, Servicio, UsuarioServicio
 
@@ -70,6 +71,7 @@ def _base(sesion: Session) -> Select:
         .outerjoin(_sala_vigente, _sala_vigente.c.usuario_id == Comensal.usuario_id)
         .outerjoin(UsuarioServicio, UsuarioServicio.id == _sala_vigente.c.asignacion_id)
         .outerjoin(Servicio, Servicio.id == UsuarioServicio.servicio_id)
+        .where(categoria_permitida_sql(Comensal.categoria))
     )
     if excluye_enfermeria_hoy(sesion):
         consulta = consulta.where(no_es_enfermeria(Comensal.categoria))

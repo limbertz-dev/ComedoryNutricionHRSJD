@@ -32,6 +32,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core import reloj
+from app.consultas.perfiles import categoria_permitida_sql
 from app.modelos.heredados import ComidaPorTurno, NovedadLaboral
 from app.modelos.reglas import ReglaDerecho, ReglaDerechoNovedad
 
@@ -124,7 +125,7 @@ def aplicar_reglas(consulta):
     """
     fecha = ComidaPorTurno.fecha_turno
     return (
-        consulta.where(
+        consulta.where(categoria_permitida_sql(ComidaPorTurno.categoria)).where(
             ComidaPorTurno.duracion_horas >= _duracion_minima_para(fecha)
         )
         .where(

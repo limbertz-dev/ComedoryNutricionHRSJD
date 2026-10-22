@@ -1,0 +1,29 @@
+.huellas-registro {
+  padding: var(--e-5);
+  display: grid;
+  gap: var(--e-4);
+  min-width: 0;
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde);
+  border-radius: var(--r-lg);
+}
+.huellas-registro__cabecera { display: flex; align-items: center; justify-content: space-between; gap: var(--e-3); flex-wrap: wrap; }
+.huellas-registro h2 { margin: 0; font-size: var(--t-md); font-weight: 800; color: var(--c-texto); }
+.huellas-registro__cabecera p, .huellas-registro__paginas p { margin: var(--e-1) 0 0; color: var(--c-texto-2); font-size: var(--t-sm); }
+.huellas-registro__busqueda { display: grid; gap: var(--e-2); }
+.huellas-registro__busqueda label { font-weight: 700; font-size: var(--t-sm); }
+.huellas-registro__busqueda > div { display: flex; gap: var(--e-2); }
+.huellas-registro__busqueda input { width: 100%; min-width: 0; max-width: 36rem; min-height: var(--alto-control-compacto); padding: var(--e-2) var(--e-3); color: var(--c-texto); background: var(--c-superficie); border: 1px solid var(--c-borde-fuerte); border-radius: var(--r-sm); font: inherit; }
+.huellas-registro__busqueda input:focus-visible, .huellas-registro__tabla-caja:focus-visible { outline: 2px solid var(--c-acento-oscuro); outline-offset: 2px; }
+.huellas-registro__estado { margin: 0; padding: var(--e-4); color: var(--c-texto-2); background: var(--c-superficie-2); border-radius: var(--r-sm); }
+.huellas-registro__estado--error { color: var(--c-error); background: var(--c-error-tenue); }
+.huellas-registro__tabla-caja { overflow-x: auto; min-width: 0; border: 1px solid var(--c-borde); border-radius: var(--r-sm); }
+.huellas-registro__tabla { width: 100%; min-width: 740px; border-collapse: collapse; font-size: var(--t-sm); }
+.huellas-registro__tabla th, .huellas-registro__tabla td { padding: var(--e-3); text-align: left; vertical-align: top; border-bottom: 1px solid var(--c-borde); }
+.huellas-registro__tabla th { background: var(--c-superficie-2); color: var(--c-texto-2); font-size: var(--t-xs); }
+.huellas-registro__tabla tbody tr:last-child td { border-bottom: 0; }
+.huellas-registro__tabla strong, .huellas-registro__tabla td > span:not(.etiqueta) { display: block; overflow-wrap: anywhere; }
+.huellas-registro__tabla td > span:not(.etiqueta) { margin-top: var(--e-1); color: var(--c-texto-2); font-size: var(--t-xs); }
+.huellas-registro__fecha { font-variant-numeric: tabular-nums; }
+.huellas-registro__paginas { display: flex; align-items: center; gap: var(--e-2); flex-wrap: wrap; }
+.huellas-registro__paginas p { margin-right: auto; }

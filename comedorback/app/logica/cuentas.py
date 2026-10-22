@@ -3,11 +3,15 @@
 Dos formas de nacer:
 
   · Vinculada   se copia el login del padrón (users.name normalizado) como
-                username y queda atada a ese users.id. La clave es del
-                comedor: temporal, se cambia en el primer ingreso. Acá no
-                se lee ninguna clave, email ni token de la base de turnos.
+                username y queda atada a ese users.id. Acá no se lee ninguna
+                clave, email ni token de la base de turnos.
   · Sin vínculo  username y nombre a mano, para quien aún no está en el
                 padrón. usuario_turnos_id queda en NULL.
+
+En las dos, root escribe la contraseña definitiva y la cuenta entra con ella
+de inmediato, sin cambio obligatorio: son pocas cuentas y las entrega root en
+persona. La clave temporal (debe_cambiar = 1) queda solo para la consola
+(python -m app.semillas.admin).
 
 Por API solo nacen cocinera y jefa: sistemas se crea por consola
 (python -m app.semillas.admin).
@@ -25,10 +29,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import seguridad
+from app.core import reloj
 from app.logica.autenticacion import fijar_clave, normalizar_username
 from app.modelos.heredados import Comensal
 from app.modelos.usuarios import IntentoLogin, UsuarioSistema
-from app.semillas.admin import clave_temporal
 
 ROLES_POR_API = frozenset({"cocinera", "jefa"})
 
@@ -100,7 +104,7 @@ def _para_respuesta(
 
 def listar_cuentas(sesion: Session) -> list[dict]:
     usuarios = (
-        sesion.execute(select(UsuarioSistema).order_by(UsuarioSistema.id))
+        sesion.execute(select(UsuarioSistema).where(UsuarioSistema.eliminada_en.is_(None)).order_by(UsuarioSistema.id))
         .scalars()
         .all()
     )
@@ -204,14 +208,31 @@ def _traducir_insercion(error: IntegrityError) -> ErrorCuenta:
     raise error
 
 
+def validar_clave(username: str, clave: str) -> None:
+    """La misma política que el cambio de clave: largo mínimo, 72 bytes como
+    máximo (bcrypt no mira más) y distinta del usuario."""
+    minimo = seguridad.ajustes().largo_minimo_clave
+    if len(clave) < minimo:
+        raise ErrorCuenta(
+            422, "password_rechazada", f"La contraseña debe tener al menos {minimo} caracteres."
+        )
+    if len(clave.encode("utf-8")) > seguridad.MAX_BYTES_CLAVE:
+        raise ErrorCuenta(422, "password_rechazada", "La contraseña es demasiado larga.")
+    if clave.strip().lower() == username:
+        raise ErrorCuenta(
+            422, "password_rechazada", "La contraseña no puede ser el nombre de usuario."
+        )
+
+
 def crear_cuenta(
     sesion: Session,
     rol: str,
     usuario_turnos_id: int | None,
     username: str | None,
     nombre: str | None,
+    password: str,
     creada_por: UsuarioSistema,
-) -> tuple[UsuarioSistema, str]:
+) -> UsuarioSistema:
     if rol not in ROLES_POR_API:
         raise ErrorCuenta(
             422,
@@ -219,10 +240,10 @@ def crear_cuenta(
             "Por API solo se crean cuentas de cocinera o jefa.",
         )
     if usuario_turnos_id is not None:
-        return _crear_vinculada(sesion, rol, usuario_turnos_id, creada_por)
+        return _crear_vinculada(sesion, rol, usuario_turnos_id, password, creada_por)
     # El esquema exige una de las dos formas: acá username y nombre vienen.
     assert username is not None and nombre is not None
-    return _crear_sin_vinculo(sesion, rol, username, nombre, creada_por)
+    return _crear_sin_vinculo(sesion, rol, username, nombre, password, creada_por)
 
 
 def _nueva_cuenta(
@@ -231,17 +252,18 @@ def _nueva_cuenta(
     rol: str,
     usuario_turnos_id: int | None,
     nombre: str | None,
+    password: str,
     creada_por: UsuarioSistema,
-) -> tuple[UsuarioSistema, str]:
-    clave = clave_temporal()
+) -> UsuarioSistema:
+    validar_clave(username, password)
     usuario = UsuarioSistema(
         username=username,
         # El hash va en el INSERT: password_hash es NOT NULL y este flush
         # tiene que salir para traducir el 1062, así que no puede esperar.
-        password_hash=seguridad.hashear_clave(clave),
+        password_hash=seguridad.hashear_clave(password),
         rol=rol,
         activo=1,
-        debe_cambiar=1,
+        debe_cambiar=0,
         version_token=0,
         usuario_turnos_id=usuario_turnos_id,
         nombre=nombre,
@@ -254,12 +276,12 @@ def _nueva_cuenta(
         sesion.rollback()
         raise _traducir_insercion(error) from error
     sesion.commit()
-    return usuario, clave
+    return usuario
 
 
 def _crear_vinculada(
-    sesion: Session, rol: str, usuario_turnos_id: int, creada_por: UsuarioSistema
-) -> tuple[UsuarioSistema, str]:
+    sesion: Session, rol: str, usuario_turnos_id: int, password: str, creada_por: UsuarioSistema
+) -> UsuarioSistema:
     persona = sesion.execute(
         select(Comensal).where(Comensal.usuario_id == usuario_turnos_id)
     ).scalar_one_or_none()
@@ -291,12 +313,19 @@ def _crear_vinculada(
     ).scalar_one_or_none()
     if en_uso is not None:
         raise ErrorCuenta(409, "username_en_uso", "Ese username ya está en uso.")
-    return _nueva_cuenta(sesion, username, rol, usuario_turnos_id, None, creada_por)
+    return _nueva_cuenta(
+        sesion, username, rol, usuario_turnos_id, None, password, creada_por
+    )
 
 
 def _crear_sin_vinculo(
-    sesion: Session, rol: str, username: str, nombre: str, creada_por: UsuarioSistema
-) -> tuple[UsuarioSistema, str]:
+    sesion: Session,
+    rol: str,
+    username: str,
+    nombre: str,
+    password: str,
+    creada_por: UsuarioSistema,
+) -> UsuarioSistema:
     username = normalizar_username(username)
     en_uso = sesion.execute(
         select(UsuarioSistema)
@@ -305,7 +334,7 @@ def _crear_sin_vinculo(
     ).scalar_one_or_none()
     if en_uso is not None:
         raise ErrorCuenta(409, "username_en_uso", "Ese username ya está en uso.")
-    return _nueva_cuenta(sesion, username, rol, None, nombre, creada_por)
+    return _nueva_cuenta(sesion, username, rol, None, nombre, password, creada_por)
 
 
 # --- estado y clave ---------------------------------------------------------
@@ -326,6 +355,14 @@ def cambiar_activo(
     sesion: Session, cuenta_id: int, activo: bool, solicitante: UsuarioSistema
 ) -> UsuarioSistema:
     cuenta = _obtener_bloqueada(sesion, cuenta_id)
+    if cuenta.eliminada_en is not None:
+        raise ErrorCuenta(409, "cuenta_eliminada", "Esta cuenta fue eliminada de la lista y no se puede reactivar.")
+    _aplicar_activo(sesion, cuenta, activo, solicitante)
+    sesion.commit()
+    return cuenta
+
+
+def _aplicar_activo(sesion, cuenta, activo, solicitante):
     if not activo:
         if cuenta.id == solicitante.id:
             raise ErrorCuenta(
@@ -359,12 +396,45 @@ def cambiar_activo(
             cuenta.version_token = (cuenta.version_token or 0) + 1
     else:
         cuenta.activo = 1
+
+
+def eliminar_cuenta(sesion: Session, cuenta_id: int, solicitante: UsuarioSistema) -> None:
+    """Baja lógica atómica e idempotente. Conserva todas las relaciones históricas."""
+    cuenta = _obtener_bloqueada(sesion, cuenta_id)
+    if cuenta.eliminada_en is not None:
+        return
+    _aplicar_activo(sesion, cuenta, False, solicitante)
+    cuenta.eliminada_en = reloj.real_utc().replace(tzinfo=None)
+    sesion.commit()
+
+
+def editar_cuenta(
+    sesion: Session, cuenta_id: int, nombre: str | None, rol: str | None,
+) -> UsuarioSistema:
+    cuenta = _obtener_bloqueada(sesion, cuenta_id)
+    if cuenta.eliminada_en is not None:
+        raise ErrorCuenta(409, "cuenta_eliminada", "Esta cuenta fue eliminada de la lista.")
+    if nombre is not None and cuenta.usuario_turnos_id is not None:
+        raise ErrorCuenta(409, "nombre_del_padron", "El nombre se administra desde el padrón.")
+    if rol is not None and rol != cuenta.rol:
+        if cuenta.rol == "sistemas":
+            raise ErrorCuenta(409, "rol_sistemas_protegido", "El rol de una cuenta de Sistemas no se cambia desde este formulario.")
+        if rol not in ROLES_POR_API:
+            raise ErrorCuenta(422, "rol_no_permitido", "Solo se puede asignar el rol de cocinera o jefa.")
+    if nombre is not None:
+        cuenta.nombre = nombre
+    if rol is not None and rol != cuenta.rol:
+        cuenta.rol = rol
+        # Los permisos nuevos requieren un ingreso nuevo, incluso para sesiones abiertas.
+        cuenta.version_token = (cuenta.version_token or 0) + 1
     sesion.commit()
     return cuenta
 
 
-def reiniciar_clave(sesion: Session, cuenta_id: int) -> tuple[UsuarioSistema, str]:
+def cambiar_clave(sesion: Session, cuenta_id: int, password: str) -> UsuarioSistema:
+    """Root fija la contraseña definitiva. Cierra las sesiones abiertas de esa
+    cuenta (version_token) y no pide cambio en el próximo ingreso."""
     cuenta = _obtener_bloqueada(sesion, cuenta_id)
-    clave = clave_temporal()
-    fijar_clave(sesion, cuenta, clave, temporal=True)
-    return cuenta, clave
+    validar_clave(cuenta.username, password)
+    fijar_clave(sesion, cuenta, password, temporal=False)
+    return cuenta
