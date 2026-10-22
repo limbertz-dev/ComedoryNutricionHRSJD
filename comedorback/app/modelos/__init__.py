@@ -5,4 +5,4 @@ depende de eso: si un modelo no está importado aquí, el autogenerate no lo ve
 y la migración sale vacía.
 """
 
-from app.modelos import comedor, heredados, reglas, usuarios  # noqa: F401
+from app.modelos import comedor, heredados, lector, reglas, usuarios  # noqa: F401
