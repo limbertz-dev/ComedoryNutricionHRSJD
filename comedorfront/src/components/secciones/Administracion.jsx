@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Boton from '../ui/Boton.jsx';
 import Etiqueta from '../ui/Etiqueta.jsx';
-import { IconoAlerta, IconoBuscar, IconoCandado, IconoCheck, IconoRecargar, IconoUsuario } from '../ui/Iconos.jsx';
+import { IconoAlerta, IconoBuscar, IconoCandado, IconoCheck, IconoEditar, IconoPapelera, IconoRecargar, IconoUsuario } from '../ui/Iconos.jsx';
 import {
-  buscarCandidatos,
+  cambiarClaveCuenta,
   crearCuenta,
   desactivarCuenta,
+  editarCuenta,
+  eliminarCuenta,
   obtenerCuentas,
   reactivarCuenta,
-  reiniciarClaveCuenta,
 } from '../../api.js';
 import {
   ETIQUETAS_ROL,
@@ -39,6 +40,23 @@ const ROLES_NUEVA_CUENTA = [
  */
 export function normalizarNombreUsuario(texto) {
   return typeof texto === 'string' ? texto.trim().toLowerCase() : '';
+}
+
+/** Largo mínimo de la contraseña; el servidor aplica la misma regla. */
+export const LARGO_MINIMO_CLAVE = 8;
+
+/**
+ * Por qué no se puede usar todavía la contraseña escrita, o '' si sirve.
+ * Anticipa las reglas del servidor para avisar antes de enviar.
+ */
+export function motivoClaveInvalida(clave, confirmacion, usuario = '') {
+  if (!clave) return 'Escriba la contraseña.';
+  if (clave.length < LARGO_MINIMO_CLAVE) return `La contraseña debe tener al menos ${LARGO_MINIMO_CLAVE} caracteres.`;
+  if (usuario && clave.trim().toLowerCase() === normalizarNombreUsuario(usuario)) {
+    return 'La contraseña no puede ser el nombre de usuario.';
+  }
+  if (clave !== confirmacion) return 'Las dos contraseñas no coinciden.';
+  return '';
 }
 
 /** True si la fila es la cuenta con la que se ingresó (nunca se desactiva). */
@@ -116,8 +134,8 @@ export function crearBuscadorCandidatos({ buscar, retardo = 300 } = {}) {
 }
 
 /**
- * Ejecuta desactivar / reactivar / reiniciar: aviso del resultado y la tabla
- * se relee del servidor. Devuelve lo que devolvió la operación.
+ * Ejecuta desactivar / reactivar: aviso del resultado y la tabla se relee
+ * del servidor. Devuelve lo que devolvió la operación.
  */
 export async function ejecutarAccionCuenta({
   ejecutar,
@@ -142,35 +160,24 @@ export async function ejecutarAccionCuenta({
   }
 }
 
-/**
- * Cierre de una creación exitosa: aviso, clave temporal al diálogo de un solo
- * uso y la tabla se relee del servidor.
- */
-export async function finalizarCreacionCuenta({ resultado, setAviso, setClave, recargar }) {
-  setAviso?.({ tipo: 'exito', titulo: `Cuenta ${resultado.cuenta.username} creada`, detalle: '' });
-  setClave?.({ usuario: resultado.cuenta.username, valor: resultado.claveTemporal });
+/** Cierre de una creación exitosa: aviso y la tabla se relee del servidor. */
+export async function finalizarCreacionCuenta({ resultado, setAviso, recargar }) {
+  setAviso?.({
+    tipo: 'exito',
+    titulo: `Cuenta ${resultado.cuenta.username} creada`,
+    detalle: 'Ya puede ingresar con la contraseña que eligió.',
+  });
   await recargar?.();
-}
-
-/** Copia al portapapeles; false si el navegador no lo permite. */
-export function copiarTexto(texto) {
-  try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      return navigator.clipboard.writeText(texto).then(() => true, () => false);
-    }
-  } catch {
-    return Promise.resolve(false);
-  }
-  return Promise.resolve(false);
 }
 
 /**
  * Administración de cuentas (solo sistemas).
  *
- * Tabla de cuentas con búsqueda local y acciones con confirmación
- * (reiniciar clave, desactivar o reactivar), diálogo de nueva cuenta con
- * pestañas «Desde el padrón» y «Sin vínculo», y diálogo de clave temporal
- * de un solo uso: la clave vive solo en memoria mientras está abierto.
+ * Tabla de cuentas con búsqueda local y acciones (cambiar clave, desactivar
+ * o reactivar) y diálogo de nueva cuenta con ingreso directo de sus datos.
+ * Root escribe la contraseña definitiva: la cuenta entra con
+ * ella sin cambio obligatorio. La contraseña solo vive en el estado del
+ * diálogo mientras está abierto.
  */
 export default function Administracion({
   usuarioActual = null,
@@ -180,7 +187,8 @@ export default function Administracion({
   busquedaInicial = '',
   dialogoNuevoInicial = false,
   avisoInicial = null,
-  claveInicial = null,
+  cambioClaveInicial = null,
+  edicionInicial = null,
   confirmacionInicial = null,
 }) {
   const [cargando, setCargando] = useState(cargandoInicial);
@@ -191,8 +199,9 @@ export default function Administracion({
   const [aviso, setAviso] = useState(avisoInicial);
   const [dialogoNuevo, setDialogoNuevo] = useState(dialogoNuevoInicial);
   const [confirmacion, setConfirmacion] = useState(confirmacionInicial);
-  /* La clave temporal: solo en este estado, solo mientras el diálogo abierto. */
-  const [clave, setClave] = useState(claveInicial);
+  /* La cuenta cuya contraseña se está cambiando, o null. */
+  const [cambioClave, setCambioClave] = useState(cambioClaveInicial);
+  const [edicion, setEdicion] = useState(edicionInicial);
   const [procesandoId, setProcesandoId] = useState(null);
 
   const cargarCuentas = useCallback(async ({ signal, esRefresco = false } = {}) => {
@@ -240,37 +249,48 @@ export default function Administracion({
     if (!confirmacion) return;
     const { tipo, cuenta } = confirmacion;
     setConfirmacion(null);
-    if (tipo === 'desactivar') {
+    if (tipo === 'eliminar') {
       await ejecutarAccionCuenta({
-        ejecutar: () => desactivarCuenta(cuenta.id),
-        tituloExito: `Cuenta ${cuenta.username} desactivada`,
-        tituloError: 'No se pudo desactivar',
+        ejecutar: async () => {
+          await eliminarCuenta(cuenta.id);
+          // Ocultar solo tras la confirmación del servidor, incluso si falla
+          // el refresco siguiente. No se borra la identidad ni su historial.
+          setCuentas(previas => previas?.filter(fila => fila.id !== cuenta.id) ?? null);
+        },
+        tituloExito: `Cuenta ${cuenta.username} eliminada de la lista`,
+        tituloError: 'No se pudo eliminar la cuenta',
         recargar: () => cargarCuentas({ esRefresco: true }),
         setAviso,
         setProcesando: (valor) => setProcesandoId(valor ? cuenta.id : null),
       });
-    } else if (tipo === 'reactivar') {
+    } else if (tipo === 'desactivar' || tipo === 'reactivar') {
+      const desactivar = tipo === 'desactivar';
       await ejecutarAccionCuenta({
-        ejecutar: () => reactivarCuenta(cuenta.id),
-        tituloExito: `Cuenta ${cuenta.username} reactivada`,
-        tituloError: 'No se pudo reactivar',
+        ejecutar: () => desactivar ? desactivarCuenta(cuenta.id) : reactivarCuenta(cuenta.id),
+        tituloExito: `Cuenta ${cuenta.username} ${desactivar ? 'desactivada' : 'reactivada'}`,
+        tituloError: `No se pudo ${tipo}`,
         recargar: () => cargarCuentas({ esRefresco: true }),
         setAviso,
         setProcesando: (valor) => setProcesandoId(valor ? cuenta.id : null),
       });
-    } else if (tipo === 'reiniciar') {
-      const resultado = await ejecutarAccionCuenta({
-        ejecutar: () => reiniciarClaveCuenta(cuenta.id),
-        tituloExito: `Clave de ${cuenta.username} reiniciada`,
-        tituloError: 'No se pudo reiniciar la clave',
-        recargar: () => cargarCuentas({ esRefresco: true }),
-        setAviso,
-        setProcesando: (valor) => setProcesandoId(valor ? cuenta.id : null),
-      });
-      if (resultado) {
-        setClave({ usuario: resultado.cuenta.username, valor: resultado.claveTemporal });
-      }
     }
+  }
+
+  async function manejarEditada(cuenta) {
+    setEdicion(null);
+    setCuentas(previas => previas?.map(fila => fila.id === cuenta.id ? cuenta : fila) ?? null);
+    setAviso({ tipo: 'exito', titulo: `Cuenta ${cuenta.username} actualizada` });
+    await cargarCuentas({ esRefresco: true });
+  }
+
+  async function manejarClaveCambiada(cuenta) {
+    setCambioClave(null);
+    setAviso({
+      tipo: 'exito',
+      titulo: `Contraseña de ${cuenta.username} cambiada`,
+      detalle: 'Sus sesiones abiertas se cerraron; ya ingresa con la nueva.',
+    });
+    await cargarCuentas({ esRefresco: true });
   }
 
   async function manejarCreada(resultado) {
@@ -278,7 +298,6 @@ export default function Administracion({
     await finalizarCreacionCuenta({
       resultado,
       setAviso,
-      setClave,
       recargar: () => cargarCuentas({ esRefresco: true }),
     });
   }
@@ -318,8 +337,8 @@ export default function Administracion({
             className="administracion__buscador-input"
             value={busqueda}
             onChange={(evento) => setBusqueda(evento.target.value)}
-            placeholder="Buscar por usuario o nombre…"
-            aria-label="Buscar por usuario o nombre"
+            placeholder="Buscar cuenta…"
+            aria-label="Buscar cuenta"
           />
           {busqueda ? (
             <button
@@ -343,11 +362,11 @@ export default function Administracion({
           variante="secundario"
           icono={<IconoRecargar tamano={17} />}
           onClick={() => cargarCuentas({ esRefresco: true })}
-          disabled={actualizando}
+          disabled={actualizando || procesandoId !== null}
         >
           {actualizando ? 'Actualizando…' : 'Actualizar'}
         </Boton>
-        <Boton onClick={() => setDialogoNuevo(true)}>
+        <Boton onClick={() => setDialogoNuevo(true)} disabled={actualizando || procesandoId !== null}>
           Nueva cuenta
         </Boton>
       </div>
@@ -368,7 +387,6 @@ export default function Administracion({
                 <th scope="col">Usuario</th>
                 <th scope="col">Nombre</th>
                 <th scope="col">Rol</th>
-                <th scope="col">Vínculo</th>
                 <th scope="col">Estado</th>
                 <th scope="col">Último ingreso</th>
                 <th scope="col">Acciones</th>
@@ -380,10 +398,12 @@ export default function Administracion({
                   key={cuenta.id}
                   cuenta={cuenta}
                   esPropia={esCuentaPropia(cuenta, usuarioActual)}
-                  procesando={procesandoId === cuenta.id}
-                  onReiniciar={() => setConfirmacion({ tipo: 'reiniciar', cuenta })}
+                  procesando={procesandoId !== null || actualizando}
+                  onCambiarClave={() => setCambioClave(cuenta)}
+                  onEditar={() => setEdicion(cuenta)}
                   onDesactivar={() => setConfirmacion({ tipo: 'desactivar', cuenta })}
                   onReactivar={() => setConfirmacion({ tipo: 'reactivar', cuenta })}
+                  onEliminar={() => setConfirmacion({ tipo: 'eliminar', cuenta })}
                 />
               ))}
             </tbody>
@@ -406,11 +426,15 @@ export default function Administracion({
         />
       ) : null}
 
-      {clave ? (
-        <DialogoClave
-          usuario={clave.usuario}
-          valor={clave.valor}
-          onCerrar={() => setClave(null)}
+      {edicion ? (
+        <DialogoEditarCuenta cuenta={edicion} onGuardada={manejarEditada} onCerrar={() => setEdicion(null)} />
+      ) : null}
+
+      {cambioClave ? (
+        <DialogoCambiarClave
+          cuenta={cambioClave}
+          onCambiada={manejarClaveCambiada}
+          onCerrar={() => setCambioClave(null)}
         />
       ) : null}
     </div>
@@ -418,35 +442,36 @@ export default function Administracion({
 }
 
 /** Fila de la tabla: datos legibles y acciones con confirmación. */
-function FilaCuenta({ cuenta, esPropia, procesando, onReiniciar, onDesactivar, onReactivar }) {
+function FilaCuenta({ cuenta, esPropia, procesando, onEditar, onCambiarClave, onDesactivar, onReactivar, onEliminar }) {
   const estado = estadoDeCuenta(cuenta);
   return (
     <tr className={cuenta.activo ? undefined : 'administracion__fila--inactiva'}>
       <td className="administracion__usuario">{cuenta.username}</td>
       <td>{cuenta.nombre || '—'}</td>
       <td>{ETIQUETAS_ROL[cuenta.rol] ?? cuenta.rol}</td>
-      <td>{cuenta.vinculada ? 'Padrón' : 'Sin vínculo'}</td>
       <td>
         <Etiqueta tono={estado.tono}>{estado.texto}</Etiqueta>
       </td>
       <td>{formatoUltimoIngreso(cuenta.ultimoIngreso)}</td>
       <td>
         <div className="administracion__acciones">
-          <Boton variante="secundario" onClick={onReiniciar} disabled={procesando}>
-            Reiniciar clave
+          <Boton variante="secundario" icono={<IconoEditar tamano={15} />} onClick={onEditar} disabled={procesando}>
+            Editar
           </Boton>
-          {cuenta.activo ? (
-            esPropia ? (
-              <span className="administracion__propia">Su cuenta</span>
-            ) : (
-              <Boton variante="secundario" onClick={onDesactivar} disabled={procesando}>
-                Desactivar
-              </Boton>
-            )
+          <Boton variante="secundario" onClick={onCambiarClave} disabled={procesando}>
+            Cambiar clave
+          </Boton>
+          {esPropia ? (
+            <span className="administracion__propia">Su cuenta</span>
           ) : (
-            <Boton variante="secundario" onClick={onReactivar} disabled={procesando}>
-              Reactivar
-            </Boton>
+            <>
+              <Boton variante="secundario" onClick={cuenta.activo ? onDesactivar : onReactivar} disabled={procesando}>
+                {cuenta.activo ? 'Desactivar' : 'Reactivar'}
+              </Boton>
+              <Boton variante="secundario" icono={<IconoPapelera tamano={15} />} onClick={onEliminar} disabled={procesando}>
+                Eliminar
+              </Boton>
+            </>
           )}
         </div>
       </td>
@@ -488,10 +513,7 @@ function AvisoAccion({ aviso, onCerrar }) {
   );
 }
 
-/**
- * Fondo + caja de diálogo. Se cierra con Escape o con un clic en el fondo.
- * La clave temporal, al cerrarse su diálogo, se borra del estado del padre.
- */
+/** Fondo + caja de diálogo. Se cierra con Escape o con un clic en el fondo. */
 function Dialogo({ etiqueta, onCerrar, children }) {
   const caja = useRef(null);
 
@@ -533,79 +555,30 @@ function Dialogo({ etiqueta, onCerrar, children }) {
   );
 }
 
-/**
- * Nueva cuenta, con dos pestañas: «Desde el padrón» (búsqueda con 2+ caracteres
- * y debounce, candidato elegido con usuario en solo lectura) y «Sin vínculo»
- * (usuario, nombre y rol, para quien aún no está en el padrón).
- */
+/** Nueva cuenta con ingreso directo de sus datos. */
 export function DialogoNuevaCuenta({
   onCrear,
   onCerrar,
-  pestanaInicial = 'padron',
-  busquedaPadronInicial = '',
-  candidatosIniciales = [],
-  candidatoInicial = null,
   usuarioLibreInicial = '',
   nombreLibreInicial = '',
+  claveInicial = '',
 }) {
-  const [pestana, setPestana] = useState(pestanaInicial);
-  const [busquedaPadron, setBusquedaPadron] = useState(busquedaPadronInicial);
-  const [candidatos, setCandidatos] = useState(candidatosIniciales);
-  const [buscando, setBuscando] = useState(false);
-  const [errorCandidatos, setErrorCandidatos] = useState('');
-  const [candidatoElegido, setCandidatoElegido] = useState(candidatoInicial);
-  const [rolPadron, setRolPadron] = useState('cocinera');
   const [usuarioLibre, setUsuarioLibre] = useState(usuarioLibreInicial);
   const [nombreLibre, setNombreLibre] = useState(nombreLibreInicial);
   const [rolLibre, setRolLibre] = useState('cocinera');
+  const [clave, setClave] = useState(claveInicial);
+  const [confirmacionClave, setConfirmacionClave] = useState(claveInicial);
   const [creando, setCreando] = useState(false);
   const [errorCrear, setErrorCrear] = useState('');
 
-  const buscador = useRef(null);
-  if (!buscador.current) {
-    buscador.current = crearBuscadorCandidatos({
-      buscar: (termino, opciones) => buscarCandidatos(termino, opciones),
-    });
-  }
-
-  useEffect(() => {
-    if (pestana !== 'padron') return undefined;
-    buscador.current.programar(busquedaPadron, {
-      onResultado: (lista) => {
-        setCandidatos(lista);
-        setErrorCandidatos('');
-      },
-      onError: (fallo) => setErrorCandidatos(fallo.message),
-      onEstado: setBuscando,
-    });
-    return () => buscador.current.cancelar();
-  }, [busquedaPadron, pestana]);
-
-  function cambiarPestana(nueva) {
-    buscador.current.cancelar();
-    setPestana(nueva);
-    setErrorCrear('');
-  }
-
-  async function crearDesdePadron() {
-    if (!candidatoElegido || creando) return;
-    setCreando(true);
-    setErrorCrear('');
-    try {
-      const resultado = await crearCuenta({
-        rol: rolPadron,
-        usuarioTurnosId: candidatoElegido.usuarioTurnosId,
-      });
-      onCrear(resultado);
-    } catch (fallo) {
-      setErrorCrear(fallo.message);
-    } finally {
-      setCreando(false);
-    }
-  }
-
-  async function crearSinVinculo() {
+  async function crear(evento) {
+    evento.preventDefault();
     if (creando) return;
+    const motivo = motivoClaveInvalida(clave, confirmacionClave, usuarioLibre);
+    if (motivo) {
+      setErrorCrear(motivo);
+      return;
+    }
     setCreando(true);
     setErrorCrear('');
     try {
@@ -613,6 +586,7 @@ export function DialogoNuevaCuenta({
         rol: rolLibre,
         username: usuarioLibre,
         nombre: nombreLibre,
+        password: clave,
       });
       onCrear(resultado);
     } catch (fallo) {
@@ -633,124 +607,8 @@ export function DialogoNuevaCuenta({
         <h2 className="administracion__dialogo-titulo">Nueva cuenta</h2>
       </div>
 
-      <div className="administracion__pestanas" role="tablist" aria-label="Origen de la cuenta">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={pestana === 'padron'}
-          className={`administracion__pestana${pestana === 'padron' ? ' administracion__pestana--activa' : ''}`}
-          onClick={() => cambiarPestana('padron')}
-        >
-          Desde el padrón
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={pestana === 'libre'}
-          className={`administracion__pestana${pestana === 'libre' ? ' administracion__pestana--activa' : ''}`}
-          onClick={() => cambiarPestana('libre')}
-        >
-          Sin vínculo
-        </button>
-      </div>
-
-      {pestana === 'padron' ? (
+      <form onSubmit={crear}>
         <div className="administracion__panel-pestana">
-          <label className="administracion__campo" htmlFor="nueva-busqueda-padron">
-            <span className="administracion__campo-rotulo">Buscar en el padrón</span>
-            <input
-              id="nueva-busqueda-padron"
-              type="text"
-              className="administracion__input"
-              value={busquedaPadron}
-              onChange={(evento) => setBusquedaPadron(evento.target.value)}
-              placeholder="Nombre o usuario, con 2 letras o más…"
-              autoComplete="off"
-            />
-          </label>
-
-          {buscando ? <p className="administracion__ayuda" role="status">Buscando…</p> : null}
-          {errorCandidatos ? <p className="administracion__error-campo" role="alert">{errorCandidatos}</p> : null}
-
-          {!buscando && !errorCandidatos && busquedaPadron.trim().length >= 2 && candidatos.length === 0 ? (
-            <p className="administracion__ayuda" role="status">Nadie del padrón coincide con esa búsqueda.</p>
-          ) : null}
-
-          {candidatos.length > 0 ? (
-            <ul className="administracion__candidatos" aria-label="Candidatos del padrón">
-              {candidatos.map((candidato) => (
-                <li
-                  key={candidato.usuarioTurnosId}
-                  className={`administracion__candidato${candidato.tieneCuenta ? ' administracion__candidato--usado' : ''}${
-                    candidatoElegido?.usuarioTurnosId === candidato.usuarioTurnosId
-                      ? ' administracion__candidato--elegido'
-                      : ''
-                  }`}
-                >
-                  <div className="administracion__candidato-datos">
-                    <strong>{candidato.nombre}</strong>
-                    <span>{candidato.login} · {candidato.categoria ?? 'Sin categoría'}</span>
-                  </div>
-                  {candidato.tieneCuenta ? (
-                    <>
-                      <Etiqueta tono="neutro">Ya tiene cuenta</Etiqueta>
-                      <Boton variante="secundario" disabled title="Ya tiene cuenta">
-                        Elegir
-                      </Boton>
-                    </>
-                  ) : (
-                    <Boton
-                      variante="secundario"
-                      onClick={() => setCandidatoElegido(candidato)}
-                      disabled={candidatoElegido?.usuarioTurnosId === candidato.usuarioTurnosId}
-                    >
-                      {candidatoElegido?.usuarioTurnosId === candidato.usuarioTurnosId ? 'Elegido' : 'Elegir'}
-                    </Boton>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {candidatoElegido ? (
-            <div className="administracion__elegido">
-              <label className="administracion__campo" htmlFor="nueva-usuario-padron">
-                <span className="administracion__campo-rotulo">Usuario de la cuenta</span>
-                <input
-                  id="nueva-usuario-padron"
-                  type="text"
-                  className="administracion__input"
-                  value={candidatoElegido.login}
-                  readOnly
-                  aria-readonly="true"
-                />
-              </label>
-              <Boton variante="fantasma" onClick={() => setCandidatoElegido(null)}>
-                Cambiar
-              </Boton>
-            </div>
-          ) : null}
-
-          <label className="administracion__campo" htmlFor="nueva-rol-padron">
-            <span className="administracion__campo-rotulo">Rol</span>
-            <select
-              id="nueva-rol-padron"
-              className="administracion__select"
-              value={rolPadron}
-              onChange={(evento) => setRolPadron(evento.target.value)}
-            >
-              {ROLES_NUEVA_CUENTA.map(({ valor, etiqueta }) => (
-                <option key={valor} value={valor}>{etiqueta}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      ) : (
-        <div className="administracion__panel-pestana">
-          <p className="administracion__ayuda">
-            Para personas que aún no están en el padrón del comedor. La cuenta queda sin vínculo.
-          </p>
-
           <label className="administracion__campo" htmlFor="nueva-usuario-libre">
             <span className="administracion__campo-rotulo">Usuario</span>
             <input
@@ -760,6 +618,8 @@ export function DialogoNuevaCuenta({
               value={usuarioLibre}
               onChange={(evento) => setUsuarioLibre(evento.target.value)}
               placeholder="Por ejemplo: maria.cocina"
+              required
+              maxLength={50}
               autoComplete="off"
             />
           </label>
@@ -771,6 +631,8 @@ export function DialogoNuevaCuenta({
             <span className="administracion__campo-rotulo">Nombre</span>
             <input
               id="nueva-nombre-libre"
+              required
+              maxLength={100}
               type="text"
               className="administracion__input"
               value={nombreLibre}
@@ -794,29 +656,103 @@ export function DialogoNuevaCuenta({
             </select>
           </label>
         </div>
-      )}
+        <CamposClave
+          idBase="nueva"
+          clave={clave}
+          onClave={setClave}
+          confirmacion={confirmacionClave}
+          onConfirmacion={setConfirmacionClave}
+        />
 
-      {errorCrear ? <p className="administracion__error-campo" role="alert">{errorCrear}</p> : null}
+        {errorCrear ? <p className="administracion__error-campo" role="alert">{errorCrear}</p> : null}
 
-      <div className="administracion__dialogo-acciones">
-        <Boton variante="secundario" onClick={onCerrar} disabled={creando}>
-          Cancelar
-        </Boton>
-        {pestana === 'padron' ? (
-          <Boton onClick={crearDesdePadron} disabled={!candidatoElegido || creando}>
-            {creando ? 'Creando…' : 'Crear'}
+        <div className="administracion__dialogo-acciones">
+          <Boton variante="secundario" onClick={onCerrar} disabled={creando}>
+            Cancelar
           </Boton>
-        ) : (
-          <Boton onClick={crearSinVinculo} disabled={creando}>
-            {creando ? 'Creando…' : 'Crear'}
+          <Boton type="submit" disabled={creando}>
+            {creando ? 'Creando\u2026' : 'Crear'}
           </Boton>
-        )}
+        </div>
+      </form>
+    </Dialogo>
+  );
+}
+
+/** Edición de datos de la cuenta con los valores actuales y envío único. */
+export function DialogoEditarCuenta({ cuenta, onGuardada, onCerrar, editar = editarCuenta }) {
+  const [nombre, setNombre] = useState(cuenta.nombre ?? '');
+  const [rol, setRol] = useState(cuenta.rol);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState('');
+  const cambioNombre = !cuenta.vinculada && nombre.trim() !== (cuenta.nombre ?? '');
+  const cambioRol = rol !== cuenta.rol;
+  const puedeGuardar = (cuenta.vinculada || nombre.trim()) && (cambioNombre || cambioRol);
+
+  async function guardar(evento) {
+    evento.preventDefault();
+    if (guardando || !puedeGuardar) return;
+    setGuardando(true);
+    setError('');
+    try {
+      const cambios = { ...(cambioNombre ? { nombre: nombre.trim() } : {}), ...(cambioRol ? { rol } : {}) };
+      const actualizada = await editar(cuenta.id, cambios);
+      onGuardada(actualizada);
+    } catch (fallo) {
+      setError(fallo.message);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <Dialogo etiqueta="Editar cuenta" onCerrar={guardando ? () => {} : onCerrar}>
+      <div className="administracion__dialogo-cabecera">
+        <span className="administracion__dialogo-icono administracion__dialogo-icono--acento" aria-hidden="true">
+          <IconoEditar tamano={22} />
+        </span>
+        <h2 className="administracion__dialogo-titulo">Editar cuenta</h2>
       </div>
+      <form onSubmit={guardar}>
+        <div className="administracion__panel-pestana">
+          <label className="administracion__campo" htmlFor="editar-usuario">
+            <span className="administracion__campo-rotulo">Usuario</span>
+            <input id="editar-usuario" className="administracion__input" value={cuenta.username} readOnly />
+          </label>
+          <label className="administracion__campo" htmlFor="editar-nombre">
+            <span className="administracion__campo-rotulo">Nombre</span>
+            <input id="editar-nombre" className="administracion__input" value={nombre} maxLength={100}
+              required={!cuenta.vinculada} readOnly={cuenta.vinculada} disabled={guardando}
+              onChange={evento => setNombre(evento.target.value)} />
+          </label>
+          {cuenta.vinculada ? <p className="administracion__ayuda">El nombre de esta cuenta se administra desde el padrón.</p> : null}
+          <label className="administracion__campo" htmlFor="editar-rol">
+            <span id="editar-rol-rotulo" className="administracion__campo-rotulo">Rol</span>
+            <select id="editar-rol" aria-labelledby="editar-rol-rotulo" className="administracion__select" value={rol}
+              disabled={guardando || cuenta.rol === 'sistemas'} onChange={evento => setRol(evento.target.value)}>
+              {cuenta.rol === 'sistemas' ? <option value="sistemas">Sistemas</option> :
+                ROLES_NUEVA_CUENTA.map(({ valor, etiqueta }) => <option key={valor} value={valor}>{etiqueta}</option>)}
+            </select>
+          </label>
+          {cambioRol ? <p className="administracion__ayuda">Al cambiar el rol se cerrarán las sesiones abiertas de esta cuenta.</p> : null}
+        </div>
+        {error ? <p className="administracion__error-campo" role="alert">{error}</p> : null}
+        <div className="administracion__dialogo-acciones">
+          <Boton variante="secundario" onClick={onCerrar} disabled={guardando}>Cancelar</Boton>
+          <Boton type="submit" disabled={guardando || !puedeGuardar}>{guardando ? 'Guardando…' : 'Guardar cambios'}</Boton>
+        </div>
+      </form>
     </Dialogo>
   );
 }
 
 const TEXTOS_CONFIRMACION = {
+  eliminar: {
+    tono: 'aviso',
+    titulo: 'Eliminar cuenta',
+    mensaje: (cuenta) => `¿Eliminar la cuenta ${cuenta.username} de la lista? Quedará desactivada y no podrá ingresar. Sus datos y registros se conservarán.`,
+    confirmar: 'Eliminar',
+  },
   desactivar: {
     tono: 'aviso',
     titulo: 'Desactivar cuenta',
@@ -829,15 +765,9 @@ const TEXTOS_CONFIRMACION = {
     mensaje: (cuenta) => `¿Reactivar la cuenta de ${cuenta.username}? Volverá a ingresar con su clave.`,
     confirmar: 'Reactivar',
   },
-  reiniciar: {
-    tono: 'aviso',
-    titulo: 'Reiniciar clave',
-    mensaje: (cuenta) => `¿Reiniciar la clave de ${cuenta.username}? Se genera una clave temporal nueva, que se muestra una sola vez.`,
-    confirmar: 'Reiniciar',
-  },
 };
 
-/** Confirmación de desactivar, reactivar o reiniciar clave. */
+/** Confirmación de desactivar o reactivar. */
 export function DialogoConfirmacion({ confirmacion, onConfirmar, onCancelar }) {
   const textos = TEXTOS_CONFIRMACION[confirmacion.tipo];
   return (
@@ -853,7 +783,7 @@ export function DialogoConfirmacion({ confirmacion, onConfirmar, onCancelar }) {
         <Boton variante="secundario" onClick={onCancelar}>
           Cancelar
         </Boton>
-        <Boton onClick={onConfirmar}>
+        <Boton onClick={onConfirmar} className={confirmacion.tipo === 'eliminar' ? 'administracion__eliminar' : undefined}>
           {textos.confirmar}
         </Boton>
       </div>
@@ -862,40 +792,108 @@ export function DialogoConfirmacion({ confirmacion, onConfirmar, onCancelar }) {
 }
 
 /**
- * Clave temporal de un solo uso: se muestra una sola vez, con Copiar y el
- * aviso de entrega en mano. Al cerrarse, el padre la borra de su estado.
+ * Contraseña y su confirmación, con «Mostrar» para revisar lo escrito.
+ * Se usa al crear la cuenta y al cambiar su clave.
  */
-export function DialogoClave({ usuario, valor, onCerrar }) {
-  const [copiado, setCopiado] = useState(false);
+export function CamposClave({ idBase, clave, onClave, confirmacion, onConfirmacion }) {
+  const [visible, setVisible] = useState(false);
+  const tipo = visible ? 'text' : 'password';
+  return (
+    <div className="administracion__clave-campos">
+      <div className="administracion__clave-fila">
+        <label className="administracion__campo" htmlFor={`${idBase}-clave`}>
+          <span className="administracion__campo-rotulo">Contraseña</span>
+          <input
+            id={`${idBase}-clave`}
+            type={tipo}
+            className="administracion__input"
+            value={clave}
+            onChange={(evento) => onClave(evento.target.value)}
+            placeholder={`Al menos ${LARGO_MINIMO_CLAVE} caracteres`}
+            autoComplete="new-password"
+          />
+        </label>
+        <label className="administracion__campo" htmlFor={`${idBase}-confirmacion`}>
+          <span className="administracion__campo-rotulo">Repetir contraseña</span>
+          <input
+            id={`${idBase}-confirmacion`}
+            type={tipo}
+            className="administracion__input"
+            value={confirmacion}
+            onChange={(evento) => onConfirmacion(evento.target.value)}
+            autoComplete="new-password"
+          />
+        </label>
+      </div>
+      <div className="administracion__clave-pie">
+        <p className="administracion__ayuda">
+          Es la contraseña definitiva: la persona entra con ella sin tener que cambiarla.
+        </p>
+        <Boton variante="fantasma" onClick={() => setVisible((valor) => !valor)} aria-pressed={visible}>
+          {visible ? 'Ocultar' : 'Mostrar'}
+        </Boton>
+      </div>
+    </div>
+  );
+}
 
-  async function manejarCopiar() {
-    const ok = await copiarTexto(valor);
-    setCopiado(ok);
+/**
+ * Cambiar la contraseña de una cuenta: root escribe la nueva. Al guardarla se
+ * cierran las sesiones abiertas de esa cuenta.
+ */
+export function DialogoCambiarClave({ cuenta, onCambiada, onCerrar, cambiar = cambiarClaveCuenta, claveInicial = '' }) {
+  const [clave, setClave] = useState(claveInicial);
+  const [confirmacion, setConfirmacion] = useState(claveInicial);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState('');
+
+  async function guardar() {
+    if (guardando) return;
+    const motivo = motivoClaveInvalida(clave, confirmacion, cuenta.username);
+    if (motivo) {
+      setError(motivo);
+      return;
+    }
+    setGuardando(true);
+    setError('');
+    try {
+      await cambiar(cuenta.id, clave);
+      onCambiada(cuenta);
+    } catch (fallo) {
+      setError(fallo.message);
+    } finally {
+      setGuardando(false);
+    }
   }
 
   return (
-    <Dialogo etiqueta="Clave temporal" onCerrar={onCerrar}>
+    <Dialogo etiqueta="Cambiar clave" onCerrar={onCerrar}>
       <div className="administracion__dialogo-cabecera">
         <span className="administracion__dialogo-icono administracion__dialogo-icono--acento" aria-hidden="true">
           <IconoCandado tamano={22} />
         </span>
-        <h2 className="administracion__dialogo-titulo">Clave temporal de {usuario}</h2>
+        <h2 className="administracion__dialogo-titulo">Cambiar clave de {cuenta.username}</h2>
       </div>
       <p className="administracion__dialogo-mensaje">
-        Anótela o cópiela ahora: no se volverá a mostrar.
+        Si tiene una sesión abierta, se cerrará y tendrá que ingresar con la nueva contraseña.
       </p>
-      <div className="administracion__clave-caja">
-        <code className="administracion__clave">{valor}</code>
-        <Boton variante="secundario" onClick={manejarCopiar}>
-          {copiado ? '¡Copiada!' : 'Copiar'}
-        </Boton>
-      </div>
-      <p className="administracion__clave-aviso" role="note">
-        No se volverá a mostrar; entréguela en mano. Se cambia en el primer ingreso.
-      </p>
+
+      <CamposClave
+        idBase="cambio"
+        clave={clave}
+        onClave={setClave}
+        confirmacion={confirmacion}
+        onConfirmacion={setConfirmacion}
+      />
+
+      {error ? <p className="administracion__error-campo" role="alert">{error}</p> : null}
+
       <div className="administracion__dialogo-acciones">
-        <Boton onClick={onCerrar}>
-          Cerrar
+        <Boton variante="secundario" onClick={onCerrar} disabled={guardando}>
+          Cancelar
+        </Boton>
+        <Boton onClick={guardar} disabled={guardando}>
+          {guardando ? 'Guardando…' : 'Guardar contraseña'}
         </Boton>
       </div>
     </Dialogo>

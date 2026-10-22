@@ -24,11 +24,12 @@ test('con rol cocinera no hay sidebar ni header y Control Biométrico ocupa toda
   assert.doesNotMatch(html, /<header class="header"/);
   assert.match(html, /app--pantalla-completa/);
 
-  // Mismo contenido: panel del lector, ficha del día y marcaciones del turno
+  // Mismo contenido: panel del lector, ficha del día, huellas por identificar y marcaciones del turno
   assert.match(html, /Control de raciones · Comedor planta baja/);
   // Sin rótulo ni punto animado que aparente un lector conectado.
   assert.doesNotMatch(html, /Lector biométrico|escenario__pulso/);
   assert.match(html, /vivo__dia/);
+  assert.match(html, /Huellas por identificar/);
   assert.match(html, /Marcaciones del turno/);
 
   // Botón flotante de sesión, pequeño y con nombre accesible
@@ -44,6 +45,7 @@ test('con rol jefa siguen el sidebar y el header, sin pantalla completa ni flota
   assert.match(html, /Supervisión del comedor/);
   assert.doesNotMatch(html, /app--pantalla-completa/);
   assert.doesNotMatch(html, /Menú de sesión/);
+  assert.doesNotMatch(html, /Huellas por identificar/);
 });
 
 test('el panel flotante contiene usuario, rol y Cerrar sesión', () => {

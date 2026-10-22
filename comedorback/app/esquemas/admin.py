@@ -36,11 +36,17 @@ class Candidato(BaseModel):
 
 
 class CrearCuenta(BaseModel):
-    """Una de dos formas: vinculada {rol, usuario_turnos_id} o sin vínculo
-    {rol, username, nombre}. El rol se valida en la lógica, para responder
-    con motivo (rol_no_permitido) en vez del 422 genérico."""
+    """Una de dos formas: vinculada {rol, usuario_turnos_id, password} o sin
+    vínculo {rol, username, nombre, password}. El rol y la política de la
+    contraseña se validan en la lógica, para responder con motivo
+    (rol_no_permitido, password_rechazada) en vez del 422 genérico."""
 
     rol: str = Field(description="cocinera | jefa (sistemas solo por consola)")
+    password: str = Field(
+        min_length=1,
+        max_length=200,
+        description="Contraseña definitiva que elige root: la cuenta entra con ella sin cambio obligatorio",
+    )
     usuario_turnos_id: int | None = Field(default=None, gt=0)
     username: str | None = Field(default=None, min_length=1, max_length=50)
     nombre: str | None = Field(default=None, min_length=1, max_length=100)
@@ -64,9 +70,32 @@ class CrearCuenta(BaseModel):
         return self
 
 
-class CuentaConClave(BaseModel):
-    """201 de creación y 200 de reinicio: la cuenta y su clave temporal, que
-    se muestra una sola vez y nunca se registra en logs."""
+class CuentaRespuesta(BaseModel):
+    """201 de creación y 200 de cambio de clave. La contraseña nunca vuelve."""
 
     cuenta: CuentaAdmin
-    clave_temporal: str
+
+
+class NuevaClave(BaseModel):
+    """La contraseña que root fija para una cuenta existente."""
+
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ActualizarCuenta(BaseModel):
+    """Datos editables; el usuario de acceso y el historial se conservan."""
+
+    model_config = {"extra": "forbid"}
+    nombre: str | None = Field(default=None, min_length=1, max_length=100)
+    rol: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validar_cambios(self):
+        if not self.model_fields_set:
+            raise ValueError("Indique al menos un dato para editar.")
+        for campo in self.model_fields_set:
+            valor = getattr(self, campo)
+            if valor is None or not valor.strip():
+                raise ValueError("Los datos editados no pueden estar vacíos.")
+            setattr(self, campo, valor.strip())
+        return self

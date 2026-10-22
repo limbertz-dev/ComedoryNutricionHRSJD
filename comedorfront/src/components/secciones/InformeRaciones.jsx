@@ -165,7 +165,7 @@ function Coeficientes({ informe }) {
                 </th>
                 <td>{ENTERO.format(grupo.servidas)}</td>
                 <td className="informe__celda--coeficiente">
-                  × {COEFICIENTE.format(grupo.coeficiente)}
+                  {grupo.coeficienteVariable ? 'Variable' : `× ${COEFICIENTE.format(grupo.coeficiente)}`}
                 </td>
                 <td className="informe__col-total">{DECIMAL.format(grupo.equivalente)}</td>
               </tr>

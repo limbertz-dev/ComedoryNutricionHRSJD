@@ -3,10 +3,13 @@
 Escribe solo en `usuarios_sistema` e `intentos_login`, tablas propias de
 `bd_nutricion`. No lee ni escribe la base de turnos.
 
-El bloqueo, con los valores por defecto (app/core/seguridad.py):
+El bloqueo está APAGADO por omisión (AUTH_INTENTOS_MAXIMOS=0): una cocinera
+que se equivoca de clave en plena hora de comida no puede quedar 15 minutos
+afuera. Todo intento se sigue registrando en `intentos_login`. Si se activa
+(por ejemplo AUTH_INTENTOS_MAXIMOS=5 en .env), funciona así:
 
-  · 5 fallidos seguidos (sin un ingreso exitoso en el medio) que caen dentro
-    de 15 minutos bloquean la cuenta por 15 minutos contados desde el 5.º.
+  · N fallidos seguidos (sin un ingreso exitoso en el medio) que caen dentro
+    de AUTH_VENTANA_MINUTOS bloquean la cuenta AUTH_BLOQUEO_MINUTOS desde el último.
   · Mientras dura, no se verifica la clave: el intento se registra como
     `bloqueado` y NO cuenta como fallido. Si contara, alguien probando claves
     sin parar mantendría bloqueada para siempre la cuenta de la jefa.
@@ -71,6 +74,8 @@ def verificar_credenciales(
 def bloqueado_hasta(sesion: Session, username: str, momento: datetime) -> datetime | None:
     """Hasta cuándo está bloqueado `username` en `momento`, o None."""
     a = seguridad.ajustes()
+    if a.intentos_maximos <= 0:
+        return None
     # "Después del último éxito" se corta por id y no por hora: la columna
     # guarda segundos, y un fallido en el mismo segundo que el éxito quedaría
     # del lado equivocado.

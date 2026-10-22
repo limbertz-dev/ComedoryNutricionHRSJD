@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.core import seguridad
@@ -84,7 +85,22 @@ def test_token_de_cuenta_dada_de_baja_deja_de_servir(cliente, crear_usuario):
 # --- bloqueo ----------------------------------------------------------------
 
 
-def test_bloqueo_al_quinto_fallido(cliente, crear_usuario):
+def test_sin_bloqueo_por_omision(cliente, crear_usuario):
+    """Apagado por omisión: equivocarse muchas veces nunca deja afuera a nadie."""
+    crear_usuario("coci1", rol="cocinera")
+    for _ in range(12):
+        assert _login(cliente, "coci1", "mal").status_code == 401
+    assert _login(cliente, "coci1", "clave-segura-1").status_code == 200
+    assert _resultados("coci1") == ["fallido"] * 12 + ["exitoso"]
+
+
+@pytest.fixture
+def con_bloqueo(monkeypatch):
+    """Activa el bloqueo como lo haría AUTH_INTENTOS_MAXIMOS=5 en .env."""
+    monkeypatch.setattr(seguridad.ajustes(), "intentos_maximos", 5)
+
+
+def test_bloqueo_al_quinto_fallido(cliente, crear_usuario, con_bloqueo):
     crear_usuario("jefa1")
 
     for _ in range(4):
@@ -102,7 +118,7 @@ def test_bloqueo_al_quinto_fallido(cliente, crear_usuario):
     assert _resultados("jefa1") == ["fallido"] * 5 + ["bloqueado"]
 
 
-def test_el_bloqueo_vence_a_los_15_minutos(cliente, crear_usuario, monkeypatch):
+def test_el_bloqueo_vence_a_los_15_minutos(cliente, crear_usuario, monkeypatch, con_bloqueo):
     crear_usuario("jefa1")
     base = autenticacion.ahora()
     monkeypatch.setattr(autenticacion, "ahora", lambda: base)
@@ -117,7 +133,7 @@ def test_el_bloqueo_vence_a_los_15_minutos(cliente, crear_usuario, monkeypatch):
     assert _login(cliente, "jefa1", "clave-segura-1").status_code == 200
 
 
-def test_fallidos_fuera_de_la_ventana_no_bloquean(cliente, crear_usuario, monkeypatch):
+def test_fallidos_fuera_de_la_ventana_no_bloquean(cliente, crear_usuario, monkeypatch, con_bloqueo):
     crear_usuario("jefa1")
     base = autenticacion.ahora()
     for i in range(5):  # uno cada 4 minutos: 16 minutos entre el 1.º y el 5.º
@@ -125,7 +141,7 @@ def test_fallidos_fuera_de_la_ventana_no_bloquean(cliente, crear_usuario, monkey
         assert _login(cliente, "jefa1", "mal").status_code == 401
 
 
-def test_un_ingreso_exitoso_reinicia_la_cuenta(cliente, crear_usuario):
+def test_un_ingreso_exitoso_reinicia_la_cuenta(cliente, crear_usuario, con_bloqueo):
     crear_usuario("jefa1")
     for _ in range(4):
         _login(cliente, "jefa1", "mal")
@@ -134,13 +150,13 @@ def test_un_ingreso_exitoso_reinicia_la_cuenta(cliente, crear_usuario):
         assert _login(cliente, "jefa1", "mal").status_code == 401
 
 
-def test_username_inexistente_tambien_se_bloquea(cliente):
+def test_username_inexistente_tambien_se_bloquea(cliente, con_bloqueo):
     for _ in range(4):
         assert _login(cliente, "fantasma", "mal").status_code == 401
     assert _login(cliente, "fantasma", "mal").status_code == 423
 
 
-def test_bloqueo_es_por_cuenta(cliente, crear_usuario):
+def test_bloqueo_es_por_cuenta(cliente, crear_usuario, con_bloqueo):
     crear_usuario("jefa1")
     crear_usuario("coci1", rol="cocinera")
     for _ in range(5):

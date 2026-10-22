@@ -76,6 +76,23 @@ export function IconoCalendario(props) {
   );
 }
 
+export function IconoEditar(props) {
+  return (
+    <Svg {...props}>
+      <path d="m15 4 5 5M4 20l5-1L20 8a2.1 2.1 0 0 0-5-3L4 16v4Z" />
+    </Svg>
+  );
+}
+
+export function IconoPapelera(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      <path d="m5 6 1 14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-14M10 10v7M14 10v7" />
+    </Svg>
+  );
+}
+
 export function IconoBuscar(props) {
   return (
     <Svg {...props}>

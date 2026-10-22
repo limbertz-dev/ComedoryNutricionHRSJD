@@ -8,9 +8,11 @@ import {
   buscarCandidatos,
   crearCuenta,
   desactivarCuenta,
+  editarCuenta,
+  eliminarCuenta,
   obtenerCuentas,
   reactivarCuenta,
-  reiniciarClaveCuenta,
+  cambiarClaveCuenta,
 } from '../src/api.js';
 import { buscarSeccion, seccionesDeRol } from '../src/navegacion.js';
 import { puedeVerSeccion, seccionesPermitidas } from '../src/permisos.js';
@@ -19,9 +21,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Panel } from '../src/App.jsx';
 import { ProveedorSesion } from '../src/hooks/useSesion.js';
 import Administracion, {
-  copiarTexto,
   crearBuscadorCandidatos,
-  DialogoClave,
+  DialogoCambiarClave,
+  DialogoEditarCuenta,
   DialogoConfirmacion,
   DialogoNuevaCuenta,
   esCuentaPropia,
@@ -30,9 +32,12 @@ import Administracion, {
   filtrarCuentas,
   finalizarCreacionCuenta,
   formatoUltimoIngreso,
+  motivoClaveInvalida,
   normalizarNombreUsuario,
   ordenarCuentas,
 } from '../src/components/secciones/Administracion.jsx';
+
+const CLAVE = 'clave-elegida-1';
 
 const fetchOriginal = globalThis.fetch;
 afterEach(() => {
@@ -147,33 +152,34 @@ test('buscarCandidatos exige 2+ caracteres, pagina con limite y valida la forma'
 // -------------------------------------------------------------
 // 4. crearCuenta
 // -------------------------------------------------------------
-test('crearCuenta desde el padrón envía {rol, usuario_turnos_id} y devuelve la clave', async () => {
+test('crearCuenta desde el padrón envía {rol, usuario_turnos_id, password} y devuelve la cuenta', async () => {
   let cuerpo;
   globalThis.fetch = async (url, opciones) => {
     assert.equal(new URL(url).pathname, '/admin/cuentas');
     assert.equal(opciones.method, 'POST');
     cuerpo = JSON.parse(opciones.body);
-    return json({ cuenta: cuentaApi({ id: 9, username: 'ana.ayuda' }), clave_temporal: 'Tmp-9x2k' }, 201);
+    return json({ cuenta: cuentaApi({ id: 9, username: 'ana.ayuda' }) }, 201);
   };
-  const resultado = await crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44 });
-  assert.deepEqual(cuerpo, { rol: 'cocinera', usuario_turnos_id: 44 });
+  const resultado = await crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44, password: CLAVE });
+  assert.deepEqual(cuerpo, { rol: 'cocinera', usuario_turnos_id: 44, password: CLAVE });
   assert.equal(resultado.cuenta.id, 9);
-  assert.equal(resultado.claveTemporal, 'Tmp-9x2k');
+  assert.deepEqual(Object.keys(resultado), ['cuenta']);
 });
 
-test('crearCuenta sin vínculo envía {rol, username, nombre} normalizados', async () => {
+test('crearCuenta sin vínculo envía {rol, username, nombre, password} normalizados', async () => {
   let cuerpo;
   globalThis.fetch = async (url, opciones) => {
     cuerpo = JSON.parse(opciones.body);
-    return json({ cuenta: cuentaApi({ id: 10, username: 'nueva.persona', vinculada: false, usuario_turnos_id: null }), clave_temporal: 'Tmp-ab12' }, 201);
+    return json({ cuenta: cuentaApi({ id: 10, username: 'nueva.persona', vinculada: false, usuario_turnos_id: null }) }, 201);
   };
-  const resultado = await crearCuenta({ rol: 'jefa', username: '  Nueva.Persona ', nombre: '  Nueva Persona ' });
-  assert.deepEqual(cuerpo, { rol: 'jefa', username: 'nueva.persona', nombre: 'Nueva Persona' });
-  assert.equal(resultado.claveTemporal, 'Tmp-ab12');
+  const resultado = await crearCuenta({ rol: 'jefa', username: '  Nueva.Persona ', nombre: '  Nueva Persona ', password: CLAVE });
+  assert.deepEqual(cuerpo, { rol: 'jefa', username: 'nueva.persona', nombre: 'Nueva Persona', password: CLAVE });
+  assert.equal(resultado.cuenta.username, 'nueva.persona');
 
-  await assert.rejects(crearCuenta({ rol: 'jefa', username: '  ', nombre: 'X' }), /nombre de usuario/);
-  await assert.rejects(crearCuenta({ rol: 'jefa', username: 'x', nombre: '  ' }), /nombre de la persona/);
-  await assert.rejects(crearCuenta({ rol: 'sistemas', username: 'x', nombre: 'X' }), /Cocinera o Jefa/);
+  await assert.rejects(crearCuenta({ rol: 'jefa', username: '  ', nombre: 'X', password: CLAVE }), /nombre de usuario/);
+  await assert.rejects(crearCuenta({ rol: 'jefa', username: 'x', nombre: '  ', password: CLAVE }), /nombre de la persona/);
+  await assert.rejects(crearCuenta({ rol: 'sistemas', username: 'x', nombre: 'X', password: CLAVE }), /Cocinera o Jefa/);
+  await assert.rejects(crearCuenta({ rol: 'jefa', username: 'x', nombre: 'X' }), /Escriba la contraseña/);
 });
 
 test('crearCuenta traduce cada motivo a español claro', async () => {
@@ -186,14 +192,17 @@ test('crearCuenta traduce cada motivo a español claro', async () => {
   ];
   for (const [motivo, esperado] of casos) {
     globalThis.fetch = async () => json({ detail: 'x', motivo }, motivo === 'persona_inexistente' ? 404 : 409);
-    await assert.rejects(crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44 }), esperado, motivo);
+    await assert.rejects(crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44, password: CLAVE }), esperado, motivo);
   }
-  globalThis.fetch = async () => json({ cuenta: cuentaApi(), clave_temporal: '' }, 201);
-  await assert.rejects(crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44 }), /clave temporal inválida/);
+  // Una contraseña rechazada muestra la regla exacta que da el servidor.
+  globalThis.fetch = async () => json({ detail: 'La contraseña debe tener al menos 8 caracteres.', motivo: 'password_rechazada' }, 422);
+  await assert.rejects(crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44, password: 'x' }), /al menos 8 caracteres/);
+  globalThis.fetch = async () => json({ cuenta: cuentaApi({ id: null }) }, 201);
+  await assert.rejects(crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44, password: CLAVE }), /cuenta inválida/);
 });
 
 // -------------------------------------------------------------
-// 5. desactivar / reactivar / reiniciar
+// 5. desactivar / reactivar / cambiar clave
 // -------------------------------------------------------------
 test('desactivarCuenta y reactivarCuenta publican en su ruta y traducen motivos', async () => {
   const rutas = [];
@@ -222,18 +231,30 @@ test('desactivarCuenta y reactivarCuenta publican en su ruta y traducen motivos'
   await assert.rejects(desactivarCuenta(0), /Cuenta inválida/);
 });
 
-test('reiniciarClaveCuenta devuelve cuenta y clave temporal', async () => {
+test('cambiarClaveCuenta envía {password} a /clave y devuelve la cuenta', async () => {
+  let cuerpo;
   globalThis.fetch = async (url, opciones) => {
-    assert.equal(new URL(url).pathname, '/admin/cuentas/7/reiniciar-clave');
+    assert.equal(new URL(url).pathname, '/admin/cuentas/7/clave');
     assert.equal(opciones.method, 'POST');
-    return json({ cuenta: cuentaApi({ debe_cambiar: true }), clave_temporal: 'Tmp-r7q1' });
+    cuerpo = JSON.parse(opciones.body);
+    return json({ cuenta: cuentaApi() });
   };
-  const resultado = await reiniciarClaveCuenta(7);
-  assert.equal(resultado.cuenta.debeCambiar, true);
-  assert.equal(resultado.claveTemporal, 'Tmp-r7q1');
+  const resultado = await cambiarClaveCuenta(7, 'otra-clave-2');
+  assert.deepEqual(cuerpo, { password: 'otra-clave-2' });
+  assert.equal(resultado.cuenta.debeCambiar, false);
 
-  globalThis.fetch = async () => json({ cuenta: cuentaApi() });
-  await assert.rejects(reiniciarClaveCuenta(7), /clave temporal inválida/);
+  await assert.rejects(cambiarClaveCuenta(7, ''), /Escriba la contraseña/);
+  await assert.rejects(cambiarClaveCuenta(0, CLAVE), /Cuenta inválida/);
+  globalThis.fetch = async () => json({ detail: 'La contraseña no puede ser el nombre de usuario.', motivo: 'password_rechazada' }, 422);
+  await assert.rejects(cambiarClaveCuenta(7, 'maria.cocina'), /nombre de usuario/);
+});
+
+test('motivoClaveInvalida anticipa las reglas del servidor', () => {
+  assert.equal(motivoClaveInvalida('', '', 'x'), 'Escriba la contraseña.');
+  assert.match(motivoClaveInvalida('corta', 'corta', 'x'), /al menos 8/);
+  assert.match(motivoClaveInvalida('Cocinera4', 'Cocinera4', ' cocinera4 '), /nombre de usuario/);
+  assert.match(motivoClaveInvalida(CLAVE, 'otra-cosa', 'x'), /no coinciden/);
+  assert.equal(motivoClaveInvalida(CLAVE, CLAVE, 'cocinera4'), '');
 });
 
 // -------------------------------------------------------------
@@ -310,7 +331,7 @@ test('carga, vacío y error son estados distintos', () => {
   assert.match(htmlError, /Reintentar cuentas/);
 });
 
-test('la tabla muestra Usuario, Nombre, Rol, Vínculo, Estado, Último ingreso y Acciones', () => {
+test('la tabla muestra nombre y conserva Desactivar, Reactivar y Eliminar separados', () => {
   const html = renderToStaticMarkup(
     h(Administracion, {
       cargandoInicial: false,
@@ -320,18 +341,19 @@ test('la tabla muestra Usuario, Nombre, Rol, Vínculo, Estado, Último ingreso y
       ],
     }),
   );
-  for (const columna of ['Usuario', 'Nombre', 'Rol', 'Vínculo', 'Estado', 'Último ingreso', 'Acciones']) {
-    assert.match(html, new RegExp(columna));
-  }
+  assert.deepEqual([...html.matchAll(/<th scope="col">([^<]+)<\/th>/g)].map(m => m[1]),
+    ['Usuario', 'Nombre', 'Rol', 'Estado', 'Último ingreso', 'Acciones']);
   assert.match(html, /maria\.cocina/);
-  assert.match(html, />Padrón</);
-  assert.match(html, />Sin vínculo</);
+  assert.doesNotMatch(html, />Vínculo<|>Padrón<|>Sin vínculo</);
+  assert.match(html, /María Cocina/);
   assert.match(html, />Activa</);
   assert.match(html, />Inactiva</);
   assert.match(html, /Nunca/);
-  assert.match(html, /Reiniciar clave/);
+  assert.match(html, /Cambiar clave/);
+  assert.doesNotMatch(html, /Reiniciar clave/);
   assert.match(html, /Desactivar/);
   assert.match(html, /Reactivar/);
+  assert.equal(html.match(/>Eliminar</g)?.length ?? 0, 2);
   assert.match(html, /Nueva cuenta/);
 });
 
@@ -368,67 +390,40 @@ test('en la fila de la propia cuenta no aparece Desactivar', () => {
   );
   assert.match(html, /Su cuenta/);
   assert.equal(html.match(/>Desactivar</g)?.length ?? 0, 1);
-  assert.equal(html.match(/>Reiniciar clave</g)?.length ?? 0, 2);
+  assert.equal(html.match(/>Eliminar</g)?.length ?? 0, 1);
+  assert.equal(html.match(/>Cambiar clave</g)?.length ?? 0, 2);
 });
 
 // -------------------------------------------------------------
 // 9. Nueva cuenta: pestañas, candidatos y vista previa
 // -------------------------------------------------------------
-const candidato = (cambios = {}) => ({
-  usuarioTurnosId: 31,
-  login: 'ana.ayuda',
-  nombre: 'Ana Ayuda',
-  categoria: 'Ayudante',
-  cuentaId: null,
-  tieneCuenta: false,
-  ...cambios,
-});
-
 const dialogoVacio = (props = {}) => h(DialogoNuevaCuenta, { onCrear() {}, onCerrar() {}, ...props });
 
-test('el diálogo trae las dos pestañas y el aviso de sin vínculo', () => {
-  const htmlPadron = renderToStaticMarkup(dialogoVacio());
-  assert.match(htmlPadron, /Desde el padrón/);
-  assert.match(htmlPadron, /Sin vínculo/);
-  assert.match(htmlPadron, /Buscar en el padrón/);
-  assert.match(htmlPadron, />Crear</);
-
-  const htmlLibre = renderToStaticMarkup(dialogoVacio({ pestanaInicial: 'libre' }));
-  assert.match(htmlLibre, /aún no están en el padrón/);
-  assert.match(htmlLibre, />Crear</);
+test('nueva cuenta abre directamente los datos manuales, sin pestanas ni candidatos', () => {
+  const html = renderToStaticMarkup(dialogoVacio());
+  assert.doesNotMatch(html, /role="tab|nueva-busqueda-padron|nueva-usuario-padron|Candidatos/);
+  assert.match(html, /id="nueva-usuario-libre"/);
+  assert.match(html, /id="nueva-nombre-libre"/);
+  assert.match(html, /id="nueva-rol-libre"/);
+  assert.match(html, /<form/);
+  assert.match(html, /type="submit"/);
+  assert.equal(html.match(/type="password"/g)?.length ?? 0, 2);
+  assert.match(html, /sin tener que cambiarla/);
 });
 
-test('los candidatos con cuenta aparecen desactivados con Ya tiene cuenta', () => {
-  const html = renderToStaticMarkup(dialogoVacio({
-    busquedaPadronInicial: 'ana',
-    candidatosIniciales: [
-      candidato(),
-      candidato({ usuarioTurnosId: 32, login: 'usada.cuenta', nombre: 'Usada Cuenta', cuentaId: 7, tieneCuenta: true }),
-    ],
-  }));
-  assert.match(html, /Ana Ayuda/);
-  assert.match(html, /ana\.ayuda/);
-  assert.match(html, /Ya tiene cuenta/);
-  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]*?Elegir/);
-});
-
-test('al elegir candidato el usuario queda en solo lectura; sin vínculo anticipa el usuario', () => {
-  const htmlElegido = renderToStaticMarkup(dialogoVacio({ candidatoInicial: candidato() }));
-  assert.match(htmlElegido, /value="ana\.ayuda"/);
-  assert.match(htmlElegido, /readOnly/);
-  assert.match(htmlElegido, /Cambiar/);
-
-  const htmlLibre = renderToStaticMarkup(dialogoVacio({
-    pestanaInicial: 'libre',
-    usuarioLibreInicial: '  Maria.Cocina ',
-  }));
-  assert.match(htmlLibre, /Va a quedar: maria\.cocina/);
+test('el alta manual anticipa el usuario normalizado y conserva los dos roles permitidos', () => {
+  const html = renderToStaticMarkup(dialogoVacio({ usuarioLibreInicial: '  Maria.Cocina ' }));
+  assert.match(html, /Va a quedar: maria\.cocina/);
+  assert.match(html, /value="cocinera"/);
+  assert.match(html, /value="jefa"/);
+  assert.doesNotMatch(html, /value="sistemas"/);
+  assert.doesNotMatch(html, /readOnly/);
 });
 
 // -------------------------------------------------------------
-// 10. Confirmación y clave temporal
+// 10. Confirmación y cambio de clave
 // -------------------------------------------------------------
-test('Desactivar, Reactivar y Reiniciar piden confirmación', () => {
+test('Desactivar y Reactivar piden confirmación', () => {
   const htmlSin = renderToStaticMarkup(
     h(Administracion, { cargandoInicial: false, cuentasIniciales: [cuenta()] }),
   );
@@ -445,53 +440,99 @@ test('Desactivar, Reactivar y Reiniciar piden confirmación', () => {
   assert.match(htmlDesactivar, /¿Desactivar la cuenta de maria\.cocina\?/);
   assert.match(htmlDesactivar, />Cancelar</);
 
-  const htmlReiniciar = renderToStaticMarkup(
+  const htmlReactivar = renderToStaticMarkup(
     h(DialogoConfirmacion, {
-      confirmacion: { tipo: 'reiniciar', cuenta: cuenta() },
+      confirmacion: { tipo: 'reactivar', cuenta: cuenta() },
       onConfirmar() {},
       onCancelar() {},
     }),
   );
-  assert.match(htmlReiniciar, /Reiniciar clave/);
-  assert.match(htmlReiniciar, /se muestra una sola vez/);
+  assert.match(htmlReactivar, /Reactivar cuenta/);
 });
 
-test('el diálogo muestra la clave con Copiar y el aviso; al cerrarlo desaparece', () => {
-  const htmlClave = renderToStaticMarkup(
+test('Eliminar advierte que oculta y desactiva conservando los registros', () => {
+  const html = renderToStaticMarkup(h(DialogoConfirmacion, {
+    confirmacion: { tipo: 'eliminar', cuenta: cuenta() },
+    onConfirmar() {}, onCancelar() {},
+  }));
+  assert.match(html, /Eliminar cuenta/);
+  assert.match(html, /Quedará desactivada/);
+  assert.match(html, /Sus datos y registros se conservarán/);
+  assert.match(html, />Cancelar</);
+});
+
+test('Editar abre los datos actuales y protege usuario y rol Sistemas', () => {
+  const html = renderToStaticMarkup(h(DialogoEditarCuenta, {
+    cuenta: cuenta({ vinculada: false }), onGuardada() {}, onCerrar() {},
+  }));
+  assert.match(html, /Editar cuenta/);
+  assert.match(html, /value="María Cocina"/);
+  assert.match(html, /id="editar-usuario"[^>]*readOnly/);
+  assert.match(html, /<option value="cocinera" selected=""/);
+  assert.match(html, /type="submit"[^>]*disabled/);
+  assert.doesNotMatch(html, /type="password"/);
+  const sistemas = renderToStaticMarkup(h(DialogoEditarCuenta, {
+    cuenta: cuenta({ rol: 'sistemas', vinculada: false }), onGuardada() {}, onCerrar() {},
+  }));
+  assert.match(sistemas, /id="editar-rol"[^>]*disabled/);
+});
+
+test('editarCuenta envía PATCH de nombre y rol sin cambiar usuario ni contraseña', async () => {
+  globalThis.fetch = async (url, opciones) => {
+    assert.equal(new URL(url).pathname, '/admin/cuentas/7');
+    assert.equal(opciones.method, 'PATCH');
+    assert.deepEqual(JSON.parse(opciones.body), { nombre: 'Sandra Lima', rol: 'jefa' });
+    return json(cuentaApi({ nombre: 'Sandra Lima', rol: 'jefa' }));
+  };
+  const respuesta = await editarCuenta(7, { nombre: ' Sandra Lima ', rol: 'jefa', username: 'no-se-envia' });
+  assert.equal(respuesta.nombre, 'Sandra Lima');
+  assert.equal(respuesta.rol, 'jefa');
+  for (const cambios of [{}, { nombre: '   ' }, { rol: 'administrador' }]) {
+    await assert.rejects(editarCuenta(7, cambios));
+  }
+  globalThis.fetch = async () => json({ motivo: 'rol_sistemas_protegido' }, 409);
+  await assert.rejects(editarCuenta(7, { rol: 'jefa' }), /Sistemas/);
+});
+
+test('eliminarCuenta usa DELETE sin cuerpo, acepta 204 y propaga errores', async () => {
+  globalThis.fetch = async (url, opciones) => {
+    assert.equal(new URL(url).pathname, '/admin/cuentas/7');
+    assert.equal(opciones.method, 'DELETE');
+    assert.equal(opciones.body, undefined);
+    return new Response(null, { status: 204 });
+  };
+  assert.equal(await eliminarCuenta(7), undefined);
+  await assert.rejects(eliminarCuenta(0), /Cuenta inválida/);
+  globalThis.fetch = async () => json({ motivo: 'ultima_cuenta_sistemas' }, 409);
+  await assert.rejects(eliminarCuenta(7), /última cuenta de Sistemas/);
+  globalThis.fetch = async () => json({ detail: 'fallo' }, 500);
+  await assert.rejects(eliminarCuenta(7), /No se pudo eliminar/);
+});
+
+test('Cambiar clave abre un diálogo con dos campos de contraseña y aviso de sesiones', () => {
+  const html = renderToStaticMarkup(
     h(Administracion, {
       cargandoInicial: false,
       cuentasIniciales: [cuenta()],
-      claveInicial: { usuario: 'maria.cocina', valor: 'Tmp-unica-1' },
+      cambioClaveInicial: cuenta(),
     }),
   );
-  assert.match(htmlClave, /Tmp-unica-1/);
-  assert.match(htmlClave, />Copiar</);
-  assert.match(htmlClave, /No se volverá a mostrar; entréguela en mano\. Se cambia en el primer ingreso/);
-
-  // Estado tras cerrar: la clave se borró y el diálogo ya no se dibuja.
-  const htmlCerrado = renderToStaticMarkup(
-    h(Administracion, { cargandoInicial: false, cuentasIniciales: [cuenta()], claveInicial: null }),
-  );
-  assert.doesNotMatch(htmlCerrado, /Tmp-unica-1/);
-  assert.doesNotMatch(htmlCerrado, /Clave temporal de/);
+  assert.match(html, /Cambiar clave de maria\.cocina/);
+  assert.equal(html.match(/type="password"/g)?.length ?? 0, 2);
+  assert.match(html, /se cerrará/);
+  assert.match(html, />Guardar contraseña</);
+  assert.doesNotMatch(html, /Clave temporal de/);
 });
 
-test('copiarTexto resuelve false sin portapapeles y true con portapapeles', async () => {
-  assert.equal(await copiarTexto('x'), false);
-  const escritos = [];
-  const descriptorOriginal = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-  Object.defineProperty(globalThis, 'navigator', {
-    value: { clipboard: { writeText: async (texto) => { escritos.push(texto); } } },
-    configurable: true,
-    writable: true,
-  });
-  try {
-    assert.equal(await copiarTexto('Tmp-1'), true);
-    assert.deepEqual(escritos, ['Tmp-1']);
-  } finally {
-    if (descriptorOriginal) Object.defineProperty(globalThis, 'navigator', descriptorOriginal);
-    else delete globalThis.navigator;
-  }
+test('el diálogo de cambio no envía nada hasta pulsar Guardar', async () => {
+  // Abrirlo o escribir no llama al servidor: solo «Guardar contraseña» envía.
+  const enviados = [];
+  const cambiar = async (id, clave) => { enviados.push([id, clave]); return { cuenta: cuenta() }; };
+  const html = renderToStaticMarkup(h(DialogoCambiarClave, {
+    cuenta: cuenta(), onCambiada() {}, onCerrar() {}, cambiar, claveInicial: CLAVE,
+  }));
+  assert.match(html, new RegExp(`value="${CLAVE}"`));
+  assert.deepEqual(enviados, []);
 });
 
 // -------------------------------------------------------------
@@ -529,19 +570,17 @@ test('ejecutarAccionCuenta avisa y relee; el error trae el mensaje del motivo', 
   assert.match(avisos[1].detalle, /propia cuenta/);
 });
 
-test('tras crear, la clave va al diálogo y la tabla se relee', async () => {
+test('tras crear, avisa que ya puede ingresar y la tabla se relee', async () => {
   const avisos = [];
-  const claves = [];
   let releidas = 0;
   await finalizarCreacionCuenta({
-    resultado: { cuenta: cuenta({ username: 'nueva.cuenta' }), claveTemporal: 'Tmp-nueva' },
+    resultado: { cuenta: cuenta({ username: 'nueva.cuenta' }) },
     setAviso: (aviso) => avisos.push(aviso),
-    setClave: (clave) => claves.push(clave),
     recargar: async () => { releidas += 1; },
   });
   assert.equal(releidas, 1);
   assert.match(avisos[0].titulo, /nueva\.cuenta/);
-  assert.deepEqual(claves[0], { usuario: 'nueva.cuenta', valor: 'Tmp-nueva' });
+  assert.match(avisos[0].detalle, /contraseña que eligió/);
 });
 
 // -------------------------------------------------------------
@@ -592,8 +631,8 @@ test('al seguir escribiendo se aborta la petición en vuelo y lo viejo no pisa',
 // -------------------------------------------------------------
 // 13. La clave nunca va a storage ni a la consola
 // -------------------------------------------------------------
-test('ninguna clave temporal va a storage ni a la consola', async () => {
-  const CLAVE = 'Tmp-secreta-xyz';
+test('la contraseña nunca va a storage ni a la consola', async () => {
+  const SECRETA = 'Secreta-elegida-xyz';
   const guardado = [];
   const memoria = () => ({
     getItem: () => null,
@@ -611,25 +650,13 @@ test('ninguna clave temporal va a storage ni a la consola', async () => {
     console[metodo] = (...argumentos) => { consola.push(argumentos.map(String).join(' ')); };
   });
   try {
-    renderToStaticMarkup(
-      h(Administracion, {
-        cargandoInicial: false,
-        cuentasIniciales: [cuenta()],
-        claveInicial: { usuario: 'maria.cocina', valor: CLAVE },
-      }),
-    );
-    renderToStaticMarkup(h(DialogoClave, { usuario: 'maria.cocina', valor: CLAVE, onCerrar() {} }));
-    renderToStaticMarkup(dialogoVacio({ pestanaInicial: 'libre', usuarioLibreInicial: 'x' }));
-    globalThis.fetch = async (url, opciones) => {
-      if (new URL(url).pathname === '/admin/cuentas') {
-        return json({ cuenta: cuentaApi(), clave_temporal: CLAVE }, 201);
-      }
-      return json({ cuenta: cuentaApi(), clave_temporal: CLAVE });
-    };
-    await crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44 });
-    await reiniciarClaveCuenta(7);
-    assert.ok(guardado.every((valor) => !valor.includes(CLAVE)), 'la clave llegó a storage');
-    assert.ok(consola.every((linea) => !linea.includes(CLAVE)), 'la clave llegó a la consola');
+    renderToStaticMarkup(dialogoVacio({ usuarioLibreInicial: 'x', claveInicial: SECRETA }));
+    renderToStaticMarkup(h(DialogoCambiarClave, { cuenta: cuenta(), onCambiada() {}, onCerrar() {}, claveInicial: SECRETA }));
+    globalThis.fetch = async () => json({ cuenta: cuentaApi() }, 201);
+    await crearCuenta({ rol: 'cocinera', usuarioTurnosId: 44, password: SECRETA });
+    await cambiarClaveCuenta(7, SECRETA);
+    assert.ok(guardado.every((valor) => !valor.includes(SECRETA)), 'la contraseña llegó a storage');
+    assert.ok(consola.every((linea) => !linea.includes(SECRETA)), 'la contraseña llegó a la consola');
   } finally {
     metodos.forEach((metodo, indice) => { console[metodo] = originales[indice]; });
     if (localOriginal === undefined) delete globalThis.localStorage;

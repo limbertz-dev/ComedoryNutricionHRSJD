@@ -176,10 +176,14 @@ Reglas:
 
 - **Claves:** solo hash bcrypt. Mínimo 8 caracteres, máximo 72 bytes, distinta
   del usuario y de la anterior.
-- **Bloqueo:** 5 fallidos seguidos dentro de 15 minutos bloquean la cuenta 15
-  minutos desde el 5.º (423). Mientras dura no se verifica la clave, y esos
-  intentos no alargan el bloqueo. Un usuario inexistente se bloquea igual,
-  para no revelar qué cuentas existen. Todo intento queda en `intentos_login`.
+- **Bloqueo:** apagado por omisión (`AUTH_INTENTOS_MAXIMOS=0`): equivocarse de
+  clave nunca deja a la cocina fuera en plena hora de comida. Todo intento
+  queda igual en `intentos_login`. Con `AUTH_INTENTOS_MAXIMOS=5` en `.env` se
+  activa: 5 fallidos dentro de 15 minutos bloquean la cuenta 15 minutos (423),
+  y un usuario inexistente se bloquea igual, para no revelar qué cuentas existen.
+- **Cuentas desde Administración:** root escribe la contraseña definitiva al
+  crear la cuenta o al cambiarla; la cuenta entra con ella sin cambio
+  obligatorio y la contraseña nunca vuelve en una respuesta.
 - **Primer ingreso:** una cuenta con clave temporal (`debe_cambiar = 1`)
   recibe 428 con un token `temporal` que **solo** sirve para
   `POST /auth/cambio-password`. En cualquier otra ruta da 403.
@@ -197,7 +201,7 @@ Ajustes en `.env`, prefijo `AUTH_` (`app/core/seguridad.py`, no `config.py`):
 ```
 AUTH_JWT_SECRETO=<32+ caracteres al azar>   # OBLIGATORIO fuera de desarrollo
 # Opcionales: AUTH_ACCESS_MINUTOS=15  AUTH_REFRESH_HORAS=12  AUTH_TEMPORAL_MINUTOS=10
-#             AUTH_INTENTOS_MAXIMOS=5  AUTH_VENTANA_MINUTOS=15  AUTH_BLOQUEO_MINUTOS=15
+#             AUTH_INTENTOS_MAXIMOS=0 (sin bloqueo)  AUTH_VENTANA_MINUTOS=15  AUTH_BLOQUEO_MINUTOS=15
 #             AUTH_BCRYPT_RONDAS=12
 ```
 
@@ -251,10 +255,10 @@ Todos exigen `Authorization: Bearer <access>` salvo `/salud`, `/auth/login` y
 | GET | `/reportes/informe?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` | Formulario de Estadística para un rango de fechas arbitrario (hoy, una semana, una quincena), con coeficientes. 422 si `desde > hasta` |
 | GET | `/admin/cuentas` | Todas las cuentas, con vínculo, nombre y último ingreso |
 | GET | `/admin/candidatos?busqueda=` | Personas del padrón para vincular (búsqueda de 2+ letras) |
-| POST | `/admin/cuentas` | Crea una cuenta vinculada o sin vínculo. 201 `{cuenta, clave_temporal}` |
+| POST | `/admin/cuentas` | Crea una cuenta vinculada o sin vínculo con la contraseña que elige root (`password`). 201 `{cuenta}` |
 | POST | `/admin/cuentas/{id}/desactivar` | Da de baja la cuenta y cierra sus sesiones |
 | POST | `/admin/cuentas/{id}/reactivar` | Reactiva la cuenta |
-| POST | `/admin/cuentas/{id}/reiniciar-clave` | 200 `{cuenta, clave_temporal}`; el próximo login da 428 |
+| POST | `/admin/cuentas/{id}/clave` | `{password}`: root fija la contraseña nueva y se cierran sus sesiones. 200 `{cuenta}` |
 | GET | `/cuentas` | Cuentas en solo lectura (jefa y sistemas; la jefa no ve cuentas sistemas) |
 | GET | `/reglas/derecho` | Versión vigente de hoy + todas, nueva a vieja |
 | GET | `/reglas/derecho/novedades` | Tipos de novedad reales para la UI |
@@ -268,7 +272,7 @@ Todos exigen `Authorization: Bearer <access>` salvo `/salud`, `/auth/login` y
 Las seis rutas `/admin/*` son solo para `sistemas`: jefa y cocinera reciben
 403. Los errores traen `motivo`: `username_en_uso`, `persona_ya_tiene_cuenta`,
 `persona_inexistente`, `cuenta_inexistente`, `login_invalido`,
-`rol_no_permitido`, `no_puede_desactivarse_a_si_misma`,
+`rol_no_permitido`, `password_rechazada`, `no_puede_desactivarse_a_si_misma`,
 `ultima_cuenta_sistemas`.
 
 Las rutas `/reglas/*` son solo para `sistemas`. Los errores traen `motivo`:

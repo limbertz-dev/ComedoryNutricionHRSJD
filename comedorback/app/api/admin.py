@@ -2,25 +2,30 @@
 
 CONTRATO con el front (no cambiar sin avisar):
 
-    GET  /admin/cuentas                todas, con vínculo, nombre y último ingreso
+    GET  /admin/cuentas                no eliminadas, con nombre y último ingreso
     GET  /admin/candidatos?busqueda=   personas del padrón (búsqueda de 2+ letras)
-    POST /admin/cuentas                201 {cuenta, clave_temporal}
+    POST /admin/cuentas                {..., password} → 201 {cuenta}
+    PATCH /admin/cuentas/{id}          {nombre?, rol?} → 200 cuenta
     POST /admin/cuentas/{id}/desactivar      200 cuenta (cierra sus sesiones)
     POST /admin/cuentas/{id}/reactivar       200 cuenta
-    POST /admin/cuentas/{id}/reiniciar-clave 200 {cuenta, clave_temporal}
+    DELETE /admin/cuentas/{id}              204 baja lógica, sin borrar historial
+    POST /admin/cuentas/{id}/clave     {password} → 200 {cuenta} (cierra sus sesiones)
+
+Root elige la contraseña: la cuenta entra con ella sin cambio obligatorio.
+Las contraseñas nunca vuelven en una respuesta.
 
 Los errores traen además `motivo`: username_en_uso, persona_ya_tiene_cuenta,
-persona_inexistente, login_invalido, rol_no_permitido, cuenta_inexistente,
-no_puede_desactivarse_a_si_misma, ultima_cuenta_sistemas.
+persona_inexistente, login_invalido, rol_no_permitido, password_rechazada,
+cuenta_inexistente, no_puede_desactivarse_a_si_misma, ultima_cuenta_sistemas.
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, status
+from fastapi import APIRouter, Path, Query, Response, status
 
 from app.core.autorizacion import ErrorAuth, UsuarioActual
 from app.core.db import SesionDep
-from app.esquemas.admin import Candidato, CrearCuenta, CuentaAdmin, CuentaConClave
+from app.esquemas.admin import ActualizarCuenta, Candidato, CrearCuenta, CuentaAdmin, CuentaRespuesta, NuevaClave
 from app.esquemas.auth import ErrorConMotivo
 from app.logica import cuentas
 from app.logica.cuentas import ErrorCuenta
@@ -66,33 +71,29 @@ def listar_candidatos(
 
 @router.post(
     "/cuentas",
-    response_model=CuentaConClave,
+    response_model=CuentaRespuesta,
     status_code=status.HTTP_201_CREATED,
     summary="Crear una cuenta",
     responses=CON_MOTIVO,
 )
 def crear_cuenta(
     sesion: SesionDep, datos: CrearCuenta, usuario: UsuarioActual
-) -> CuentaConClave:
-    """Vinculada {rol, usuario_turnos_id} o sin vínculo {rol, username, nombre}.
-
-    La clave temporal se devuelve una sola vez: no se guarda en ningún log.
-    """
+) -> CuentaRespuesta:
+    """Vinculada {rol, usuario_turnos_id, password} o sin vínculo
+    {rol, username, nombre, password}. Queda lista para ingresar."""
     try:
-        cuenta, clave = cuentas.crear_cuenta(
+        cuenta = cuentas.crear_cuenta(
             sesion,
             datos.rol,
             datos.usuario_turnos_id,
             datos.username,
             datos.nombre,
+            datos.password,
             usuario,
         )
     except ErrorCuenta as error:
         raise ErrorAuth(error.status_code, error.motivo, error.detail) from error
-    return CuentaConClave(
-        cuenta=CuentaAdmin(**cuentas.cuenta_para_respuesta(sesion, cuenta)),
-        clave_temporal=clave,
-    )
+    return CuentaRespuesta(cuenta=CuentaAdmin(**cuentas.cuenta_para_respuesta(sesion, cuenta)))
 
 
 @router.post(
@@ -132,22 +133,57 @@ def reactivar_cuenta(
     return CuentaAdmin(**cuentas.cuenta_para_respuesta(sesion, cuenta))
 
 
-@router.post(
-    "/cuentas/{cuenta_id}/reiniciar-clave",
-    response_model=CuentaConClave,
-    summary="Dar una clave temporal nueva",
+@router.patch(
+    "/cuentas/{cuenta_id}",
+    response_model=CuentaAdmin,
+    summary="Editar nombre y rol de una cuenta",
     responses=CON_MOTIVO,
 )
-def reiniciar_clave(
+def editar_cuenta(
     sesion: SesionDep,
+    datos: ActualizarCuenta,
     cuenta_id: Annotated[int, Path(gt=0, description="Id de la cuenta")],
-) -> CuentaConClave:
-    """Deja debe_cambiar en 1 y cierra sus sesiones. El próximo login da 428."""
+) -> CuentaAdmin:
     try:
-        cuenta, clave = cuentas.reiniciar_clave(sesion, cuenta_id)
+        cuenta = cuentas.editar_cuenta(sesion, cuenta_id, datos.nombre, datos.rol)
     except ErrorCuenta as error:
         raise ErrorAuth(error.status_code, error.motivo, error.detail) from error
-    return CuentaConClave(
-        cuenta=CuentaAdmin(**cuentas.cuenta_para_respuesta(sesion, cuenta)),
-        clave_temporal=clave,
-    )
+    return CuentaAdmin(**cuentas.cuenta_para_respuesta(sesion, cuenta))
+
+
+@router.delete(
+    "/cuentas/{cuenta_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Ocultar y desactivar una cuenta conservando sus registros",
+    responses=CON_MOTIVO,
+)
+def eliminar_cuenta(
+    sesion: SesionDep,
+    cuenta_id: Annotated[int, Path(gt=0, description="Id de la cuenta")],
+    usuario: UsuarioActual,
+) -> Response:
+    try:
+        cuentas.eliminar_cuenta(sesion, cuenta_id, usuario)
+    except ErrorCuenta as error:
+        raise ErrorAuth(error.status_code, error.motivo, error.detail) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/cuentas/{cuenta_id}/clave",
+    response_model=CuentaRespuesta,
+    summary="Cambiar la contraseña de una cuenta",
+    responses=CON_MOTIVO,
+)
+def cambiar_clave(
+    sesion: SesionDep,
+    datos: NuevaClave,
+    cuenta_id: Annotated[int, Path(gt=0, description="Id de la cuenta")],
+) -> CuentaRespuesta:
+    """Root fija la contraseña nueva. Cierra las sesiones abiertas de esa
+    cuenta y no pide cambio en el próximo ingreso."""
+    try:
+        cuenta = cuentas.cambiar_clave(sesion, cuenta_id, datos.password)
+    except ErrorCuenta as error:
+        raise ErrorAuth(error.status_code, error.motivo, error.detail) from error
+    return CuentaRespuesta(cuenta=CuentaAdmin(**cuentas.cuenta_para_respuesta(sesion, cuenta)))

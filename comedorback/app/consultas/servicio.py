@@ -34,13 +34,38 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
-from app.consultas.horarios import ComidaConVentanas, ventanas_del_dia
-from app.logica.marcacion import resolver_comida_en_curso
+from app.consultas.horarios import ComidaConVentanas, ventanas_del_dia, interseccion
+from app.logica.marcacion import ComidaEnCurso, resolver_comida_en_curso
+from app.modelos.comedor import HorarioComida
+from app.modelos.heredados import Comida
 
 RELOJ_INCONSISTENTE = "reloj_inconsistente"
 SERVICIO_NO_DETERMINABLE = "servicio_no_determinable"
 SERVICIO_DISTINTO = "servicio_distinto"
+
+
+def comida_de_referencia(sesion: Session, momento: datetime) -> ComidaEnCurso | None:
+    """Comida vigente o ultima ventana cerrada. Solo contexto, nunca permiso."""
+    vigente = resolver_comida_en_curso(sesion, momento)
+    if vigente is not None:
+        return vigente
+    versiones = sesion.execute(select(HorarioComida, Comida.nombre).join(
+        Comida, Comida.id == HorarioComida.comida_id).where(
+        HorarioComida.activo == 1, Comida.estado == 1, HorarioComida.vigente_desde <= momento)).all()
+    cerradas = []
+    for horario, nombre in versiones:
+        limite = min(momento, horario.vigente_hasta) if horario.vigente_hasta else momento
+        for dia in (limite.date(), limite.date() - timedelta(days=1)):
+            ventana = interseccion(dia, horario.hora_inicio, horario.hora_fin,
+                                   horario.vigente_desde, horario.vigente_hasta)
+            if ventana is not None and ventana[1] <= momento:
+                cerradas.append((ventana[1], ventana[0], horario.comida_id, nombre, dia))
+    if not cerradas:
+        return None
+    _, _, comida_id, nombre, dia = max(cerradas)
+    return ComidaEnCurso(comida_id=comida_id, comida=nombre, fecha_comida=dia)
 
 
 @dataclass(frozen=True)

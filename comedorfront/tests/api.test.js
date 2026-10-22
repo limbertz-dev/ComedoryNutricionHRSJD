@@ -383,7 +383,7 @@ test('registro diario marca el día en curso y conserva sin_clasificar', async (
   assert.equal(informe.filas[0].esHoy, true);
   assert.equal(informe.sinClasificar, 4);
   assert.deepEqual(notasDeInforme(informe), [
-    '4 raciones servidas a personal sin categoría asignada en el formulario. No están incluidas en las columnas de arriba — quedan pendientes de clasificar.',
+    '4 raciones pendientes de clasificación. Están incluidas en el total del informe.',
   ]);
 });
 
@@ -402,6 +402,18 @@ test('mensual mapea grupos a etiqueta y cierra con el equivalente', async () => 
   assert.equal(informe.diasRegistrados, 10);
   assert.equal(notasDeInforme(informe).length, 1);
   assert.match(notasDeInforme(informe)[0], /sin coeficiente asignado/);
+});
+
+test('mensual conserva el equivalente historico con coeficientes variables', async () => {
+  globalThis.fetch = async () => json(informeBase('mensual', {
+    filas: [{ etiqueta: 'Almuerzo', celdas: [2, 1], total: 3, registrado: true }],
+    grupos: [{ grupo: 'Almuerzo', servidas: 3, coeficiente: 1.2, equivalente: 3.2, coeficientes_mixtos: true }],
+    total_equivalente: 3.2,
+  }));
+  const informe = await obtenerInformeMensual({ mesIndice: 8, gestion: 2026, hoy: hoyFijo });
+  assert.equal(informe.grupos[0].coeficienteVariable, true);
+  assert.equal(informe.grupos[0].equivalente, 3.2);
+  assert.notEqual(informe.grupos[0].servidas * informe.grupos[0].coeficiente, 3.2);
 });
 
 test('gestión cuenta meses registrados y marca el mes en curso', async () => {

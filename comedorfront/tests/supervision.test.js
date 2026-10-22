@@ -4,6 +4,7 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import Header from '../src/components/layout/Header.jsx';
 import Supervision, {
+  LIMITE_SUPERVISION,
   filtrarMarcaciones,
   metodoDeMarcacion,
   pestanaPorDefecto,
@@ -393,11 +394,11 @@ test('la tabla muestra Hora, Comensal, Categoría, Comida, Resultado, Motivo, M�
   assert.doesNotMatch(html, /<th scope="col">Acción<\/th>/);
 
   // Sin aviso de truncado con pocas filas
-  assert.doesNotMatch(html, /Mostrando las últimas 100/);
+  assert.doesNotMatch(html, /Mostrando las últimas/);
 });
 
-test('con 100 filas avisa que muestra las últimas 100', () => {
-  const cien = Array.from({ length: 100 }, (_, i) => marcacionFixture({
+test('solo avisa truncado al llegar al límite de la consulta', () => {
+  const cien = Array.from({ length: LIMITE_SUPERVISION }, (_, i) => marcacionFixture({
     id: 1000 + i,
     persona: { id: 1000 + i, nombre: `Comensal ${1000 + i}`, categoria: 'Planta' },
   }));
@@ -408,16 +409,16 @@ test('con 100 filas avisa que muestra las últimas 100', () => {
       marcacionesIniciales: cien,
     })
   );
-  assert.match(htmlCien, /Mostrando las últimas 100/);
+  assert.match(htmlCien, /Mostrando las últimas 1000/);
 
   const htmlNoventa = renderToStaticMarkup(
     h(Supervision, {
       cargandoInicial: false,
       comidasIniciales: diaFixture(),
-      marcacionesIniciales: cien.slice(0, 99),
+      marcacionesIniciales: cien.slice(0, 150),
     })
   );
-  assert.doesNotMatch(htmlNoventa, /Mostrando las últimas 100/);
+  assert.doesNotMatch(htmlNoventa, /Mostrando las últimas/);
 });
 
 // -------------------------------------------------------------

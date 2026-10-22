@@ -30,10 +30,10 @@ class TotalesDia(BaseModel):
 class EstadoPantalla(BaseModel):
     momento: datetime
     fecha_comida: date | None = Field(
-        description="Fecha a la que suman las raciones que se marquen ahora"
+        description="Fecha del servicio mostrado: vigente o ultimo cerrado si fuera_de_horario=true"
     )
     comida_id: int | None = None
-    comida: str | None = None
+    comida: str | None = Field(default=None, description="Comida vigente o ultima cerrada; no habilita entregas fuera de horario")
     fuera_de_horario: bool = Field(
         description="True si el reloj no cae en ninguna franja: nadie puede marcar"
     )
