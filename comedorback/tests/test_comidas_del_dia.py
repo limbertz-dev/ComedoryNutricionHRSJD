@@ -32,6 +32,7 @@ CLAVES_FILA = {
     "servidas",
     "manuales",
     "rechazos_por_motivo",
+    "policias",  # raciones de policía de la comida, aparte de las servidas
 }
 
 

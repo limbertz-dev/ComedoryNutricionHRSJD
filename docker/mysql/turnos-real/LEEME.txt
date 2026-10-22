@@ -1,0 +1,2 @@
+# Aquí va el volcado REAL de la base de turnos (.sql) si se quiere cargar
+# en lugar del escenario sintético. Esta carpeta no se sube a git.
