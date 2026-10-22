@@ -38,13 +38,24 @@ class Prueba(Teclado):
                      "no reconocida. Ctrl+C para cerrar.")
 
 
-ADAPTADORES = {"teclado": Teclado, "prueba": Prueba}
+def _zkteco(api):
+    # Import diferido: pyzkfp y el SDK solo hacen falta con este adaptador.
+    from zkteco import ZKTeco
+    return ZKTeco(api)
 
 
-def crear(nombre: str):
+ADAPTADORES = {
+    "teclado": lambda _api: Teclado(),
+    "prueba": lambda _api: Prueba(),
+    "zkteco": _zkteco,  # ZK9500 / ZK4500 por USB, con el SDK ZKFinger
+}
+
+
+def crear(nombre: str, api=None):
     try:
-        return ADAPTADORES[nombre]()
+        fabrica = ADAPTADORES[nombre]
     except KeyError:
         raise SystemExit(
             f"Adaptador '{nombre}' desconocido. Opciones: {', '.join(ADAPTADORES)}."
         ) from None
+    return fabrica(api)

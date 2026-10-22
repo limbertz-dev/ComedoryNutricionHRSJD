@@ -1,73 +1,89 @@
 # Puente del lector biométrico
 
 Programa que corre en la PC de cocina. Lee el lector, manda cada huella a la API
-(`POST /lector/lecturas`) y muestra el resultado a la cocinera. Solo necesita
-Python 3.10+ (sin paquetes extra).
+(`POST /lector/lecturas`) y muestra el resultado a la cocinera.
+
+Lector previsto: **ZKTeco ZK9500** (primera opción) o **ZK4500**, por USB. Estos
+lectores solo *capturan* la huella: la comparación la hace el SDK ZKFinger en la PC,
+contra las huellas enroladas que el puente carga de la API.
 
 ```
-Lector ──► puente.py (PC de cocina) ──► API /lector/lecturas ──► misma marcación de siempre
-              │                                                (derecho, horario, duplicado)
-              └─ sin conexión 2 min ──► pendientes.csv (la jefa registra a mano)
+Arranque:   puente ── GET /lector/plantillas ──► API          (huellas enroladas)
+            puente ── carga en el SDK ZKFinger (memoria de la PC)
+Cada dedo:  ZK9500 ── captura ──► SDK compara 1:N ──► identificador ──► POST /lector/lecturas
+                                                                         (derecho, horario, duplicado)
+Sin red:    reintenta 2 min ──► pendientes.csv (la jefa registra a mano con su hora real)
 ```
 
 ## Cómo funciona
 
-- **El lector entrega un número** por huella: el número de usuario de una terminal
-  o el id de plantilla de un programa USB. La API lo traduce a la persona con
-  `vinculos_lector`. Un número sin vínculo se registra como *huella no
-  reconocida* y la cocinera la identifica en su pantalla, como hoy.
+- **Cada huella enrolada es un vínculo**: `personal` (una persona del padrón) o
+  `policia` (sin persona). Una huella que no coincide con ninguna se registra como
+  *no reconocida* y la cocinera la identifica en su pantalla, como hoy.
+- **Policías: vía libre.** Su huella da una ración en la columna Policías en cada
+  lectura (sin turno, derecho ni duplicado; solo dentro de un horario de comida).
+  No aparecen en historiales ni en el padrón.
 - **La hora la pone el servidor**, nunca la PC (regla anti-antedatado).
-- **Reintentos seguros**: cada huella lleva una `Idempotency-Key`; si la red
-  falla, el puente reintenta la misma y la API no la registra dos veces.
+- **Reintentos seguros**: cada huella lleva una `Idempotency-Key`; si la red falla,
+  el puente reintenta la misma y la API no la registra dos veces.
 - **Nada se pierde en silencio**: si la API no responde en 2 minutos, el puente
-  avisa «SIN CONEXIÓN» y anota la lectura en `pendientes.csv` con su hora real.
+  avisa «SIN CONEXIÓN» y anota la lectura en `pendientes.csv`.
+- **Huellas nuevas**: el puente vuelve a cargar las plantillas cada minuto.
 
-## Prueba en el hospital (viernes)
+## Instalación en la PC de cocina (una vez)
 
-### 0. Antes de salir
-- [ ] En la API (`comedorback`): `alembic upgrade head` (crea `vinculos_lector` y `solicitudes_lector`).
-- [ ] Generar la clave del lector: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
-- [ ] En el `.env` de la API: `LECTORES=cocina-01=<esa clave>` y reiniciar la API.
+1. Instalar **Python 3.10+** (marcar «Add to PATH»).
+2. Instalar el **ZKFinger SDK for Windows** de ZKTeco (trae el driver del ZK9500/ZK4500).
+3. Conectar el lector por USB: debe encender su luz.
+4. `pip install -r requirements-zkteco.txt`
+5. `copy puente.ini.ejemplo puente.ini` y completar `url` y `clave`.
 
-### 1. Identificar el aparato (anotar)
-- Marca y modelo: ____________ · Conexión: USB / red · ¿Trae SDK o CD? ____
-- Abrir el **Bloc de notas**, apoyar un dedo enrolado: **¿aparece un número y salta de línea?**
-  - **Sí** → modo teclado: el puente funciona tal cual (`adaptador = teclado`).
-  - **No** → hace falta un adaptador para ese modelo (`adaptadores.py`). Traer el
-    manual o el SDK; el resto (API, vínculos, puente) ya está listo y probado.
+Si al abrir aparece «Falta libzkfp.dll», el SDK del punto 2 no está instalado.
 
-### 2. Configurar el puente en la PC de cocina
+## En la API (antes de ir)
+
+- [ ] `alembic upgrade head` (crea `vinculos_lector`, `solicitudes_lector`, `raciones_policia`).
+- [ ] Clave del lector: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+- [ ] `.env`: `LECTORES=cocina-01=<esa clave>`; reiniciar la API. La misma clave en `puente.ini`.
+- [ ] La columna **Policías** activa en `categorias_reporte` (si no, la huella de un policía se rechaza).
+
+## Prueba en el hospital
+
+### 1. Enrolar 3 personas y 1 policía (con el puente CERRADO)
 ```powershell
-cd lector_puente
-copy puente.ini.ejemplo puente.ini   # completar url y clave
-python puente.py                     # debe decir: Conectado como cocina-01 · ...
+python enrolar.py --usuario jefa
 ```
-Si dice «Clave del lector rechazada», la clave de `puente.ini` no es la de `LECTORES`.
+Opción 1 (personal): buscar a la persona por nombre, apoyar el **mismo dedo 3 veces**.
+Opción 2 (policía): solo los 3 apoyos. Un dedo ya enrolado se rechaza.
 
-### 3. Vincular 3 personas de prueba
-1. Enrolar la huella en el lector y anotar el número que muestra.
-2. `python vincular.py --api http://<servidor>:8000 --usuario jefa` → opción 1,
-   escribir el número, buscar a la persona por nombre y elegirla.
+### 2. Abrir el puente
+```powershell
+python puente.py      # «Conectado como cocina-01 · … · N huellas cargadas en el lector.»
+```
 
-### 4. Las tres huellas (dentro de un horario de comida)
-| Prueba | Esperado en el puente | Esperado en Supervisión |
+### 3. Las pruebas (dentro de un horario de comida)
+| Prueba | Esperado en el puente | Esperado en la app |
 |---|---|---|
-| Persona vinculada con derecho | `OK Almuerzo: NOMBRE` | Aceptada |
+| Persona enrolada con derecho | `OK Almuerzo: NOMBRE` | Supervisión: aceptada |
 | La misma persona otra vez | `NO … Ya recibió esta comida` | Rechazada · duplicado |
-| Dedo sin enrolar / número sin vincular | `NO … Huella no reconocida` | Rechazada · la cocinera la identifica |
+| Dedo sin enrolar | `NO … Huella no reconocida` | La cocinera la identifica |
+| Policía | `OK Almuerzo: Policía` (cada vez) | Reportes: columna Policías |
+| Desconectar la red 1 minuto | reintenta y registra | sin duplicados |
 
-### 5. Si algo falla
-- Sin el aparato funcionando, `adaptador = prueba` permite escribir los números a
-  mano y verificar toda la cadena («-» = huella no reconocida).
-- `puente.log` guarda los errores de conexión. `pendientes.csv`, las lecturas que no
-  llegaron.
+### 4. Si el aparato no funciona
+- `adaptador = prueba` en `puente.ini` permite escribir identificadores a mano y
+  verificar toda la cadena con la API («-» = huella no reconocida).
+- `puente.log` guarda los errores de conexión; `pendientes.csv`, lo que no llegó.
+- Lo único que habla con el aparato es `SdkZK` en `zkteco.py`.
 
 ## Archivos
 
 | Archivo | Qué es |
 |---|---|
 | `puente.py` | El puente: lectura, envío con reintentos, pendientes |
-| `adaptadores.py` | Cómo se lee cada tipo de lector (`teclado`, `prueba`) |
-| `vincular.py` | Vincular huellas con personas desde la consola (jefa/sistemas) |
+| `zkteco.py` | Adaptador ZK9500/ZK4500 (SDK ZKFinger vía `pyzkfp`) |
+| `enrolar.py` | Enrolar huellas con el ZKTeco: personal o policía |
+| `adaptadores.py` | `zkteco`, `teclado` (lectores que escriben un número), `prueba` |
+| `vincular.py` | Vincular números de lectores que reconocen solos (terminales) |
 | `puente.ini.ejemplo` | Configuración; copiar a `puente.ini` (no se sube a git) |
-| `test_puente.py` | Pruebas: `python -m pytest test_puente.py` |
+| `test_puente.py`, `test_zkteco.py` | Pruebas: `python -m pytest` |

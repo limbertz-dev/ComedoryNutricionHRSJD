@@ -1,16 +1,19 @@
-"""lector biometrico real: vinculos y solicitudes
+"""lector biometrico real y raciones de policia
 
 Revision ID: a9d3c5e7f1b2
 Revises: 8d4a2b7c9f10
 Create Date: 2026-10-22
 
-Dos tablas nuevas para conectar un lector biometrico real (app/api/lector.py):
+Tres tablas nuevas:
 
-  · `vinculos_lector`: el identificador con que el lector enrolo la huella
-    (numero de usuario de una terminal o id de plantilla de un lector USB) ->
-    users.id del padron. Baja logica con `activo`.
+  · `vinculos_lector`: el identificador con que el lector enrolo la huella ->
+    `personal` (users.id del padron) o `policia` (sin persona). Baja logica con
+    `activo`. `plantilla` guarda la plantilla ZKFinger en base64 cuando el
+    lector es USB (ZK9500/ZK4500) y compara en la PC.
   · `solicitudes_lector`: cada envio del puente por su Idempotency-Key, con la
     respuesta enviada, para que un reintento no escriba otra lectura.
+  · `raciones_policia`: cada lectura de una huella de policia. Separadas de
+    `asistencias`; solo cuentan en la columna Policias.
 
 Solo agrega tablas: no modifica ninguna existente. Solo toca bd_nutricion.
 Sobre la base de turnos no se ejecuta nada.
@@ -33,7 +36,7 @@ def upgrade() -> None:
     sa.Column('clave', sa.CHAR(length=36), nullable=False, comment='Idempotency-Key (UUID v4) del envio.'),
     sa.Column('dispositivo', sa.String(length=50), nullable=False, comment='Nombre del lector, fijado por su clave en LECTORES.'),
     sa.Column('identificador', sa.String(length=64), nullable=True, comment='Lo que entrego el lector. NULL = huella no reconocida.'),
-    sa.Column('lectura_id', mysql.BIGINT(unsigned=True), nullable=False),
+    sa.Column('lectura_id', mysql.BIGINT(unsigned=True), nullable=True, comment='NULL cuando el envio fue de un policia: su racion va a raciones_policia.'),
     sa.Column('respuesta', sa.JSON(), nullable=False, comment='Respuesta enviada al lector, para repetirla ante un reintento.'),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['lectura_id'], ['lecturas_biometricas.id'], name=op.f('fk_solicitudes_lector_lectura_id'), ondelete='RESTRICT'),
@@ -46,11 +49,14 @@ def upgrade() -> None:
     op.create_table('vinculos_lector',
     sa.Column('id', mysql.BIGINT(unsigned=True), nullable=False),
     sa.Column('identificador', sa.String(length=64), nullable=False, comment='Numero de usuario o id de plantilla con que el lector enrolo la huella.'),
-    sa.Column('usuario_id', mysql.BIGINT(unsigned=True), nullable=False, comment='users.id de la base de turnos (v_comensales), sin FK entre bases.'),
+    sa.Column('tipo', sa.Enum('personal', 'policia', name='tipo_vinculo'), nullable=False, comment='personal = persona del padron. policia = racion directa en la columna Policias.'),
+    sa.Column('usuario_id', mysql.BIGINT(unsigned=True), nullable=True, comment='users.id de la base de turnos (v_comensales), sin FK. NULL en policias.'),
     sa.Column('activo', mysql.TINYINT(display_width=1), nullable=False),
+    sa.Column('plantilla', sa.Text(), nullable=True, comment='Plantilla ZKFinger en base64, si la huella se enrolo con un lector USB. Solo la lee el puente con la clave del lector; nunca sale en /lector/vinculos.'),
     sa.Column('creado_por_cuenta', mysql.BIGINT(unsigned=True), nullable=True, comment='Cuenta de jefatura que creo o reasigno el vinculo.'),
     sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("(tipo = 'personal' AND usuario_id IS NOT NULL) OR (tipo = 'policia' AND usuario_id IS NULL)", name=op.f('ck_vinculos_lector_tipo_coherente')),
     sa.ForeignKeyConstraint(['creado_por_cuenta'], ['usuarios_sistema.id'], name=op.f('fk_vinculos_lector_creado_por_cuenta'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_vinculos_lector')),
     sa.UniqueConstraint('identificador', name=op.f('uq_vinculos_lector_identificador')),
@@ -59,11 +65,29 @@ def upgrade() -> None:
     mysql_collate='utf8mb4_unicode_ci'
     )
     op.create_index('idx_vinculos_lector_usuario', 'vinculos_lector', ['usuario_id'], unique=False)
+    op.create_table('raciones_policia',
+    sa.Column('id', mysql.BIGINT(unsigned=True), nullable=False),
+    sa.Column('fecha_comida', sa.Date(), nullable=False),
+    sa.Column('comida_id', mysql.BIGINT(unsigned=True), nullable=False, comment='comidas.id de la base de turnos, sin FK.'),
+    sa.Column('categoria_reporte_id', mysql.BIGINT(unsigned=True), nullable=False, comment='Snapshot de la columna Policias al servir: un cambio de catalogo no reescribe meses.'),
+    sa.Column('fecha_hora', mysql.DATETIME(fsp=6), nullable=False),
+    sa.Column('dispositivo', sa.String(length=50), nullable=False, comment='El lector que la registro.'),
+    sa.Column('vinculo_id', mysql.BIGINT(unsigned=True), nullable=False, comment='La huella de policia que se leyo. No identifica a una persona del padron.'),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['categoria_reporte_id'], ['categorias_reporte.id'], name=op.f('fk_raciones_policia_categoria_reporte_id'), ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['vinculo_id'], ['vinculos_lector.id'], name=op.f('fk_raciones_policia_vinculo_id'), ondelete='RESTRICT'),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_raciones_policia')),
+    comment='Raciones de policias, registradas por el lector sin identidad: no estan en la base de turnos. Solo cuentan como racion en la columna Policias.',
+    mysql_charset='utf8mb4',
+    mysql_collate='utf8mb4_unicode_ci'
+    )
+    op.create_index('idx_raciones_policia_fecha_comida', 'raciones_policia', ['fecha_comida', 'comida_id'], unique=False)
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    # DROP TABLE se lleva sus indices. Soltar antes idx_solicitudes_lector_lectura
-    # falla: MySQL lo usa para sostener la FK hacia lecturas_biometricas.
-    op.drop_table('vinculos_lector')
+    # DROP TABLE se lleva sus indices: soltar antes uno que sostiene una FK
+    # falla en MySQL. Orden inverso a las FK.
+    op.drop_table('raciones_policia')
     op.drop_table('solicitudes_lector')
+    op.drop_table('vinculos_lector')

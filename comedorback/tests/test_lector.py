@@ -248,3 +248,32 @@ def test_vincular_a_alguien_fuera_del_padron_422(cliente, jefa):
 
 def test_baja_de_vinculo_inexistente_404(cliente, jefa):
     assert cliente.delete("/lector/vinculos/999999", headers=jefa).status_code == 404
+
+
+# --- plantillas (lectores USB ZKTeco) -------------------------------------------------
+
+PLANTILLA = "U1MyMQAAA" + "A" * 40 + "=="
+
+
+@pytest.mark.usefixtures("con_horarios")
+def test_plantillas_solo_para_el_lector_y_nunca_en_vinculos(cliente, jefa, en_almuerzo):
+    alta = cliente.post("/lector/vinculos", headers=jefa, json={
+        "identificador": "zk-1", "usuario_id": en_almuerzo, "plantilla": PLANTILLA})
+    assert alta.status_code == 201, alta.text
+    assert "plantilla" not in alta.json()
+    assert all("plantilla" not in v for v in cliente.get("/lector/vinculos", headers=jefa).json())
+
+    r = cliente.get("/lector/plantillas", headers=LECTOR)
+    assert r.status_code == 200
+    assert r.json() == [{"id": alta.json()["id"], "identificador": "zk-1", "plantilla": PLANTILLA}]
+    assert cliente.get("/lector/plantillas", headers=jefa).status_code == 401
+
+    cliente.delete(f"/lector/vinculos/{alta.json()['id']}", headers=jefa)
+    assert cliente.get("/lector/plantillas", headers=LECTOR).json() == []
+
+
+@pytest.mark.parametrize("plantilla", ["no es base64!", "A" * 9000])
+def test_plantilla_invalida_422(cliente, jefa, plantilla):
+    r = cliente.post("/lector/vinculos", headers=jefa,
+                     json={"identificador": "zk-2", "usuario_id": 1, "plantilla": plantilla})
+    assert r.status_code == 422

@@ -124,7 +124,7 @@ def test_adaptador_teclado_ignora_vacias_y_traduce_no_reconocida():
 
 def test_adaptador_desconocido_corta_con_mensaje():
     with pytest.raises(SystemExit, match="Opciones"):
-        adaptadores.crear("zkteco")
+        adaptadores.crear("hikvision")
 
 
 def test_configuracion_exige_url_y_clave(tmp_path):

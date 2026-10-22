@@ -88,6 +88,7 @@ def tablas_auth_limpias():
         # vínculos a la cuenta que los creó.
         sesion.execute(text("DELETE FROM solicitudes_lector"))
         sesion.execute(text("DELETE FROM vinculos_lector"))
+        sesion.execute(text("DELETE FROM raciones_policia"))
         # R2 deja solo la versión base (2000-01-01): los tests que asumen
         # 12 h y enfermería excluida no se enteran de versiones de otro test.
         sesion.execute(

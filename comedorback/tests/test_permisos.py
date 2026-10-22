@@ -56,6 +56,7 @@ RUTAS_PUBLICAS = {
 RUTAS_LECTOR = {
     ("GET", "/lector/salud"),
     ("POST", "/lector/lecturas"),
+    ("GET", "/lector/plantillas"),
 }
 
 

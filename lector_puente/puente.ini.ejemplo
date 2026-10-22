@@ -8,9 +8,10 @@ url = http://127.0.0.1:8000
 clave =
 
 [lector]
+# zkteco:  ZK9500 / ZK4500 por USB (requiere el ZKFinger SDK y `pip install pyzkfp`).
 # teclado: el lector escribe el número de usuario y Enter.
 # prueba:  se escribe a mano; «-» simula una huella no reconocida.
-adaptador = teclado
+adaptador = zkteco
 
 [puente]
 # Cuánto se reintenta un envío si la API no responde. Después se anota en

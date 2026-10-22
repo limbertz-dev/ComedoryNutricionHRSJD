@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from app.core.autorizacion import ErrorAuth, UsuarioActual, no_autenticado
 from app.core.db import SesionDep
 from app.esquemas.lector import (
+    Plantilla,
     RespuestaLectura,
     SaludLector,
     SolicitudLectura,
@@ -53,6 +54,14 @@ def salud(sesion: SesionDep, dispositivo: LectorAutorizado) -> SaludLector:
     """Para el arranque del puente: confirma la clave, la hora del servidor y
     cuántas huellas hay vinculadas. No escribe nada."""
     return SaludLector(**lector.salud(sesion, dispositivo))
+
+
+@router.get("/plantillas", response_model=list[Plantilla], summary="Plantillas para el SDK del lector")
+def plantillas(sesion: SesionDep, _dispositivo: LectorAutorizado) -> list[Plantilla]:
+    """Solo con la clave del lector: las huellas enroladas con un lector USB
+    (ZK9500/ZK4500), para que el puente compare en la PC. Nunca salen por
+    /lector/vinculos ni con la sesión de una persona."""
+    return [Plantilla(**p) for p in lector.plantillas(sesion)]
 
 
 @router.post(
@@ -110,6 +119,7 @@ def vincular(sesion: SesionDep, solicitud: SolicitudVinculo, usuario: UsuarioAct
         return Vinculo(**lector.vincular(
             sesion, identificador=solicitud.identificador,
             usuario_id=solicitud.usuario_id, cuenta_id=cuenta_id,
+            plantilla=solicitud.plantilla, tipo=solicitud.tipo,
         ))
     except LookupError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None

@@ -97,6 +97,17 @@ def vincular(sesion: Sesion) -> None:
         print(f"  No se vinculó ({codigo}): {detalle(datos)}")
 
 
+def vincular_policia(sesion: Sesion) -> None:
+    """Para lectores que reconocen solos (terminal / teclado): el número que
+    muestra el aparato queda como huella de policía, sin persona."""
+    identificador = input("  Número que muestra el lector para la huella del policía: ").strip()
+    if not identificador:
+        return
+    codigo, datos = sesion.pedir("POST", "/lector/vinculos", {"identificador": identificador, "tipo": "policia"})
+    print(f"  Listo: huella {identificador} -> Policía." if codigo == 201
+          else f"  No se vinculó ({codigo}): {detalle(datos)}")
+
+
 def dar_de_baja(sesion: Sesion) -> None:
     listar(sesion)
     vinculo = input("  [id] del vínculo a dar de baja (vacío = cancelar): ").strip()
@@ -113,7 +124,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     sesion = Sesion(args.api)
     sesion.ingresar(args.usuario)
-    acciones = {"1": vincular, "2": listar, "3": dar_de_baja}
+    acciones = {"1": vincular, "2": listar, "3": dar_de_baja, "4": vincular_policia}
     while True:
         opcion = input("\n1) Vincular huella  2) Ver vinculadas  3) Dar de baja  0) Salir: ").strip()
         if opcion == "0":

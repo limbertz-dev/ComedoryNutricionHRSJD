@@ -2,7 +2,9 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
 
 from app.esquemas.marcacion import RespuestaMarcacion
 
@@ -46,13 +48,46 @@ class SaludLector(BaseModel):
 
 class SolicitudVinculo(BaseModel):
     identificador: str = Field(pattern=PATRON_IDENTIFICADOR)
-    usuario_id: int = Field(gt=0, description="users.id de la persona en el padrón.")
+    tipo: Literal["personal", "policia"] = Field(
+        default="personal",
+        description="policia: huella sin persona del padrón; cada lectura es una ración en Policías.",
+    )
+    usuario_id: int | None = Field(
+        default=None, gt=0, description="users.id de la persona. Obligatorio en personal; nunca en policia."
+    )
+    plantilla: str | None = Field(
+        default=None,
+        max_length=8192,
+        pattern=r"^[A-Za-z0-9+/]+={0,2}$",
+        description=(
+            "Plantilla ZKFinger en base64, solo con lectores USB que comparan en la PC "
+            "(ZK9500, ZK4500). Con terminales que reconocen solas, se omite."
+        ),
+    )
+
+
+    @model_validator(mode="after")
+    def _usuario_segun_tipo(self) -> "SolicitudVinculo":
+        if self.tipo == "personal" and self.usuario_id is None:
+            raise ValueError("Un vínculo de personal necesita usuario_id.")
+        if self.tipo == "policia" and self.usuario_id is not None:
+            raise ValueError("Un vínculo de policía no lleva usuario_id.")
+        return self
+
+
+class Plantilla(BaseModel):
+    """Lo que el puente carga en la memoria del SDK para comparar 1:N."""
+
+    id: int = Field(description="vinculos_lector.id: el fid de la plantilla en el SDK.")
+    identificador: str
+    plantilla: str
 
 
 class Vinculo(BaseModel):
     id: int
     identificador: str
-    usuario_id: int
+    tipo: Literal["personal", "policia"]
+    usuario_id: int | None
     nombre: str | None = Field(description="Del padrón; null si la persona ya no figura.")
     categoria: str | None
     activo: bool
