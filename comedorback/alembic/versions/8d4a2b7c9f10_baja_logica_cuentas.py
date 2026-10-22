@@ -13,7 +13,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("usuarios_sistema", sa.Column("eliminada_en", sa.DateTime(), nullable=True))
+    op.add_column("usuarios_sistema", sa.Column(
+        "eliminada_en", sa.DateTime(), nullable=True,
+        comment="Baja lógica: oculta la cuenta sin borrar su identidad ni registros. UTC.",
+    ))
 
 
 def downgrade() -> None:

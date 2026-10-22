@@ -307,7 +307,9 @@ def test_vigente_sigue_al_reloj(cliente, root, version_derecho):
 # --- enfermería: padrón y derecho van juntos ----------------------------------
 
 
-def test_padron_y_derecho_incluyen_enfermeria_hoy(cliente, root, version_derecho):
+def test_enfermeria_sigue_fuera_aunque_la_version_no_la_excluya(cliente, root, version_derecho):
+    # Solo comen las categorías de app/consultas/perfiles.py; la marca
+    # excluir_enfermeria de una versión no la vuelve elegible.
     usuario = _usuario_enfermeria()
     dia, fecha_comida = _turno_largo_limpio(usuario)
     hoy = _fijar(dia)
@@ -322,14 +324,14 @@ def test_padron_y_derecho_incluyen_enfermeria_hoy(cliente, root, version_derecho
     version_derecho(
         hoy, 12, novedades=tuple(NOVEDADES_BASE), excluir_enfermeria=False
     )
-    assert cliente.get(f"/personal/{usuario}", headers=root).status_code == 200
+    assert cliente.get(f"/personal/{usuario}", headers=root).status_code == 404
     r = cliente.get(
         f"/personal/{usuario}/derecho",
         params={"fecha": fecha_comida.isoformat()},
         headers=root,
     )
     assert r.status_code == 200, r.text
-    assert len(r.json()) > 0
+    assert r.json() == []
 
 
 # --- permisos -------------------------------------------------------------------

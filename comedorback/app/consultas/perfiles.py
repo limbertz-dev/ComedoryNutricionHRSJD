@@ -1,7 +1,10 @@
 """Perfiles del comedor, basados en los nombres del catalogo del hospital.
 
 Un servicio organiza el padron; no convierte una categoria excluida en elegible.
-Policias no tiene equivalencia confirmada en los catalogos inspeccionados.
+Solo comen estas categorias (regla del hospital, 22/10/2026): Administrativo,
+Servicio, Enfermeria y las demas quedan fuera aunque una version de
+reglas_derecho tenga excluir_enfermeria=0. Policias no tiene equivalencia
+confirmada en los catalogos inspeccionados.
 """
 import unicodedata
 
