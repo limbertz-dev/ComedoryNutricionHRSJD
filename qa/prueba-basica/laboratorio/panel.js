@@ -77,6 +77,14 @@ function dibujar() {
       : datos.lectura_id ? 'Revisar en cocina' : 'Simular fallo de huella';
     tarjeta.querySelector('.decision').textContent = `Tu revisión: ${estado.revision[caso]?.resultado ?? 'pendiente'}`;
   }
+  const policia = document.querySelector('#policia');
+  const policias = estado.policias ?? { dia: 0, comida: 0 };
+  policia.querySelector('.estado').textContent = policias.dia
+    ? `${policias.comida} en ${estado.servicio} · ${policias.dia} en el día` : 'Sin simular';
+  policia.querySelector('.detalle').textContent = policias.dia
+    ? 'Raciones de policía de este ensayo. Cuentan en Policías del Resumen y de Reportes.'
+    : 'Todavía no se registró ninguna ración de policía.';
+  policia.querySelector('.resultado').classList.toggle('comprobado', policias.dia > 0);
 }
 
 /** @param {string} ruta @param {object} opciones @returns {Promise<object>} */
@@ -223,6 +231,12 @@ for (const boton of document.querySelectorAll('.simular')) boton.addEventListene
   } else if (datos.lectura_id) volverAPantalla();
   else if (!estado.servicio_elegido_vigente || !estado.preparado_cuatro_comidas) mostrarAviso('Elige primero una comida arriba para preparar su horario.', true);
   else ejecutar('/simular', { caso });
+});
+document.querySelector('.simular-policia').addEventListener('click', () => {
+  if (!disponible()) return;
+  if (repeticionPendiente) { mostrarAviso('Verifica primero la lectura pendiente de QA 01.', true); return; }
+  if (!estado.servicio_elegido_vigente) { mostrarAviso('Elige primero una comida arriba para usar su horario.', true); return; }
+  ejecutar('/simular', { caso: 'policia' });
 });
 for (const boton of document.querySelectorAll('.aprobar, .rechazar')) boton.addEventListener('click', () => {
   if (!disponible()) return;

@@ -250,7 +250,12 @@ def mostrar_huella(etiqueta, huella):
     print(f"{PROTEGIDA} {etiqueta}: {huella['sha256']} ({len(huella['tablas'])} tablas)")
 
 
-def preflight(conexion, revisiones=("8d4a2b7c9f10",)):
+# La revisión de Alembic de la app que el laboratorio exige en la base QA.
+# Al agregar una migración, se cambia SOLO aquí (y se migra la base QA).
+REVISION_APP = "a9d3c5e7f1b2"
+
+
+def preflight(conexion, revisiones=(REVISION_APP,)):
     """Solo SELECT en conexión AUTOCOMMIT: antes de cualquier transacción DB."""
     validar_marcador(conexion.execute(text(
         f"SELECT clave, version, base_sim FROM `{DEMO}`.escenario_sintetico WHERE clave=:clave"

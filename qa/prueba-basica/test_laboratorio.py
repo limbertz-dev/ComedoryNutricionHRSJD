@@ -108,7 +108,7 @@ def test_nuevo_ensayo_exige_confirmacion_y_no_resetea_cuentas(monkeypatch, tmp_p
     control.detener_api.assert_not_called()
     control.nuevo_ensayo({**cuerpo, 'confirmar': True})
     scripts = [llamada.args[0] for llamada in control.ejecutar_script.call_args_list]
-    assert scripts == ['limpiar.py', 'limpiar.py', 'comun.py', 'comun.py', 'preparar_servicios.py']
+    assert scripts == ['policia_qa.py', 'limpiar.py', 'limpiar.py', 'comun.py', 'comun.py', 'preparar_servicios.py']
     assert '--conservar-cuentas-de' in control.ejecutar_script.call_args_list[-2].args
     archivo = next((tmp_path / 'evidencias').glob('*-ensayo-laboratorio.json'))
     assert archivo.read_text(encoding='utf-8') == '{"evidencia":"previa"}'
@@ -241,3 +241,45 @@ def test_http_rechaza_origen_ajeno_token_ausente_y_rutas_arbitrarias():
         servidor.shutdown()
         servidor.server_close()
         hilo.join(timeout=3)
+
+
+# --- caso Policía ---------------------------------------------------------------
+
+
+def _control_policia(vigente, salida=''):
+    control = lab.Laboratorio(Mock(), 'srv', {})
+    control.estado = Mock(return_value={'servicio_elegido_vigente': vigente})
+
+    def ejecutar(archivo, *argumentos):
+        control.ultima_salida = salida
+    control.ejecutar_script = Mock(side_effect=ejecutar)
+    return control
+
+
+def test_policia_fuera_de_horario_no_ejecuta_nada():
+    control = _control_policia(False)
+    with pytest.raises(c.Abortado, match='Fuera de horario'):
+        control.simular({'caso': 'policia'})
+    control.ejecutar_script.assert_not_called()
+
+
+def test_policia_usa_el_lector_y_lee_la_respuesta_entre_las_huellas():
+    salida = ('bd_proyecto_backend antes: x (36 tablas)\n'
+              '{"valido": true, "comida": "Cena", "detalle": "Ración habilitada · 2 de policía en esta comida"}\n'
+              'bd_proyecto_backend después: x (36 tablas)\n')
+    control = _control_policia(True, salida)
+    control.simular({'caso': 'policia'})
+    control.ejecutar_script.assert_called_once_with('policia_qa.py', '--leer')
+    assert control.ultima_accion == 'Policía registrado en Cena. Ración habilitada · 2 de policía en esta comida.'
+
+
+def test_policia_sin_racion_lo_dice():
+    control = _control_policia(True, '{"valido": false, "detalle": "No hay un tiempo de comida vigente"}\n')
+    control.simular({'caso': 'policia'})
+    assert control.ultima_accion.startswith('La lectura del policía no dio ración')
+
+
+def test_caso_desconocido_nombra_las_opciones():
+    control = _control_policia(True)
+    with pytest.raises(c.Abortado, match='Policía'):
+        control.simular({'caso': 'qa09'})

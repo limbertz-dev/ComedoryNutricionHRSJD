@@ -70,7 +70,8 @@ class Laboratorio:
         return datos
 
     def ejecutar_script(self, archivo, *argumentos):
-        permitidos = {'huella.py', 'limpiar.py', 'limpiar_fallido.py', 'comun.py', 'refechar.py', 'preparar_servicios.py', 'preparar_perfiles.py'}
+        permitidos = {'huella.py', 'limpiar.py', 'limpiar_fallido.py', 'comun.py', 'refechar.py', 'preparar_servicios.py', 'preparar_perfiles.py',
+                      'policia_qa.py'}
         if archivo not in permitidos:
             raise c.Abortado('Operación de laboratorio no permitida.')
         resultado = subprocess.run(
@@ -78,6 +79,7 @@ class Laboratorio:
             cwd=c.RAIZ, env=self.entorno, capture_output=True,
             text=True, encoding='utf-8', errors='replace', timeout=90,
         )
+        self.ultima_salida = resultado.stdout
         if resultado.returncode:
             # El motivo va a la consola del laboratorio; c.ejecutar ya lo deja sin SQL ni parámetros.
             motivo = resultado.stderr.strip().splitlines()[-1:] or ['sin mensaje']
@@ -108,7 +110,7 @@ class Laboratorio:
                 if (salud.get('estado') == 'ok' and salud.get('entorno') == 'desarrollo'
                         and salud.get('base_datos') == c.SIM
                         and salud.get('base_turnos') == c.DEMO
-                        and salud.get('revision_alembic') == '8d4a2b7c9f10'):
+                        and salud.get('revision_alembic') == c.REVISION_APP):
                     return
                 raise c.Abortado('La API no corresponde al escenario QA esperado.')
             except (OSError, TimeoutError):
@@ -165,6 +167,8 @@ class Laboratorio:
         datos_previos = self.diario()
         estado_previo = self.estado()
         self.detener_api()
+        # Las raciones de policía del ensayo anterior: aparte del personal.
+        self.ejecutar_script('policia_qa.py', '--limpiar')
         cierre = ('limpiar_fallido.py' if any(
             revision.get('resultado') == 'rechazado'
             for revision in datos_previos.get('revision_operador', {}).values()
@@ -195,10 +199,26 @@ class Laboratorio:
         comida = c.COMIDAS_LABORATORIO[comida_id]['nombre']
         self.ultima_accion = f'Ensayo de {comida} listo. Las cuentas y contraseñas se conservaron; puedes simular ambos casos.'
 
+    def simular_policia(self):
+        """Una huella de policía por la lógica real del lector: vía libre, solo
+        en horario de comida. Cada pulsación es una ración más en Policías."""
+        estado = self.estado()
+        if not estado['servicio_elegido_vigente']:
+            raise c.Abortado('Fuera de horario: elige una comida arriba para simular al policía.')
+        self.ejecutar_script('policia_qa.py', '--leer')
+        respuesta = json.loads(next(l for l in self.ultima_salida.splitlines() if l.startswith('{')))
+        if respuesta.get('valido'):
+            self.ultima_accion = f"Policía registrado en {respuesta['comida']}. {respuesta['detalle']}."
+        else:
+            self.ultima_accion = f"La lectura del policía no dio ración: {respuesta.get('detalle')}."
+
     def simular(self, cuerpo):
         caso = cuerpo.get('caso')
+        if caso == 'policia':
+            self.simular_policia()
+            return
         if caso not in ('qa01', 'qa02'):
-            raise c.Abortado('Elige QA 01 o QA 02. QA 03 está en reserva.')
+            raise c.Abortado('Elige QA 01, QA 02 o Policía. QA 03 está en reserva.')
         import enrolamiento
         registro = enrolamiento.registro_de(c.COMENSALES_QA[caso]['usuario_id'])
         if registro is None:
@@ -287,6 +307,12 @@ class Laboratorio:
                     salida['revision'] = datos.get('revisiones_por_comida', {}).get(str(referencia.comida_id),
                         datos.get('revision_operador', {}) if anterior == referencia.comida_id else {})
         with self.motor.connect() as conn:
+            import policia_qa
+            policias = conn.execute(text(
+                "SELECT COUNT(*) AS dia, COALESCE(SUM(comida_id=:comida), 0) AS comida FROM raciones_policia "
+                "WHERE dispositivo=:d AND fecha_comida=:f"
+            ), {'d': policia_qa.DISPOSITIVO, 'f': fecha, 'comida': salida['comida_id']}).one()
+            salida['policias'] = {'dia': int(policias.dia), 'comida': int(policias.comida)}
             cuentas = conn.execute(text(
                 "SELECT id, username, rol, usuario_turnos_id FROM usuarios_sistema "
                 "WHERE username IN ('cocinera1','cocinera2','cocinera3','jefa')"
@@ -357,7 +383,12 @@ def crear_handler(control):
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors http://127.0.0.1:5173 http://localhost:5173; base-uri 'none'")
             self.end_headers()
-            self.wfile.write(cuerpo)
+            try:
+                self.wfile.write(cuerpo)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                # El cliente ya cortó (un sondeo de salud con tiempo límite): no
+                # hay a quién responder y no es un fallo del laboratorio.
+                pass
 
         def local(self):
             puerto = self.server.server_port

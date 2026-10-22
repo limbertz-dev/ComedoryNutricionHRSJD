@@ -21,7 +21,7 @@ def obtener(url):
 def salud_api(datos):
     return all(datos.get(k) == v for k, v in {
         'estado': 'ok', 'entorno': 'desarrollo', 'base_datos': c.SIM,
-        'base_turnos': c.DEMO, 'revision_alembic': '8d4a2b7c9f10',
+        'base_turnos': c.DEMO, 'revision_alembic': c.REVISION_APP,
     }.items())
 
 

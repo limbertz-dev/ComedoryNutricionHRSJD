@@ -546,7 +546,7 @@ def _simulador_http_cuentas(fallo_en=None, temporales_esperadas=None):
                 'entorno': 'desarrollo',
                 'base_datos': c.SIM,
                 'base_turnos': c.DEMO,
-                'revision_alembic': '8d4a2b7c9f10',
+                'revision_alembic': c.REVISION_APP,
             }
         if (metodo, ruta) == ('POST', '/auth/login'):
             cuenta = cuerpo['username']
@@ -1225,13 +1225,13 @@ def test_cuentas_py_solo_conserva_resultados_previos_de_otras_cuentas(monkeypatc
 
 @pytest.mark.parametrize('respuesta_salud', [
     (200, {'estado': 'ok', 'entorno': 'desarrollo', 'base_datos': 'bd_nutricion',
-           'base_turnos': c.DEMO, 'revision_alembic': '8d4a2b7c9f10'}),
+           'base_turnos': c.DEMO, 'revision_alembic': c.REVISION_APP}),
     (200, {'estado': 'ok', 'entorno': 'desarrollo', 'base_datos': c.SIM,
-           'base_turnos': c.PROTEGIDA, 'revision_alembic': '8d4a2b7c9f10'}),
+           'base_turnos': c.PROTEGIDA, 'revision_alembic': c.REVISION_APP}),
     (200, {'estado': 'ok', 'entorno': 'desarrollo', 'base_datos': c.SIM,
            'base_turnos': c.DEMO, 'revision_alembic': 'otra'}),
     (200, {'estado': 'ok', 'entorno': 'produccion', 'base_datos': c.SIM,
-           'base_turnos': c.DEMO, 'revision_alembic': '8d4a2b7c9f10'}),
+           'base_turnos': c.DEMO, 'revision_alembic': c.REVISION_APP}),
     (503, {'estado': 'error'}),
 ])
 def test_cuentas_py_aborta_si_salud_no_coincide(monkeypatch, tmp_path, respuesta_salud):
