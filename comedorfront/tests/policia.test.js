@@ -87,3 +87,20 @@ test('el apartado de policías vacío lo dice', () => {
   assert.equal(esPolicia(policia), true);
   assert.equal(esPolicia(personal), false);
 });
+
+test('las tarjetas de comida y el resumen suman los policías aparte del cupo', () => {
+  const dia = {
+    fecha: '2026-10-19', rechazosSinComida: 0,
+    comidas: [{
+      comidaId: 4, comida: 'Cena', horaInicio: '17:00', horaFin: '23:59', estado: 'en_curso',
+      previstas: 3, servidas: 0, manuales: 0, policias: 2,
+      rechazos: { noIdentificado: 0, sinDerecho: 0, duplicado: 0 },
+    }],
+  };
+  const html = renderToStaticMarkup(h(Supervision, {
+    cargandoInicial: false, comidasIniciales: dia, marcacionesIniciales: [policia],
+  }));
+  assert.match(html, /Policías: <\/span>2/);
+  assert.match(html, /Aceptadas<\/dt><dd>0<\/dd><small>de 3 previstas/);
+  assert.match(html, /Policías<\/dt><dd>2<\/dd><small>Aparte del cupo del personal/);
+});

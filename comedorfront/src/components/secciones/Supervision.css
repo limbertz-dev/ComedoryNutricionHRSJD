@@ -246,6 +246,10 @@
   color: var(--c-icono);
 }
 
+.supervision__pestana-cifra--policia {
+  color: var(--c-acento-oscuro);
+}
+
 /* Nota discreta bajo las pestañas, solo si hay rechazos fuera de franja. */
 .supervision__nota-fuera-franja {
   margin: calc(var(--e-2) * -1) 0 0;
@@ -295,7 +299,7 @@
 
 .supervision__cifras {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
 }
 
@@ -350,6 +354,11 @@
 .supervision__cifra--manual dt,
 .supervision__cifra--manual dd {
   color: var(--c-icono);
+}
+
+.supervision__cifra--policia dt,
+.supervision__cifra--policia dd {
+  color: var(--c-acento-oscuro);
 }
 
 /* -------------------------------------------------------------

@@ -382,13 +382,16 @@ export async function obtenerPersonasEnrolamiento({ signal } = {}) {
 }
 
 /** Registro de vinculos de huella: consulta de la jefa en el laboratorio. */
-export async function obtenerRegistrosHuellas({ busqueda = '', limite = 50, desplazamiento = 0, signal } = {}) {
+export async function obtenerRegistrosHuellas({ busqueda = '', limite = 50, desplazamiento = 0, fecha = null, signal } = {}) {
   if (typeof busqueda !== 'string' || busqueda.trim().length > 100
+    || (fecha !== null && !FECHA_API.test(fecha))
     || !Number.isInteger(limite) || limite < 1 || limite > 100
     || !Number.isInteger(desplazamiento) || desplazamiento < 0) {
     throw new Error('Revisa la búsqueda del registro de huellas.');
   }
   const consulta = new URLSearchParams({ busqueda: busqueda.trim(), limite: String(limite), desplazamiento: String(desplazamiento) });
+  // Un solo día, en hora de Bolivia; sin fecha, todas las altas.
+  if (fecha !== null) consulta.set('fecha', fecha);
   try {
     const pagina = await solicitarApi(`/_qa/enrolamiento/registros?${consulta}`, { signal });
     const id = valor => Number.isSafeInteger(valor) && valor > 0;
