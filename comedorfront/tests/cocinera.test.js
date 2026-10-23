@@ -190,3 +190,23 @@ test('Pantalla completa se oculta si el navegador no la soporta', async () => {
     delete globalThis.document;
   }
 });
+
+test('al iniciar sesión la cocinera empieza siempre en el checklist', async () => {
+  const { prepararIngreso } = await import('../src/hooks/useSesion.js');
+  const localOriginal = globalThis.localStorage;
+  const guardado = new Map([['comedor_seccion_activa', 'vivo']]);
+  globalThis.localStorage = { getItem: (c) => guardado.get(c) ?? null, setItem: (c, v) => guardado.set(c, v) };
+  try {
+    prepararIngreso({ tipo: 'credencial' });
+    assert.equal(guardado.get('comedor_seccion_activa'), 'vivo');
+    prepararIngreso({ tipo: 'ok', rol: 'jefa' });
+    assert.equal(guardado.get('comedor_seccion_activa'), 'vivo');
+    prepararIngreso({ tipo: 'ok', rol: 'cocinera' });
+    assert.equal(guardado.get('comedor_seccion_activa'), 'checklist');
+    const html = renderToStaticMarkup(conSesion(h(Panel, { rol: 'cocinera' })));
+    assert.match(html, /aria-label="Checklist de comida"/);
+  } finally {
+    if (localOriginal === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = localOriginal;
+  }
+});

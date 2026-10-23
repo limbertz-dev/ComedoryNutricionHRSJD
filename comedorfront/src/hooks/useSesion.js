@@ -9,8 +9,17 @@ import {
   leerTokens,
   reductorSesion,
 } from '../sesion.js';
+import { guardarSeccionActiva } from '../navegacion.js';
 
 const ContextoSesion = createContext(null);
+
+/*
+ * Un ingreso nuevo de la cocinera empieza siempre en el checklist; F5 (que
+ * restaura la sesión sin pasar por aquí) conserva su última pantalla.
+ */
+export function prepararIngreso(resultado) {
+  if (resultado?.tipo === 'ok' && resultado.rol === 'cocinera') guardarSeccionActiva('checklist');
+}
 
 /**
  * Acción con la que arranca la app: sin tokens guardados, al Login; con
@@ -56,6 +65,7 @@ export function ProveedorSesion({ children }) {
   /** Devuelve el resultado de `iniciarSesion` para que el Login pinte 401 / 423. */
   const login = useCallback(async (usuario, contrasena) => {
     const resultado = await iniciarSesion(usuario, contrasena);
+    prepararIngreso(resultado);
     const accion = accionDeIngreso(resultado, usuario);
     if (accion) despachar(accion);
     return resultado;
@@ -63,6 +73,7 @@ export function ProveedorSesion({ children }) {
 
   const cambiarPassword = useCallback(async ({ usuario, actual, nueva }) => {
     const resultado = await cambiarContrasena({ usuario, actual, nueva });
+    prepararIngreso(resultado);
     const accion = accionDeIngreso(resultado, usuario);
     if (accion) despachar(accion);
     return resultado;
