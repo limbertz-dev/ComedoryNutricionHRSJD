@@ -74,7 +74,8 @@ export function claveDeEvento(origen, id) {
 }
 
 /** Por dónde terminó en ración una fila (`resultado_final.via`). */
-export const VIAS_RESULTADO_FINAL = ['lector', 'identificacion_manual', 'registro_manual', 'policia'];
+export const VIAS_RESULTADO_FINAL = ['lector', 'identificacion_manual', 'registro_manual', 'policia', 'identificacion_policia'];
+const VIAS_POLICIA = ['policia', 'identificacion_policia'];
 const ESTADOS_FINALES = ['racion_servida', 'sin_racion'];
 
 /** Texto o null: la API manda null en lo que no aplica. */
@@ -104,7 +105,7 @@ function adaptarBloquesIntervencion(dato) {
   const final = dato.resultado_final;
   // Una ración de policía no tiene asistencia: va a raciones_policia.
   if (final != null && (!VIAS_RESULTADO_FINAL.includes(final.via)
-    || (final.via === 'policia' ? final.asistencia_id != null : !Number.isInteger(final.asistencia_id)))) {
+    || (VIAS_POLICIA.includes(final.via) ? final.asistencia_id != null : !Number.isInteger(final.asistencia_id)))) {
     throw new Error('La API devolvió un resultado final inválido.');
   }
   if ((final != null) !== (estadoFinal === 'racion_servida')) {
@@ -1505,6 +1506,48 @@ export function nuevaClaveIdempotencia(cripto = globalThis.crypto) {
 /** true si `clave` es un UUID v4 en minúsculas, como lo normaliza el servidor. */
 export function esClaveIdempotencia(clave) {
   return typeof clave === 'string' && CLAVE_UUID4.test(clave);
+}
+
+/** GET /pantalla/policias (cocina): policías con huella activa, para identificarlos. */
+export async function obtenerPoliciasActivos({ signal } = {}) {
+  const datos = await solicitarApi('/pantalla/policias', { signal });
+  if (!Array.isArray(datos) || datos.some((p) => !Number.isSafeInteger(p?.id) || p.id <= 0
+    || typeof p.nombre !== 'string' || (p.documento != null && typeof p.documento !== 'string'))) {
+    throw new Error('La API devolvió una lista de policías inválida.');
+  }
+  return datos.map((p) => ({ id: p.id, nombre: p.nombre, documento: p.documento ?? null }));
+}
+
+/**
+ * POST /asistencias/lecturas/{id}/identificar-policia (solo cocinera): la
+ * huella no reconocida era de un policía. `clave` se repite SOLO para
+ * reintentar la misma decisión. Devuelve { estado: 'registrada' | 'conflicto'
+ * | 'incierto', ... }.
+ */
+export async function identificarComoPolicia(lecturaId, vinculoId, { clave, signal } = {}) {
+  if (!Number.isInteger(lecturaId) || lecturaId <= 0) throw new Error('Lectura inválida.');
+  if (!Number.isInteger(vinculoId) || vinculoId <= 0) throw new Error('Elija al policía.');
+  if (!esClaveIdempotencia(clave)) throw new Error('Clave de idempotencia inválida.');
+  let dato;
+  try {
+    dato = await solicitarApi(`/asistencias/lecturas/${lecturaId}/identificar-policia`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': clave },
+      body: JSON.stringify({ vinculo_id: vinculoId }),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if (error instanceof ErrorApi && error.status >= 400 && error.status < 500) {
+      return { estado: 'conflicto', motivo: error.datos?.motivo ?? null,
+        detalle: error.datos?.detail ?? error.message };
+    }
+    return { estado: 'incierto', detalle: 'No se pudo confirmar la entrega. Repita la confirmación: no se duplica.' };
+  }
+  if (dato?.valido !== true || dato.lectura_id !== lecturaId || !Number.isSafeInteger(dato.racion_id)) {
+    return { estado: 'incierto', detalle: 'La respuesta del servidor no se pudo leer. Repita la confirmación: no se duplica.' };
+  }
+  return { estado: 'registrada', nombre: dato.nombre, comida: dato.comida ?? null, reintento: dato.reintento === true };
 }
 
 /** Motivos de 409 que dicen que esa lectura ya no se puede identificar. */

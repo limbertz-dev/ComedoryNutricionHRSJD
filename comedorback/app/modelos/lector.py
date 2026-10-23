@@ -143,4 +143,19 @@ class RacionPolicia(Base):
         ID, ForeignKey("vinculos_lector.id", ondelete="RESTRICT"),
         comment="La huella de policia que se leyo. No identifica a una persona del padron.",
     )
+    lectura_id: Mapped[int | None] = mapped_column(
+        ID, ForeignKey("lecturas_biometricas.id", ondelete="RESTRICT"), unique=True,
+        comment=(
+            "Solo si cocina identifico como policia una huella no reconocida: esa "
+            "lectura. UNIQUE: una lectura da, como mucho, una racion."
+        ),
+    )
+    registrado_por_cuenta: Mapped[int | None] = mapped_column(
+        ID, ForeignKey("usuarios_sistema.id", ondelete="RESTRICT"),
+        comment="La cocinera que identifico al policia. NULL si la leyo el lector.",
+    )
+    clave_idempotencia: Mapped[str | None] = mapped_column(
+        CHAR(36), unique=True,
+        comment="Idempotency-Key de la identificacion por cocina: un reintento no da dos raciones.",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

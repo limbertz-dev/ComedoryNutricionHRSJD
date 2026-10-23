@@ -72,6 +72,7 @@ from app.modelos.comedor import (
     LecturaBiometrica,
 )
 from app.modelos.heredados import Comensal
+from app.modelos.lector import RacionPolicia
 
 CLAVE_UUID4 = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
@@ -517,6 +518,9 @@ def _una_pasada(sesion: Session, ctx: _Contexto) -> Respuesta:
     # predicado de arriba incluyera "sin asistencia", esta rama no existiría.
     ya_vinculada = sesion.execute(
         select(Asistencia.id).where(Asistencia.lectura_id == lectura_pk)
+    ).first() or sesion.execute(
+        # También si cocina ya la identificó como policía (app/logica/policia.py).
+        select(RacionPolicia.id).where(RacionPolicia.lectura_id == lectura_pk)
     ).first()
     if ya_vinculada is not None:
         return rechazar("lectura_ya_resuelta")

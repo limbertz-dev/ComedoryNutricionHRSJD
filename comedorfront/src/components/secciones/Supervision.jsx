@@ -606,7 +606,7 @@ export default function Supervision({
 
 /** Una ración de policía por el lector: vía libre, sin persona del padrón. */
 export function esPolicia(marcacion) {
-  return marcacion?.origen === 'racion_policia';
+  return marcacion?.origen === 'racion_policia' || marcacion?.resultadoFinal?.via === 'identificacion_policia';
 }
 
 /**
@@ -639,15 +639,26 @@ export function RacionesPolicia({ filas }) {
               </tr>
             </thead>
             <tbody>
-              {filas.map((m) => (
-                <tr key={m.clave}>
-                  <td>{m.hora}</td>
-                  <td>{m.persona?.nombre || 'Policía'}</td>
-                  <td>{m.comida ?? '—'}</td>
-                  <td><Etiqueta tono="exito">Ración registrada</Etiqueta></td>
-                  <td>{m.dispositivo ?? '—'}</td>
-                </tr>
-              ))}
+              {filas.map((m) => {
+                const porCocina = m.resultadoFinal?.via === 'identificacion_policia';
+                const quien = m.intervencion?.registradaPor;
+                return (
+                  <tr key={m.clave}>
+                    <td>{m.hora}</td>
+                    <td>{(porCocina ? m.resultadoFinal.comensal?.nombre : m.persona?.nombre) || 'Policía'}</td>
+                    <td>{m.comida ?? m.resultadoFinal?.comida ?? '—'}</td>
+                    <td>
+                      <span className="supervision__resultado">
+                        <Etiqueta tono="exito">{porCocina ? 'Identificado por cocina' : 'Ración registrada'}</Etiqueta>
+                        {porCocina && quien ? (
+                          <span className="supervision__final-detalle">{`registró ${quien.nombre || quien.usuario}`}</span>
+                        ) : null}
+                      </span>
+                    </td>
+                    <td>{m.dispositivo ?? '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

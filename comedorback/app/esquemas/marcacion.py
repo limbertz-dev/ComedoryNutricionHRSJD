@@ -23,6 +23,27 @@ class DerechoComida(BaseModel):
     servicio_id: int
 
 
+class SolicitudIdentificacionPolicia(BaseModel):
+    vinculo_id: int = Field(gt=0, description="vinculos_lector.id del policía elegido.")
+
+
+class RespuestaIdentificacionPolicia(BaseModel):
+    valido: bool
+    lectura_id: int
+    racion_id: int
+    vinculo_id: int
+    nombre: str
+    comida: str | None = None
+    fecha_comida: date
+    reintento: bool
+
+
+class PoliciaActivo(BaseModel):
+    id: int = Field(description="vinculos_lector.id")
+    nombre: str
+    documento: str | None = None
+
+
 class SolicitudMarcacion(BaseModel):
     """Lo que manda el navegador cuando la jefatura registra a mano."""
 
