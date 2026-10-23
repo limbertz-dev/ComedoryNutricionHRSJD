@@ -62,7 +62,7 @@ function horaDeMarcacion(fechaHora) {
 }
 
 /** Orígenes de una fila de GET /pantalla/ultimas-marcaciones. */
-export const ORIGENES_MARCACION = ['lectura_biometrica', 'asistencia_manual'];
+export const ORIGENES_MARCACION = ['lectura_biometrica', 'asistencia_manual', 'racion_policia'];
 
 /**
  * Identidad de un evento persistido: "<origen>:<id>". El `id` numérico solo
@@ -74,7 +74,7 @@ export function claveDeEvento(origen, id) {
 }
 
 /** Por dónde terminó en ración una fila (`resultado_final.via`). */
-export const VIAS_RESULTADO_FINAL = ['lector', 'identificacion_manual', 'registro_manual'];
+export const VIAS_RESULTADO_FINAL = ['lector', 'identificacion_manual', 'registro_manual', 'policia'];
 const ESTADOS_FINALES = ['racion_servida', 'sin_racion'];
 
 /** Texto o null: la API manda null en lo que no aplica. */
@@ -102,7 +102,9 @@ function adaptarBloquesIntervencion(dato) {
     throw new Error('La API devolvió un estado final inválido.');
   }
   const final = dato.resultado_final;
-  if (final != null && (!VIAS_RESULTADO_FINAL.includes(final.via) || !Number.isInteger(final.asistencia_id))) {
+  // Una ración de policía no tiene asistencia: va a raciones_policia.
+  if (final != null && (!VIAS_RESULTADO_FINAL.includes(final.via)
+    || (final.via === 'policia' ? final.asistencia_id != null : !Number.isInteger(final.asistencia_id)))) {
     throw new Error('La API devolvió un resultado final inválido.');
   }
   if ((final != null) !== (estadoFinal === 'racion_servida')) {
@@ -337,6 +339,8 @@ function adaptarComidasDelDia(dato) {
         previstas: comida.previstas,
         servidas: comida.servidas,
         manuales: comida.manuales,
+        // Raciones de policía de la comida, aparte de las servidas al personal.
+        policias: Number.isInteger(comida.policias) && comida.policias > 0 ? comida.policias : 0,
         rechazos: {
           noIdentificado: rechazos.no_identificado,
           sinDerecho: rechazos.sin_derecho,

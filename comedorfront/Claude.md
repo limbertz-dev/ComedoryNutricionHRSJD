@@ -34,14 +34,18 @@ Secciones del sidebar (`src/navegacion.js`):
    «Huellas por identificar» (solo cocinera) sigue el
    servicio actual con `GET /pantalla/lecturas-por-identificar` y confirma la
    entrega con `POST /asistencias/lecturas/{id}/identificar` e
-   `Idempotency-Key` (`src/identificacion.js`), sin nota ni motivo.
+   `Idempotency-Key` (`src/identificacion.js`), sin nota ni motivo. La huella
+   de un policía (vía libre, sin persona del padrón) llega como origen
+   `racion_policia` y se muestra como «Policía registrado», con check.
 2. **Supervisión del comedor** — tabla en vivo para la jefa: pestañas
    por comida (estado, aceptadas, rechazos, manuales), resumen de la pestaña
-   con su período y las últimas 100 marcaciones con filtros por resultado
+   con su período y las marcaciones del día (hasta 1000) con filtros por resultado
    (incluye «Manuales») y nombre, refresco cada 30 s y botón Actualizar.
    Sin «Autorizar» sobre las filas: la huella no reconocida la identifica la
    cocinera; aquí se ve su resultado final y, al pie, la consulta de
    intervenciones de cocina (`GET /intervenciones-cocina`), sin aprobaciones.
+   Las raciones de policía van en su propio apartado «Policías», fuera de la
+   tabla del personal; no aparecen en el Historial.
    Solo lectura: ningún control registra, autoriza ni modifica raciones.
 3. **Resumen** — cupo del turno, raciones del día por categoría y lecturas del
    lector, cada conteo con su período (`GET /pantalla/estado`, `src/resumen.js`).

@@ -96,6 +96,7 @@ function FiltroComida({ activo, onCambiar }) {
 export function etiquetaDeOrigen(origen) {
   if (origen === 'asistencia_manual') return 'Registro manual';
   if (origen === 'lectura_biometrica') return 'Lectura biométrica';
+  if (origen === 'racion_policia') return 'Policía';
   return null;
 }
 
@@ -143,6 +144,19 @@ export function eventoDeFila(fila) {
         categoria: 'Identificada por cocina',
         legajo: '—',
       },
+    };
+  }
+  if (fila.origen === 'racion_policia') {
+    // Huella de policía: vía libre, sin persona del padrón. Cuenta en Policías.
+    return {
+      id: fila.clave,
+      origen: fila.origen,
+      valido: true,
+      sinIdentificar: false,
+      titulo: 'Policía registrado',
+      detalle: 'Ración de policía habilitada — vía libre, cuenta en la columna Policías',
+      hora: fila.hora,
+      persona: { id: null, nombre: 'Policía', categoria: 'Policías', legajo: '—' },
     };
   }
   const manual = fila.origen === 'asistencia_manual';
@@ -794,6 +808,7 @@ export default function PantallaEnVivo({
                         {registro.persona.categoria}
                         {' · '}{registro.hora}
                         {registro.origen === 'asistencia_manual' ? ' · Registro manual' : null}
+                        {registro.origen === 'racion_policia' ? ' · Ración de policía' : null}
                         {identificadaPorCocina(registro)
                           ? ` · Identificada por cocina: ${registro.resultadoFinal.comensal.nombre ?? 'persona identificada'}`
                           : esHuellaNoReconocida(registro) && registro.puedeIdentificar && puedeIdentificar

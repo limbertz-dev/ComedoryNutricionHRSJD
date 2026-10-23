@@ -716,3 +716,17 @@
   font-size: var(--t-xs);
   font-weight: 600;
 }
+
+/* ---------- Apartado de policías ---------- */
+/* Raciones por el lector sin persona del padrón: separadas de la tabla del personal. */
+.supervision__subtitulo {
+  margin: 0;
+  color: var(--c-texto);
+  font-size: var(--t-md);
+  font-weight: 800;
+}
+
+.supervision__policias .supervision__conteo {
+  color: var(--c-texto-2);
+  font-weight: 600;
+}

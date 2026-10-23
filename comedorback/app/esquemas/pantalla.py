@@ -63,8 +63,10 @@ class ComensalRacion(BaseModel):
 class ResultadoFinal(BaseModel):
     """La ración que quedó, si quedó una. Separado de `decision_original`."""
 
-    via: Literal["lector", "identificacion_manual", "registro_manual"]
-    asistencia_id: int
+    via: Literal["lector", "identificacion_manual", "registro_manual", "policia"]
+    asistencia_id: int | None = Field(
+        default=None, description="null en una ración de policía: va a raciones_policia, no a asistencias."
+    )
     comensal: ComensalRacion
     comida: str | None = None
     fecha_comida: date | None = None
@@ -119,7 +121,7 @@ class Marcacion(BaseModel):
     motivo: str | None = None
     valido: bool = Field(description="True si resultado == 'aceptada'")
     dispositivo: str
-    origen: Literal["lectura_biometrica", "asistencia_manual"] = Field(
+    origen: Literal["lectura_biometrica", "asistencia_manual", "racion_policia"] = Field(
         description=(
             "Tabla de la que sale la fila, según la rama de la consulta; nunca "
             "del cliente ni del dispositivo. Una asistencia biométrica aparece "

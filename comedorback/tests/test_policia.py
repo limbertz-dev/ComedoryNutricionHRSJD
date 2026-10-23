@@ -167,3 +167,21 @@ def test_sin_policias_la_fuente_es_asistencias():
         r = raciones.fuente()
         assert (sesion.execute(select(func.count()).select_from(r)).scalar_one()
                 == sesion.execute(select(func.count()).select_from(Asistencia)).scalar_one())
+
+
+def test_aparece_en_las_marcaciones_de_cocina_y_supervision(cliente, jefa, huella_policia):
+    _leer(cliente)
+    filas = cliente.get(f"/pantalla/ultimas-marcaciones?fecha={FECHA}&limite=50", headers=jefa).json()
+    policias = [f for f in filas if f["origen"] == "racion_policia"]
+    assert len(policias) == 1
+    fila = policias[0]
+    assert (fila["valido"], fila["nombre"], fila["categoria"], fila["comida"]) == (True, "Policía", "Policías", "Almuerzo")
+    assert fila["estado_final"] == "racion_servida"
+    assert fila["resultado_final"]["via"] == "policia" and fila["resultado_final"]["asistencia_id"] is None
+    assert fila["clave_evento"] == f"racion_policia:{fila['id']}"
+    assert fila["puede_identificar"] is False
+    # Filtrada por comida: en el almuerzo sí, en la cena no.
+    assert any(f["origen"] == "racion_policia" for f in cliente.get(
+        f"/pantalla/ultimas-marcaciones?fecha={FECHA}&comida_id=2", headers=jefa).json())
+    assert not any(f["origen"] == "racion_policia" for f in cliente.get(
+        f"/pantalla/ultimas-marcaciones?fecha={FECHA}&comida_id=4", headers=jefa).json())

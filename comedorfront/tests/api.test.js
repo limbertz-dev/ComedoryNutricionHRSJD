@@ -556,7 +556,7 @@ test('las comidas del día llegan en camelCase con estado, servidas y rechazos p
       comidas: [
         {
           comida_id: 1, comida: 'Desayuno', hora_inicio: '07:00', hora_fin: '09:00',
-          estado: 'cerrada', previstas: 120, servidas: 118, manuales: 2,
+          estado: 'cerrada', previstas: 120, servidas: 118, manuales: 2, policias: 3,
           rechazos_por_motivo: { no_identificado: 1, sin_derecho: 0, duplicado: 3 },
         },
         {
@@ -575,9 +575,11 @@ test('las comidas del día llegan en camelCase con estado, servidas y rechazos p
   assert.equal(dia.comidas.length, 2);
   assert.deepEqual(dia.comidas[0], {
     comidaId: 1, comida: 'Desayuno', horaInicio: '07:00', horaFin: '09:00',
-    estado: 'cerrada', previstas: 120, servidas: 118, manuales: 2,
+    estado: 'cerrada', previstas: 120, servidas: 118, manuales: 2, policias: 3,
     rechazos: { noIdentificado: 1, sinDerecho: 0, duplicado: 3 },
   });
+  // Una API sin el campo (versión anterior) da 0 policías.
+  assert.equal(dia.comidas[1].policias, 0);
   assert.equal(dia.comidas[1].estado, 'en_curso');
   assert.equal(dia.comidas[1].previstas, null);
   assert.equal(dia.rechazosSinComida, 4);
