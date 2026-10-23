@@ -24,7 +24,9 @@ test('Nuevo solo aparece en cocina con enrolamiento QA habilitado y usa el area 
 
 test('el alta inicia sin persona preseleccionada y no permite capturar hasta elegir', () => {
   const html = renderToStaticMarkup(h(RegistrarHuella, { personasIniciales: [persona] }));
-  assert.match(html, /<option value="" selected="">Selecciona a la persona/);
+  assert.match(html, /class="app-select-value">Selecciona a la persona/);
+  // Listas con el desplegable propio de la app, no el nativo del navegador.
+  assert.doesNotMatch(html, /<select/);
   assert.match(html, /<button[^>]*disabled=""[^>]*>[\s\S]*?Simular captura/);
   assert.match(html, /Captura simulada/);
   const elegido = renderToStaticMarkup(h(RegistrarHuella, { personasIniciales: [persona], elegidoInicial: persona.id }));

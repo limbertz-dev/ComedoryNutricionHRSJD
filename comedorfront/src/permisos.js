@@ -7,10 +7,12 @@
  */
 
 /** Ids de las secciones, en el orden del menú lateral. */
-export const IDS_SECCIONES = ['vivo', 'supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin', 'monitoreo', 'cuentas'];
+export const IDS_SECCIONES = ['checklist', 'vivo', 'supervision', 'dashboard', 'historial', 'reportes', 'reglas', 'admin', 'monitoreo', 'cuentas'];
 
 /*
- * La cocinera opera el lector: solo Control Biométrico y sin el «Modo
+ * La cocinera abre en el checklist de la comida en curso (mientras no esté el
+ * lector) y cambia a Control Biométrico desde su panel flotante. Opera el
+ * lector sin el «Modo
  * manual», que autoriza raciones saltándose la huella. La jefa supervisa el
  * comedor ('supervision') y ve además resumen, historial, reportes y las
  * cuentas en solo lectura ('cuentas'). Sistemas (root) ya no opera el
@@ -21,7 +23,7 @@ export const IDS_SECCIONES = ['vivo', 'supervision', 'dashboard', 'historial', '
 const SECCIONES_JEFATURA = ['supervision', 'dashboard', 'historial', 'reportes'];
 
 /* Secciones que consultan el padrón y el cupo del turno. */
-const SECCIONES_DEL_COMEDOR = ['vivo', ...SECCIONES_JEFATURA];
+const SECCIONES_DEL_COMEDOR = ['checklist', 'vivo', ...SECCIONES_JEFATURA];
 
 /*
  * Intervenciones de cocina (huella no reconocida): solo la cocinera
@@ -32,7 +34,7 @@ const SECCIONES_DEL_COMEDOR = ['vivo', ...SECCIONES_JEFATURA];
  */
 const PERMISOS = {
   cocinera: {
-    etiqueta: 'Cocinera', secciones: ['vivo'], marcacionManual: false,
+    etiqueta: 'Cocinera', secciones: ['checklist', 'vivo'], marcacionManual: false,
     identificaLecturas: true, consultaIntervenciones: false,
   },
   jefa: {

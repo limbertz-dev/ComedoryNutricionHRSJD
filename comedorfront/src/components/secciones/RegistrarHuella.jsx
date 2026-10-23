@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import AppSelect from '../ui/AppSelect.jsx';
 import Boton from '../ui/Boton.jsx';
 import { IconoBuscar, IconoCheck, IconoHuella } from '../ui/Iconos.jsx';
 import {
@@ -211,20 +212,24 @@ export default function RegistrarHuella({
               </div>
             ) : (
             <>
-            <label className="registro-huella__paso" htmlFor="huella-persona">1. Selecciona a la persona</label>
+            <span className="registro-huella__paso" id="huella-persona-rotulo">1. Selecciona a la persona</span>
             {personas === null ? <p role="status">{error ? 'No se pudo cargar el padrón.' : 'Cargando padrón…'}</p> : (
               <>
                 <div className="registro-huella__filtros">
-                  <label>Categoría<select aria-label="Filtrar por categoría" value={categoria} disabled={bloqueado}
-                    onChange={e => { setCategoria(e.target.value); setServicio(''); seleccionar(''); }}>
-                    <option value="">Todas las permitidas</option>
-                    {categorias.map(c => <option key={c}>{c}</option>)}
-                  </select></label>
-                  <label>Servicio<select aria-label="Filtrar por servicio" value={servicio} disabled={bloqueado}
-                    onChange={e => { setServicio(e.target.value); seleccionar(''); }}>
-                    <option value="">Todos los servicios</option>
-                    {servicios.map(s => <option key={s}>{s}</option>)}
-                  </select></label>
+                  <div className="registro-huella__filtro">
+                    <span>Categoría</span>
+                    <AppSelect ariaLabel="Filtrar por categoría" value={categoria} disabled={bloqueado}
+                      onChange={valor => { setCategoria(valor); setServicio(''); seleccionar(''); }}
+                      options={[{ value: '', label: 'Todas las permitidas' },
+                        ...categorias.map(c => ({ value: c, label: c }))]} />
+                  </div>
+                  <div className="registro-huella__filtro">
+                    <span>Servicio</span>
+                    <AppSelect ariaLabel="Filtrar por servicio" value={servicio} disabled={bloqueado}
+                      onChange={valor => { setServicio(valor); seleccionar(''); }}
+                      options={[{ value: '', label: 'Todos los servicios' },
+                        ...servicios.map(s => ({ value: s, label: s }))]} />
+                  </div>
                 </div>
                 <div className="registro-huella__controles">
                   <label className="registro-huella__busqueda">
@@ -233,13 +238,13 @@ export default function RegistrarHuella({
                     <input value={busqueda} disabled={bloqueado} placeholder="Buscar por nombre o legajo…"
                       onChange={e => { setBusqueda(e.target.value); seleccionar(''); }} />
                   </label>
-                  <select id="huella-persona" value={elegido} disabled={bloqueado}
-                    onChange={e => seleccionar(e.target.value)}>
-                    <option value="">{opciones.length ? 'Selecciona a la persona…' : 'No hay coincidencias'}</option>
-                    {opciones.map(p => <option key={p.id} value={String(p.id)}>
-                      {p.nombre} · {p.legajo}{p.huella_registrada ? ' · Huella registrada' : ''}
-                    </option>)}
-                  </select>
+                  <AppSelect id="huella-persona" ariaLabel="Selecciona a la persona" value={elegido} disabled={bloqueado}
+                    onChange={valor => seleccionar(valor)}
+                    placeholder={opciones.length ? 'Selecciona a la persona…' : 'No hay coincidencias'}
+                    options={opciones.map(p => ({
+                      value: String(p.id),
+                      label: `${p.nombre} · ${p.legajo}${p.huella_registrada ? ' · Huella registrada' : ''}`,
+                    }))} />
                 </div>
                 {persona ? (
                   <div className="registro-huella__identidad">

@@ -150,10 +150,10 @@ test('sistemas ve solo Reglas, Administración y Lector biométrico, en ese orde
   assert.equal(usaDatosDelComedor('sistemas'), false);
 });
 
-test('las pantallas quitadas a root siguen existiendo para la jefa; la cocinera no cambia', () => {
+test('las pantallas quitadas a root siguen existiendo para la jefa; la cocinera suma el checklist', () => {
   assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
   assert.equal(puedeMarcarManual('jefa'), true);
-  assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
+  assert.deepEqual(seccionesPermitidas('cocinera'), ['checklist', 'vivo']);
   assert.equal(puedeMarcarManual('cocinera'), false);
   for (const id of ['supervision', 'dashboard', 'historial', 'reportes', 'vivo', 'cuentas']) {
     assert.ok(SECCIONES.some((seccion) => seccion.id === id), `la sección ${id} no se elimina`);

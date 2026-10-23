@@ -22,13 +22,13 @@
 .registro-huella__modo { color: var(--c-aviso); font-size: var(--t-xs); font-weight: 750; }
 .registro-huella__paso { display: block; color: var(--c-texto-2); font-size: var(--t-sm); font-weight: 750; }
 .registro-huella__filtros { display: grid; grid-template-columns: 1fr 1fr; gap: var(--e-3); margin-top: var(--e-3); }
-.registro-huella__filtros label { display: flex; flex-direction: column; gap: var(--e-1); color: var(--c-texto-2); font-size: var(--t-xs); }
+.registro-huella__filtros label,
+.registro-huella__filtro { display: flex; flex-direction: column; gap: var(--e-1); min-width: 0; color: var(--c-texto-2); font-size: var(--t-xs); }
 .registro-huella__lectura { padding: var(--e-3); border-left: 3px solid var(--c-acento-fuerte); }
 .registro-huella__lectura--rechazada { border-color: var(--c-aviso); }
 .registro-huella__controles { display: grid; grid-template-columns: 1fr 1.4fr; gap: var(--e-3); margin-top: var(--e-3); }
 .registro-huella__busqueda { display: flex; align-items: center; gap: var(--e-2); }
-.registro-huella__busqueda,
-.registro-huella select {
+.registro-huella__busqueda {
   min-width: 0;
   padding: var(--e-3);
   color: var(--c-texto);
@@ -39,10 +39,8 @@
   font-size: var(--t-sm);
 }
 .registro-huella input { width: 100%; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; }
-.registro-huella select { appearance: auto; }
 .registro-huella input:focus { outline: none; }
-.registro-huella__busqueda:focus-within,
-.registro-huella select:focus-visible { outline: 2px solid var(--c-acento-oscuro); outline-offset: 2px; }
+.registro-huella__busqueda:focus-within { outline: 2px solid var(--c-acento-oscuro); outline-offset: 2px; }
 .registro-huella__identidad { display: flex; flex-direction: column; gap: var(--e-1); margin-top: var(--e-4); padding-left: var(--e-3); border-left: 3px solid var(--c-acento-fuerte); overflow-wrap: anywhere; }
 .registro-huella__identidad strong { font-size: var(--t-md); }
 .registro-huella__identidad span,

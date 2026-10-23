@@ -36,8 +36,8 @@ const ACTIVA_JEFA = { fase: 'activa', rol: 'jefa', usuario: 'ntarifa', aviso: nu
 
 // --- Guardia por rol ---
 
-test('guardia por rol: cocinera 1 sección, jefa 5, sistemas 3 (reglas, admin y lector), rol desconocido ninguna', () => {
-  assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
+test('guardia por rol: cocinera 2 secciones (checklist y vivo), jefa 5, sistemas 3 (reglas, admin y lector), rol desconocido ninguna', () => {
+  assert.deepEqual(seccionesPermitidas('cocinera'), ['checklist', 'vivo']);
   assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
   assert.deepEqual(seccionesPermitidas('sistemas'), ['reglas', 'admin', 'monitoreo']);
   assert.deepEqual(seccionesPermitidas(' Jefa '), seccionesPermitidas('jefa'));
@@ -49,7 +49,11 @@ test('guardia por rol: cocinera 1 sección, jefa 5, sistemas 3 (reglas, admin y 
     assert.equal(puedeVerSeccion('cocinera', id), false, `cocinera no ve ${id}`);
   }
   assert.equal(puedeVerSeccion('cocinera', 'vivo'), true);
+  assert.equal(puedeVerSeccion('cocinera', 'checklist'), true);
+  assert.equal(seccionInicialDeRol('cocinera'), 'checklist');
   assert.equal(puedeVerSeccion('jefa', 'vivo'), false);
+  assert.equal(puedeVerSeccion('jefa', 'checklist'), false);
+  assert.equal(puedeVerSeccion('sistemas', 'checklist'), false);
   assert.equal(puedeVerSeccion('jefa', 'supervision'), true);
   assert.equal(puedeVerSeccion('jefa', 'reportes'), true);
 });
@@ -61,11 +65,12 @@ test('el registro manual es solo de la jefa: ni cocinera ni sistemas lo tienen',
   assert.equal(puedeMarcarManual('desconocido'), false);
 });
 
-test('redirect cocinera: la sección que dejó la jefa en la PC compartida la manda a Control Biométrico', () => {
-  assert.equal(resolverSeccionGuardada('cocinera', 'reportes'), 'vivo');
-  assert.equal(resolverSeccionGuardada('cocinera', 'historial'), 'vivo');
-  assert.equal(resolverSeccionGuardada('cocinera', 'supervision'), 'vivo');
-  assert.equal(resolverSeccionGuardada('cocinera', null), 'vivo');
+test('redirect cocinera: la sección que dejó la jefa en la PC compartida la manda al checklist', () => {
+  assert.equal(resolverSeccionGuardada('cocinera', 'reportes'), 'checklist');
+  assert.equal(resolverSeccionGuardada('cocinera', 'historial'), 'checklist');
+  assert.equal(resolverSeccionGuardada('cocinera', 'supervision'), 'checklist');
+  assert.equal(resolverSeccionGuardada('cocinera', null), 'checklist');
+  assert.equal(resolverSeccionGuardada('jefa', 'checklist'), 'supervision');
   assert.equal(resolverSeccionGuardada('jefa', 'reportes'), 'reportes');
   assert.equal(resolverSeccionGuardada('jefa', 'vivo'), 'supervision');
   assert.equal(resolverSeccionGuardada('jefa', 'basura'), 'supervision');

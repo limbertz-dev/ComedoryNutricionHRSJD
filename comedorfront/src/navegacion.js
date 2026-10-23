@@ -2,6 +2,7 @@ import {
   IconoDashboard,
   IconoHistorial,
   IconoHuella,
+  IconoLista,
   IconoOjo,
   IconoReloj,
   IconoReportes,
@@ -17,6 +18,13 @@ import { resolverSeccionGuardada, seccionInicialDeRol, seccionesPermitidas } fro
  * la barra superior muestra de la sección abierta.
  */
 export const SECCIONES = [
+  {
+    id: 'checklist',
+    etiqueta: 'Checklist de comida',
+    titulo: 'Checklist de comida',
+    descripcion: 'Entrega de raciones de la comida en curso',
+    Icono: IconoLista,
+  },
   {
     id: 'vivo',
     etiqueta: 'Control Biométrico',
@@ -82,7 +90,7 @@ export const SECCIONES = [
   },
 ];
 
-export const SECCION_INICIAL = 'vivo';
+export const SECCION_INICIAL = 'checklist';
 
 /** Sección abierta, o la primera si el id no existe. */
 export function buscarSeccion(id) {

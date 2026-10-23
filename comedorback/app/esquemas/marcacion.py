@@ -107,3 +107,41 @@ class RespuestaMarcacion(BaseModel):
     raciones_restantes: int | None = Field(
         default=None, description="null = no se aplica un limite manual de cupo"
     )
+
+
+class PersonaChecklist(BaseModel):
+    """Una persona con derecho a la comida en curso."""
+
+    usuario_id: int
+    nombre: str | None = None
+    categoria: str | None = None
+    servicio: str | None = Field(default=None, description="Sala del hospital del turno")
+    turno: str
+    servida: bool
+    metodo: Literal["biometrico", "manual", "checklist"] | None = None
+    asistencia_id: int | None = None
+    fecha_hora: datetime | None = None
+    anulable_hasta: datetime | None = Field(
+        default=None,
+        description="Solo en las marcas propias del checklist que aún se pueden desmarcar.",
+    )
+
+
+class Checklist(BaseModel):
+    momento: datetime
+    fuera_de_horario: bool
+    comida_id: int | None = None
+    comida: str | None = None
+    fecha_comida: date | None = None
+    minutos_para_anular: int
+    personas: list[PersonaChecklist]
+
+
+class SolicitudChecklist(BaseModel):
+    usuario_id: int = Field(gt=0, description="users.id de quien recibe la ración.")
+
+
+class RespuestaAnulacion(BaseModel):
+    asistencia_id: int
+    usuario_id: int
+    anulada_en: datetime

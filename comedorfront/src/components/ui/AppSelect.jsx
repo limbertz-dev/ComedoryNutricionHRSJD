@@ -11,6 +11,7 @@ export default function AppSelect({
   placeholder = 'Seleccionar',
   options = [],
   className = '',
+  ariaLabel = undefined,
 }) {
   const listboxId = useId();
   const rootRef = useRef(null);
@@ -66,6 +67,7 @@ export default function AppSelect({
         type="button"
         className="app-select-trigger"
         disabled={disabled}
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}

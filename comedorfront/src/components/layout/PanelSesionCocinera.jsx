@@ -3,7 +3,7 @@ import useSesion from '../../hooks/useSesion.js';
 import { SECCION_INICIAL, guardarSeccionActiva } from '../../navegacion.js';
 import { etiquetaDeRol } from '../../permisos.js';
 import Boton from '../ui/Boton.jsx';
-import { IconoCerrarSesion, IconoUsuario } from '../ui/Iconos.jsx';
+import { IconoCerrarSesion, IconoHuella, IconoLista, IconoUsuario } from '../ui/Iconos.jsx';
 import './PanelSesionCocinera.css';
 
 /** True si el navegador ofrece la Fullscreen API. */
@@ -26,8 +26,17 @@ export async function alternarPantallaCompleta() {
   }
 }
 
-/** Panel de usuario, pantalla completa y cierre de sesion. */
-export default function PanelSesionCocinera({ abiertoInicial = false }) {
+/*
+ * Las dos pantallas de la cocinera. El checklist es la principal mientras no
+ * esté el lector; el botón del panel lleva a la otra.
+ */
+const PANTALLAS_COCINA = {
+  checklist: { destino: 'vivo', etiqueta: 'Ir a Control Biométrico', Icono: IconoHuella },
+  vivo: { destino: 'checklist', etiqueta: 'Ir al Checklist de comida', Icono: IconoLista },
+};
+
+/** Panel de usuario, cambio de pantalla, pantalla completa y cierre de sesion. */
+export default function PanelSesionCocinera({ abiertoInicial = false, seccionActiva = null, onCambiarSeccion = null }) {
   const { rol, usuario, logout } = useSesion();
   const [abierto, setAbierto] = useState(abiertoInicial);
   const cajaRef = useRef(null);
@@ -49,7 +58,7 @@ export default function PanelSesionCocinera({ abiertoInicial = false }) {
   }, [abierto]);
 
   function manejarCerrarSesion() {
-    // Igual que el sidebar: quien entre después empieza en Control Biométrico.
+    // Igual que el sidebar: quien entre después empieza en su primera sección.
     guardarSeccionActiva(SECCION_INICIAL);
     logout();
   }
@@ -62,6 +71,11 @@ export default function PanelSesionCocinera({ abiertoInicial = false }) {
       usuario={usuario}
       rol={rol}
       onCerrarSesion={manejarCerrarSesion}
+      seccionActiva={seccionActiva}
+      onCambiarSeccion={onCambiarSeccion ? (id) => {
+        setAbierto(false);
+        onCambiarSeccion(id);
+      } : null}
     />
   );
 }
@@ -78,7 +92,10 @@ export function CajaSesionCocinera({
   usuario,
   rol,
   onCerrarSesion,
+  seccionActiva = null,
+  onCambiarSeccion = null,
 }) {
+  const cambio = onCambiarSeccion ? PANTALLAS_COCINA[seccionActiva] : null;
   return (
     <div className="panel-sesion" ref={cajaRef}>
       <button
@@ -96,6 +113,12 @@ export function CajaSesionCocinera({
             <strong className="panel-sesion__usuario-nombre">{usuario || 'Usuario'}</strong>
             <small className="panel-sesion__usuario-rol">{etiquetaDeRol(rol)}</small>
           </div>
+          {cambio ? (
+            <Boton variante="primario" anchoCompleto icono={<cambio.Icono tamano={18} />}
+              onClick={() => onCambiarSeccion(cambio.destino)}>
+              {cambio.etiqueta}
+            </Boton>
+          ) : null}
           {admitePantallaCompleta() ? (
             <Boton variante="secundario" anchoCompleto onClick={alternarPantallaCompleta}>
               Pantalla completa
