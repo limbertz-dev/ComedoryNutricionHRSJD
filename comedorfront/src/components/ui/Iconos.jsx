@@ -121,6 +121,15 @@ export function IconoCheck(props) {
   );
 }
 
+export function IconoLista(props) {
+  return (
+    <Svg {...props}>
+      <path d="m4 7 1.6 1.6L8.5 5.7M4 15.5l1.6 1.6 2.9-2.9" />
+      <path d="M12 7.5h8M12 16h8" />
+    </Svg>
+  );
+}
+
 export function IconoEquis(props) {
   return (
     <Svg {...props} strokeWidth="2.6">

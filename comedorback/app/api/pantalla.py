@@ -12,7 +12,8 @@ from app.core import reloj
 from app.core.autorizacion import UsuarioActual, UsuarioIdentificador
 from app.core.db import SesionDep
 from app.esquemas.historial import ComensalDelDia, ComidaListada, HistorialDiario
-from app.esquemas.marcacion import PoliciaActivo
+from app.esquemas.marcacion import Checklist, PoliciaActivo
+from app.logica import checklist as checklist_logica
 from app.logica import policia as policia_logica
 from app.esquemas.pantalla import (
     ComidasDelDia,
@@ -197,3 +198,16 @@ def policias(sesion: SesionDep) -> list[PoliciaActivo]:
     """Para que cocina elija a un policía cuando el lector no reconoce su
     huella. Solo nombre y CI/placa; nunca plantillas."""
     return [PoliciaActivo(**p) for p in policia_logica.listar_activos(sesion)]
+
+
+@router.get(
+    "/checklist",
+    response_model=Checklist,
+    summary="Checklist de la comida en curso",
+)
+def checklist(sesion: SesionDep, usuario: UsuarioActual) -> Checklist:
+    """Quiénes tienen derecho a la comida que está abierta (turno de 12 h o
+    más, categorías permitidas, sin novedad) y si ya recibieron su ración.
+    Fuera de horario: `fuera_de_horario=true` y lista vacía."""
+    cuenta_id = usuario.id
+    return Checklist(**asdict(checklist_logica.listar(sesion, cuenta_id)))

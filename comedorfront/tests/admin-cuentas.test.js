@@ -67,7 +67,7 @@ const cuentaApi = (cambios = {}) => ({
 test("solo sistemas ve 'admin': jefa y cocinera no la ven ni la montan", () => {
   assert.deepEqual(seccionesPermitidas('sistemas'), ['reglas', 'admin', 'monitoreo']);
   assert.deepEqual(seccionesPermitidas('jefa'), ['supervision', 'dashboard', 'historial', 'reportes', 'cuentas']);
-  assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
+  assert.deepEqual(seccionesPermitidas('cocinera'), ['checklist', 'vivo']);
   assert.equal(puedeVerSeccion('sistemas', 'admin'), true);
   assert.equal(puedeVerSeccion('jefa', 'admin'), false);
   assert.equal(puedeVerSeccion('cocinera', 'admin'), false);

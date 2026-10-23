@@ -89,6 +89,8 @@ def tablas_auth_limpias():
         sesion.execute(text("DELETE FROM solicitudes_lector"))
         sesion.execute(text("DELETE FROM vinculos_lector"))
         sesion.execute(text("DELETE FROM raciones_policia"))
+        # Las anulaciones del checklist apuntan (RESTRICT) a la cuenta.
+        sesion.execute(text("DELETE FROM anulaciones_checklist"))
         # R2 deja solo la versión base (2000-01-01): los tests que asumen
         # 12 h y enfermería excluida no se enteran de versiones de otro test.
         sesion.execute(

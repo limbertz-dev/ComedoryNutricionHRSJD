@@ -90,6 +90,10 @@ def opciones(comentario: str, *restricciones):
     return (*restricciones, config) if restricciones else config
 
 
+# 'checklist': la cocinera marca en la lista de la comida en curso mientras
+# no esté el lector. Pasa por las mismas reglas que la huella.
+METODOS_ASISTENCIA = ("biometrico", "manual", "checklist")
+
 MOTIVOS_RECHAZO = (
     "duplicado",
     "sin_derecho",
@@ -312,7 +316,7 @@ class Asistencia(Base):
         ID, comment="turnos_asignados.id que justifico la racion, sin FK."
     )
     metodo: Mapped[str] = mapped_column(
-        SAEnum("biometrico", "manual", name="metodo_asistencia")
+        SAEnum(*METODOS_ASISTENCIA, name="metodo_asistencia")
     )
     lectura_id: Mapped[int | None] = mapped_column(
         ID,
@@ -338,6 +342,51 @@ class Asistencia(Base):
         ),
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# Idénticos carácter por carácter a los de la migración b3e5f7a9c1d4.
+COMENTARIO_TABLA_ANULACIONES = (
+    "Raciones del checklist que la misma cocinera desmarco a los pocos "
+    "minutos. Solo inserciones: la asistencia se borra y aqui queda su copia."
+)
+COMENTARIO_ANULACION_ASISTENCIA = (
+    "asistencias.id que se borro. Sin FK: la fila ya no existe."
+)
+
+
+class AnulacionChecklist(Base):
+    """Una ración del checklist que se deshizo por error de la cocinera.
+
+    La ración es un hecho histórico y no se borra... salvo esta excepción
+    acotada: la marcó la misma cuenta hace pocos minutos y la comida sigue
+    abierta (app/logica/checklist.py). Para que la excepción no deje huecos,
+    la copia de la ración y quién la anuló quedan aquí.
+    """
+
+    __tablename__ = "anulaciones_checklist"
+    __table_args__ = opciones(
+        COMENTARIO_TABLA_ANULACIONES,
+        Index("idx_anulaciones_checklist_fecha_comida", "fecha_comida", "comida_id"),
+    )
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True)
+    asistencia_id: Mapped[int] = mapped_column(ID, comment=COMENTARIO_ANULACION_ASISTENCIA)
+    usuario_id: Mapped[int] = mapped_column(
+        ID, comment="users.id del comensal desmarcado, sin FK entre bases."
+    )
+    fecha_comida: Mapped[date] = mapped_column(Date)
+    comida_id: Mapped[int] = mapped_column(ID)
+    marcada_en: Mapped[datetime] = mapped_column(
+        DateTime, comment="asistencias.fecha_hora de la racion anulada."
+    )
+    cuenta_id: Mapped[int] = mapped_column(
+        ID,
+        ForeignKey("usuarios_sistema.id", ondelete="RESTRICT"),
+        comment="La cocinera que marco y anulo (la misma cuenta, por regla).",
+    )
+    anulada_en: Mapped[datetime] = mapped_column(
+        DateTime, comment="Instante del reloj del servidor al anular."
+    )
 
 
 CAUSA_IDENTIFICACION = "identificacion_manual_por_no_identificado"

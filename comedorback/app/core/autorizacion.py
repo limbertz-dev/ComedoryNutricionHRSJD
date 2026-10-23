@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.core import seguridad
 from app.core.db import SesionDep
-from app.core.permisos import IDENTIFICACION_LECTURA, MARCACION_MANUAL
+from app.core.permisos import CHECKLIST_COCINA, IDENTIFICACION_LECTURA, MARCACION_MANUAL
 from app.modelos.usuarios import UsuarioSistema
 
 
@@ -114,6 +114,19 @@ def usuario_identificador(usuario: UsuarioActual) -> UsuarioSistema:
 
 
 UsuarioIdentificador = Annotated[UsuarioSistema, Depends(usuario_identificador)]
+
+
+def usuario_checklist(usuario: UsuarioActual) -> UsuarioSistema:
+    """La cuenta que marca en el checklist de cocina: solo cocinera."""
+    if usuario.rol not in CHECKLIST_COCINA:
+        raise prohibido(
+            "rol_no_autorizado",
+            f"El rol '{usuario.rol}' no marca en el checklist de cocina.",
+        )
+    return usuario
+
+
+UsuarioChecklist = Annotated[UsuarioSistema, Depends(usuario_checklist)]
 
 
 def requiere_rol(
