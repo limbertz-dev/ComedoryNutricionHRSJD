@@ -24,7 +24,11 @@ test('lista el comensal, ID, legajo y cuenta registradora con fecha local explí
 
 test('carga, vacío, error y último resultado conservado son estados distintos', () => {
   assert.match(renderToStaticMarkup(h(HuellasRegistradas)), /Cargando huellas registradas/);
-  assert.match(renderToStaticMarkup(h(HuellasRegistradas, { inicial: { pagina: { ...pagina, total: 0, datos: [] } } })), /Todavía no hay huellas registradas/);
+  // Abre filtrado por el día de hoy: vacío dice que ese día no hubo altas.
+  const vacio = renderToStaticMarkup(h(HuellasRegistradas, { inicial: { pagina: { ...pagina, total: 0, datos: [] } } }));
+  assert.match(vacio, /No hubo altas de huella ese día/);
+  assert.match(vacio, /Filtrar por día del alta/);
+  assert.match(vacio, /Todas las fechas/);
   const error = renderToStaticMarkup(h(HuellasRegistradas, { inicial: { pagina, error: 'Sin conexión' } }));
   assert.match(error, /role="alert"/);
   assert.match(error, /Se conserva la última consulta/);
@@ -50,7 +54,18 @@ test('cliente envía búsqueda y página; rechaza fechas e identidades inválida
   };
   assert.equal((await obtenerRegistrosHuellas({ busqueda: ' LEG-QA01 ', desplazamiento: 50 })).total, 51);
   await assert.rejects(obtenerRegistrosHuellas({ limite: 101 }), /Revisa/);
+  await assert.rejects(obtenerRegistrosHuellas({ fecha: '22/10/2026' }), /Revisa/);
   assert.equal(llamadas, 1);
+  globalThis.fetch = async url => {
+    assert.equal(new URL(url).searchParams.get('fecha'), '2026-10-22');
+    return { ok: true, json: async () => pagina };
+  };
+  await obtenerRegistrosHuellas({ fecha: '2026-10-22' });
+  globalThis.fetch = async url => {
+    assert.equal(new URL(url).searchParams.has('fecha'), false);
+    return { ok: true, json: async () => pagina };
+  };
+  await obtenerRegistrosHuellas();
   for (const invalida of [{ ...fila, registrada_en: 'ayer' }, { ...fila, cuenta: null }, { ...fila, comensal: { ...fila.comensal, usuario_id: '900101' } }]) {
     globalThis.fetch = async () => ({ ok: true, json: async () => ({ ...pagina, datos: [invalida] }) });
     await assert.rejects(obtenerRegistrosHuellas(), /registro de huellas/);

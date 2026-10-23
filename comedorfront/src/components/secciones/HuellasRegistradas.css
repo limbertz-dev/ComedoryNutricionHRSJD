@@ -27,3 +27,12 @@
 .huellas-registro__fecha { font-variant-numeric: tabular-nums; }
 .huellas-registro__paginas { display: flex; align-items: center; gap: var(--e-2); flex-wrap: wrap; }
 .huellas-registro__paginas p { margin-right: auto; }
+
+/* Filtro por un solo día del alta, con el mismo selector que el resto de la app. */
+.huellas-registro__fecha-filtro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--e-3);
+  margin-bottom: var(--e-4);
+}
