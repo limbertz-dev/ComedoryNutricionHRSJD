@@ -283,10 +283,14 @@ export default function Supervision({
     />
   ) : null;
 
+  /* Los policías van en su propio apartado: no son personal del padrón. */
+  const policias = useMemo(() => marcaciones.filter(esPolicia), [marcaciones]);
+  const personal = useMemo(() => marcaciones.filter((m) => !esPolicia(m)), [marcaciones]);
+
   /* Filtrado local sobre las filas de la pestaña activa */
   const marcacionesFiltradas = useMemo(
-    () => filtrarMarcaciones(marcaciones, { resultado: filtroResultado, busqueda }),
-    [marcaciones, filtroResultado, busqueda],
+    () => filtrarMarcaciones(personal, { resultado: filtroResultado, busqueda }),
+    [personal, filtroResultado, busqueda],
   );
   // Las altas no dependen del dia ni de la comida seleccionada.
   const registroHuellas = puedeConsultarHuellas ? <HuellasRegistradas
@@ -485,7 +489,7 @@ export default function Supervision({
       <section className="supervision__panel" aria-label="Marcaciones de la comida seleccionada">
         <header className="supervision__panel-cabecera">
           <p className="supervision__conteo" role="status">
-            {`${marcacionesFiltradas.length} de ${marcaciones.length} ${marcaciones.length === 1 ? 'marcación' : 'marcaciones'}`}
+            {`${marcacionesFiltradas.length} de ${personal.length} ${personal.length === 1 ? 'marcación' : 'marcaciones'}`}
           </p>
           {marcaciones.length >= LIMITE_SUPERVISION ? (
             <p className="supervision__nota-truncada" role="status">{`Mostrando las últimas ${LIMITE_SUPERVISION}`}</p>
@@ -541,6 +545,8 @@ export default function Supervision({
         )}
       </section>
 
+      <RacionesPolicia filas={policias} />
+
       {/* Consulta de lo que hizo cocina con las huellas no reconocidas: solo
           jefa, sin botones de aprobación. Acotada a la pestaña activa y
           refrescada con el resto de la sección. */}
@@ -556,6 +562,56 @@ export default function Supervision({
       ) : null}
       {registroHuellas}
     </div>
+  );
+}
+
+/** Una ración de policía por el lector: vía libre, sin persona del padrón. */
+export function esPolicia(marcacion) {
+  return marcacion?.origen === 'racion_policia';
+}
+
+/**
+ * Apartado de policías de la comida (o del día, en «Todas»): cuántas
+ * raciones y a qué hora. No hay persona que mostrar ni motivo de rechazo.
+ */
+export function RacionesPolicia({ filas }) {
+  return (
+    <section className="supervision__panel supervision__policias" aria-label="Raciones de policía">
+      <header className="supervision__panel-cabecera">
+        <h3 className="supervision__subtitulo">Policías</h3>
+        <p className="supervision__conteo" role="status">
+          {`${filas.length} ${filas.length === 1 ? 'ración' : 'raciones'} · vía libre, cuentan en la columna Policías`}
+        </p>
+      </header>
+      {filas.length === 0 ? (
+        <p className="supervision__vacio supervision__vacio--tabla" role="status">
+          No hay raciones de policía registradas.
+        </p>
+      ) : (
+        <div className="supervision__tabla-caja">
+          <table className="supervision__tabla" aria-label="Raciones de policía">
+            <thead>
+              <tr>
+                <th scope="col">Hora</th>
+                <th scope="col">Comida</th>
+                <th scope="col">Resultado</th>
+                <th scope="col">Lector</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((m) => (
+                <tr key={m.clave}>
+                  <td>{m.hora}</td>
+                  <td>{m.comida ?? '—'}</td>
+                  <td><Etiqueta tono="exito">Ración registrada</Etiqueta></td>
+                  <td>{m.dispositivo ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

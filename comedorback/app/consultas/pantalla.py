@@ -13,7 +13,7 @@ informe dicen cosas distintas del mismo día.
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import and_, case, exists, func, literal, or_, select
+from sqlalchemy import and_, case, exists, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, aliased
 
 from app.consultas.derecho import (
@@ -27,6 +27,7 @@ from app.consultas.servicio import Servicio, VentanasDelDia, evaluar_servicio, c
 from app.core import reloj
 from app.consultas import raciones
 from app.consultas.perfiles import categoria_permitida_sql
+from app.logica import policia
 from app.logica.marcacion import ComidaEnCurso, resolver_comida_en_curso
 from app.modelos.comedor import (
     Asistencia,
@@ -66,6 +67,8 @@ class TotalesDia:
 # tabla y una lectura y una asistencia manual pueden compartirlo.
 ORIGEN_LECTURA = "lectura_biometrica"
 ORIGEN_MANUAL = "asistencia_manual"
+# Ración de policía por el lector: sin persona del padrón (app/logica/policia.py).
+ORIGEN_POLICIA = "racion_policia"
 
 
 def clave_evento(origen: str, id_: int) -> str:
@@ -492,26 +495,57 @@ def ultimas_marcaciones(
             func.date(Asistencia.fecha_hora) == dia,
         )
     )
+    comida_policia = aliased(Comida, name="comida_policia")
+    policias = (
+        select(
+            RacionPolicia.id.label("id"),
+            literal(None).label("usuario_id"),
+            RacionPolicia.fecha_hora,
+            literal(policia.NOMBRE).label("nombre"),
+            literal("Policías").label("categoria"),
+            RacionPolicia.comida_id,
+            comida_policia.nombre.label("comida"),
+            literal("aceptada").label("resultado"),
+            literal(None).label("motivo"),
+            literal(True).label("valido"),
+            RacionPolicia.dispositivo,
+            literal(None).label("lectura_resultado"),
+            literal(None).label("lectura_motivo"),
+            literal(None).label("asistencia_id"),
+            literal(None).label("racion_usuario_id"),
+            literal(policia.NOMBRE).label("racion_nombre"),
+            RacionPolicia.fecha_comida.label("racion_fecha_comida"),
+            RacionPolicia.fecha_hora.label("racion_fecha_hora"),
+        )
+        .select_from(RacionPolicia)
+        .outerjoin(comida_policia, comida_policia.id == RacionPolicia.comida_id)
+        .where(func.date(RacionPolicia.fecha_hora) == dia)
+    )
     if comida_id is not None:
         lecturas = lecturas.where(comida_resuelta_id == comida_id)
         manuales = manuales.where(Asistencia.comida_id == comida_id)
-    filas = _componer_ventana(sesion, lecturas, manuales, limite)
+        policias = policias.where(RacionPolicia.comida_id == comida_id)
+    filas = _componer_ventana(sesion, lecturas, manuales, limite, policias)
     return _enriquecer(sesion, filas, rol, cuenta_id)
 
 
-def _componer_ventana(sesion: Session, lecturas, manuales, limite: int) -> list[Marcacion]:
-    """Une las dos ramas, ordena y corta la ventana.
+def _componer_ventana(
+    sesion: Session, lecturas, manuales, limite: int, policias=None
+) -> list[Marcacion]:
+    """Une las tres ramas (lecturas, manuales y policías), ordena y corta la ventana.
 
     Cada rama agrega su `origen` como literal: sale de la consulta, nunca de
     una columna con datos. Orden: fecha_hora e id descendentes y, como último
     desempate, `origen` ascendente, para que dos filas con la misma fecha e
     id (una de cada tabla) salgan siempre en el mismo orden.
     """
-    consulta = (
-        lecturas.add_columns(literal(ORIGEN_LECTURA).label("origen"))
-        .union_all(manuales.add_columns(literal(ORIGEN_MANUAL).label("origen")))
-        .subquery("marcaciones")
-    )
+    ramas = [
+        lecturas.add_columns(literal(ORIGEN_LECTURA).label("origen")),
+        manuales.add_columns(literal(ORIGEN_MANUAL).label("origen")),
+    ]
+    if policias is not None:
+        ramas.append(policias.add_columns(literal(ORIGEN_POLICIA).label("origen")))
+    consulta = union_all(*ramas).subquery("marcaciones")
     ordenadas = (
         select(consulta)
         .order_by(
@@ -625,6 +659,18 @@ def _enriquecer(
     ventanas: VentanasDelDia | None = None
 
     for m in filas:
+        if m.origen == ORIGEN_POLICIA:
+            # Vía libre: siempre una ración, sin lectura de personal que revisar.
+            m.estado_final = "racion_servida"
+            m.decision_original = None
+            m.comida_origen = "persistida_en_asistencia"
+            m.motivo_no_identificable = "no_aplica"
+            m.resultado_final = {
+                "via": "policia", "asistencia_id": None,
+                "comensal": {"usuario_id": None, "nombre": policia.NOMBRE},
+                "comida": m.comida, "fecha_comida": m.racion_fecha_comida, "momento": m.racion_fecha_hora,
+            }
+            continue
         con_racion = m.asistencia_id is not None
         m.estado_final = "racion_servida" if con_racion else "sin_racion"
         es_lectura = m.origen == ORIGEN_LECTURA
