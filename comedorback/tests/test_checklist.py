@@ -1,8 +1,8 @@
 """Checklist de cocina: lista de la comida en curso, marcar y desmarcar.
 
 La lista sale del derecho (`aplicar_reglas`) y la marca pasa por las mismas
-reglas que la huella. Desmarcar: solo la misma cocinera, dentro de
-MINUTOS_PARA_ANULAR y con la comida todavía abierta.
+reglas que la huella. Desmarcar: solo la misma cocinera y con la comida
+todavía abierta, sin otro plazo.
 """
 
 from datetime import date, datetime, time, timedelta
@@ -13,7 +13,6 @@ from sqlalchemy import select, text
 import reloj_prueba
 from app.consultas.derecho import aplicar_reglas
 from app.core.db import SesionLocal
-from app.logica.checklist import MINUTOS_PARA_ANULAR
 from app.modelos.comedor import AnulacionChecklist, Asistencia, HorarioComida
 from app.modelos.heredados import ComidaPorTurno
 from app.semillas import horarios
@@ -162,7 +161,7 @@ def test_marcar_registra_con_la_cuenta_y_no_repite(cliente, cuentas):
     persona = next(p for p in lista["personas"] if p["usuario_id"] == usuario_id)
     assert persona["servida"] is True
     assert persona["metodo"] == "checklist"
-    assert persona["anulable_hasta"] is not None
+    assert persona["anulable"] is True
 
 
 @pytest.mark.usefixtures("con_horarios")
@@ -192,7 +191,8 @@ def test_desmarcar_en_plazo_deja_auditoria(cliente, cuentas):
     asistencia_id = cliente.post(
         "/asistencias/checklist", json={"usuario_id": usuario_id}, headers=cocinera
     ).json()["asistencia_id"]
-    reloj_prueba.fijar(momento + timedelta(minutes=MINUTOS_PARA_ANULAR - 1))
+    # Mucho después de marcar, pero dentro de la misma comida: se puede.
+    reloj_prueba.fijar(momento + timedelta(minutes=30))
     r = cliente.delete(f"/asistencias/checklist/{asistencia_id}", headers=cocinera)
     assert r.status_code == 200, r.text
     with SesionLocal() as sesion:
@@ -207,7 +207,7 @@ def test_desmarcar_en_plazo_deja_auditoria(cliente, cuentas):
 
 
 @pytest.mark.usefixtures("con_horarios")
-def test_desmarcar_vencido_otra_cuenta_o_no_checklist(cliente, cuentas, lector):
+def test_desmarcar_otra_cuenta_o_comida_cerrada(cliente, cuentas, lector):
     _, cocinera = cuentas["cocinera"]
     _, cocinera_b = cuentas["cocinera_b"]
     usuario_id, _, _, momento = _en_franja()
@@ -219,13 +219,16 @@ def test_desmarcar_vencido_otra_cuenta_o_no_checklist(cliente, cuentas, lector):
     assert r.status_code == 403
     assert r.json()["motivo"] == "otra_cuenta"
 
-    reloj_prueba.fijar(momento + timedelta(minutes=MINUTOS_PARA_ANULAR, seconds=1))
+    # La otra cocinera la ve entregada, pero no la puede deshacer.
+    lista = cliente.get("/pantalla/checklist", headers=cocinera_b).json()
+    persona = next(p for p in lista["personas"] if p["usuario_id"] == usuario_id)
+    assert persona["servida"] is True and persona["anulable"] is False
+
+    # Cerrada la comida (madrugada, sin franja en la semilla): ya no se deshace.
+    reloj_prueba.fijar(datetime.combine(momento.date() + timedelta(days=1), time(3, 30)))
     r = cliente.delete(f"/asistencias/checklist/{asistencia_id}", headers=cocinera)
     assert r.status_code == 409
-    assert r.json()["motivo"] == "plazo_vencido"
-    lista = cliente.get("/pantalla/checklist", headers=cocinera).json()
-    persona = next(p for p in lista["personas"] if p["usuario_id"] == usuario_id)
-    assert persona["servida"] is True and persona["anulable_hasta"] is None
+    assert r.json()["motivo"] == "comida_cerrada"
 
     assert cliente.delete("/asistencias/checklist/999999999", headers=cocinera).status_code == 404
     with SesionLocal() as sesion:

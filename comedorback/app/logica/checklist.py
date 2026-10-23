@@ -7,12 +7,12 @@ que lo anule) y la marca pasa por `registrar_marcacion`, con el mismo orden de
 validación que la huella: la pantalla nunca decide si alguien come.
 
 Desmarcar es la única excepción a «una ración no se borra»: solo la misma
-cuenta que marcó, dentro de `MINUTOS_PARA_ANULAR` y mientras esa comida siga
-abierta. La copia queda en `anulaciones_checklist`.
+cuenta que marcó y mientras esa comida siga abierta; al cerrar la comida, la
+corrección pasa a la jefa. La copia queda en `anulaciones_checklist`.
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -24,7 +24,6 @@ from app.modelos.comedor import AnulacionChecklist, Asistencia
 from app.modelos.heredados import ComidaPorTurno, Comensal, Servicio
 
 DISPOSITIVO_CHECKLIST = "checklist-cocina"
-MINUTOS_PARA_ANULAR = 5
 
 
 @dataclass(frozen=True)
@@ -38,7 +37,7 @@ class PersonaChecklist:
     metodo: str | None = None
     asistencia_id: int | None = None
     fecha_hora: datetime | None = None
-    anulable_hasta: datetime | None = None
+    anulable: bool = False
 
 
 @dataclass(frozen=True)
@@ -48,7 +47,6 @@ class Checklist:
     comida_id: int | None = None
     comida: str | None = None
     fecha_comida: date | None = None
-    minutos_para_anular: int = MINUTOS_PARA_ANULAR
     personas: list[PersonaChecklist] = field(default_factory=list)
 
 
@@ -60,15 +58,12 @@ class ErrorChecklist(Exception):
         self.detalle = detalle
 
 
-def _limite_anulacion(asistencia_fecha_hora: datetime) -> datetime:
-    return asistencia_fecha_hora + timedelta(minutes=MINUTOS_PARA_ANULAR)
-
-
 def listar(sesion: Session, cuenta_id: int) -> Checklist:
     """Quiénes tienen derecho a la comida en curso y si ya la recibieron.
 
-    `anulable_hasta` solo viene en las marcas que ESTA cuenta todavía puede
-    deshacer; las de otra cocinera, la huella o la jefa nunca lo traen.
+    `anulable` solo es true en las marcas del checklist de ESTA cuenta (la
+    lista ya es de la comida abierta); las de otra cocinera, la huella o la
+    jefa nunca.
     """
     ahora = reloj.ahora()
     comida = resolver_comida_en_curso(sesion, ahora)
@@ -114,14 +109,11 @@ def listar(sesion: Session, cuenta_id: int) -> Checklist:
     personas = []
     for fila in filas:
         asistencia = servidas.get(fila.usuario_id)
-        anulable_hasta = None
-        if (
+        anulable = (
             asistencia is not None
             and asistencia.metodo == "checklist"
             and asistencia.registrado_por_cuenta == cuenta_id
-            and _limite_anulacion(asistencia.fecha_hora) > ahora
-        ):
-            anulable_hasta = _limite_anulacion(asistencia.fecha_hora)
+        )
         personas.append(
             PersonaChecklist(
                 usuario_id=fila.usuario_id,
@@ -133,7 +125,7 @@ def listar(sesion: Session, cuenta_id: int) -> Checklist:
                 metodo=asistencia.metodo if asistencia else None,
                 asistencia_id=asistencia.id if asistencia else None,
                 fecha_hora=asistencia.fecha_hora if asistencia else None,
-                anulable_hasta=anulable_hasta,
+                anulable=anulable,
             )
         )
     personas.sort(key=lambda p: ((p.nombre or "").casefold(), p.usuario_id))
@@ -159,7 +151,7 @@ def marcar(sesion: Session, cuenta_id: int, usuario_id: int) -> Resultado:
 
 
 def anular(sesion: Session, cuenta_id: int, asistencia_id: int) -> AnulacionChecklist:
-    """Deshace una marca propia reciente de la comida que sigue abierta."""
+    """Deshace una marca propia de la comida que sigue abierta."""
     ahora = reloj.ahora()
     asistencia = sesion.execute(
         select(Asistencia).where(Asistencia.id == asistencia_id).with_for_update()
@@ -173,12 +165,6 @@ def anular(sesion: Session, cuenta_id: int, asistencia_id: int) -> AnulacionChec
     if asistencia.registrado_por_cuenta != cuenta_id:
         raise ErrorChecklist(
             403, "otra_cuenta", "Solo puede desmarcar quien marcó la ración."
-        )
-    if _limite_anulacion(asistencia.fecha_hora) <= ahora:
-        raise ErrorChecklist(
-            409,
-            "plazo_vencido",
-            f"Pasaron más de {MINUTOS_PARA_ANULAR} minutos: pida la corrección a la jefa.",
         )
     comida = resolver_comida_en_curso(sesion, ahora)
     if (
