@@ -55,3 +55,7 @@ input:not([type="checkbox"]), select { min-width: 0; width: 100%; min-height: 44
 [hidden] { display: none !important; }
 @media (max-width: 760px) { main { padding: var(--e-3); } .casos { grid-template-columns: 1fr; } .campos { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 430px) { .comidas { grid-template-columns: 1fr 1fr; } .paso { align-items: stretch; flex-direction: column; } .paso > button { flex-basis: auto; } }
+
+/* Elegir qué policía se simula. */
+.elegir-policia { min-width: 14rem; }
+.solo-lectores { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

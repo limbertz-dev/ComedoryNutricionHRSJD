@@ -24,34 +24,51 @@ import comun as c
 
 DISPOSITIVO = "lector-laboratorio-qa"
 IDENTIFICADOR = "qa-policia"
+NOMBRE_PRUEBA = "Policía de prueba QA"
 
 
 def permisos(limpiar: bool):
     if limpiar:
         return c.permisos((c.SIM, "raciones_policia", "DELETE"), (c.SIM, "solicitudes_lector", "DELETE"))
-    return c.permisos((c.SIM, "vinculos_lector", "INSERT"), (c.SIM, "raciones_policia", "INSERT"),
-                      (c.SIM, "solicitudes_lector", "INSERT"))
+    return c.permisos((c.SIM, "vinculos_lector", "INSERT"), (c.SIM, "vinculos_lector", "UPDATE"),
+                      (c.SIM, "raciones_policia", "INSERT"), (c.SIM, "solicitudes_lector", "INSERT"))
 
 
 def asegurar_vinculo(conn) -> None:
     fila = conn.execute(text(
-        "SELECT tipo, activo FROM vinculos_lector WHERE identificador=:i"), {"i": IDENTIFICADOR}).one_or_none()
+        "SELECT tipo, activo, nombre FROM vinculos_lector WHERE identificador=:i"), {"i": IDENTIFICADOR}).one_or_none()
     if fila is None:
         conn.execute(text(
-            "INSERT INTO vinculos_lector (identificador, tipo, usuario_id, activo) "
-            "VALUES (:i, 'policia', NULL, 1)"), {"i": IDENTIFICADOR})
+            "INSERT INTO vinculos_lector (identificador, tipo, usuario_id, nombre, activo) "
+            "VALUES (:i, 'policia', NULL, :n, 1)"), {"i": IDENTIFICADOR, "n": NOMBRE_PRUEBA})
     elif fila.tipo != "policia" or not fila.activo:
         raise c.Abortado("El identificador qa-policia existe pero no es una huella de policía activa.")
+    elif fila.nombre is None:
+        conn.execute(text("UPDATE vinculos_lector SET nombre=:n WHERE identificador=:i AND nombre IS NULL"),
+                     {"i": IDENTIFICADOR, "n": NOMBRE_PRUEBA})
 
 
-def leer(motor, datos) -> dict:
+def identificador_de(conn, vinculo_id):
+    """El policía elegido en el panel, o el de prueba fijo."""
+    if vinculo_id is None:
+        return IDENTIFICADOR
+    fila = conn.execute(text(
+        "SELECT identificador FROM vinculos_lector WHERE id=:v AND tipo='policia' AND activo=1"),
+        {"v": vinculo_id}).one_or_none()
+    if fila is None:
+        raise c.Abortado("Ese policía no tiene una huella activa.")
+    return fila.identificador
+
+
+def leer(motor, datos, vinculo_id=None) -> dict:
     with motor.begin() as conn:
         asegurar_vinculo(conn)
+        identificador = identificador_de(conn, vinculo_id)
     with c.app_sin_dotenv(), c.reloj_laboratorio(datos):
         from app.logica import lector
         with Session(motor, expire_on_commit=False) as sesion:
             return lector.registrar_lectura(
-                sesion, dispositivo=DISPOSITIVO, clave=str(uuid.uuid4()), identificador=IDENTIFICADOR
+                sesion, dispositivo=DISPOSITIVO, clave=str(uuid.uuid4()), identificador=identificador
             ).cuerpo
 
 
@@ -68,6 +85,7 @@ def main(argv=None):
     grupo = parser.add_mutually_exclusive_group(required=True)
     grupo.add_argument("--leer", action="store_true")
     grupo.add_argument("--limpiar", action="store_true")
+    parser.add_argument("--vinculo", type=int, help="id del policía a leer; sin él, el de prueba")
     args = parser.parse_args(argv)
     with c.bloqueo_corrida(), c.entorno_seguro(permisos(args.limpiar)) as (motor, huella, servidor):
         datos = c.leer_corrida(servidor)
@@ -75,7 +93,7 @@ def main(argv=None):
         if args.limpiar:
             print(f"Raciones de policía del laboratorio borradas: {limpiar(motor)}")
         else:
-            print(json.dumps(leer(motor, datos), ensure_ascii=False))
+            print(json.dumps(leer(motor, datos, args.vinculo), ensure_ascii=False))
 
 
 if __name__ == "__main__":

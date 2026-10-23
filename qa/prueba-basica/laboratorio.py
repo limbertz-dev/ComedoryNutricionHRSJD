@@ -199,23 +199,26 @@ class Laboratorio:
         comida = c.COMIDAS_LABORATORIO[comida_id]['nombre']
         self.ultima_accion = f'Ensayo de {comida} listo. Las cuentas y contraseñas se conservaron; puedes simular ambos casos.'
 
-    def simular_policia(self):
+    def simular_policia(self, vinculo_id=None):
         """Una huella de policía por la lógica real del lector: vía libre, solo
         en horario de comida. Cada pulsación es una ración más en Policías."""
         estado = self.estado()
         if not estado['servicio_elegido_vigente']:
             raise c.Abortado('Fuera de horario: elige una comida arriba para simular al policía.')
-        self.ejecutar_script('policia_qa.py', '--leer')
+        if vinculo_id is not None and type(vinculo_id) is not int:
+            raise c.Abortado('Elige un policía de la lista.')
+        argumentos = ['--leer'] + (['--vinculo', str(vinculo_id)] if vinculo_id is not None else [])
+        self.ejecutar_script('policia_qa.py', *argumentos)
         respuesta = json.loads(next(l for l in self.ultima_salida.splitlines() if l.startswith('{')))
         if respuesta.get('valido'):
-            self.ultima_accion = f"Policía registrado en {respuesta['comida']}. {respuesta['detalle']}."
+            self.ultima_accion = f"{respuesta.get('nombre') or 'Policía'} registrado en {respuesta['comida']}. {respuesta['detalle']}."
         else:
             self.ultima_accion = f"La lectura del policía no dio ración: {respuesta.get('detalle')}."
 
     def simular(self, cuerpo):
         caso = cuerpo.get('caso')
         if caso == 'policia':
-            self.simular_policia()
+            self.simular_policia(cuerpo.get('vinculo_id'))
             return
         if caso not in ('qa01', 'qa02'):
             raise c.Abortado('Elige QA 01, QA 02 o Policía. QA 03 está en reserva.')
@@ -313,6 +316,10 @@ class Laboratorio:
                 "WHERE dispositivo=:d AND fecha_comida=:f"
             ), {'d': policia_qa.DISPOSITIVO, 'f': fecha, 'comida': salida['comida_id']}).one()
             salida['policias'] = {'dia': int(policias.dia), 'comida': int(policias.comida)}
+            salida['policias_registrados'] = [dict(f) for f in conn.execute(text(
+                "SELECT id, nombre, documento FROM vinculos_lector WHERE tipo='policia' AND activo=1 "
+                "ORDER BY created_at DESC, id DESC"
+            )).mappings()]
             cuentas = conn.execute(text(
                 "SELECT id, username, rol, usuario_turnos_id FROM usuarios_sistema "
                 "WHERE username IN ('cocinera1','cocinera2','cocinera3','jefa')"

@@ -168,6 +168,30 @@ def listar_registros(motor, busqueda='', limite=50, desplazamiento=0, fecha=None
 
     termino = normalizar(busqueda.strip())
     filas = []
+    bolivia = timezone(timedelta(hours=-4))
+    # Policías: su huella no está en el padrón; el alta vive en vinculos_lector.
+    from app.modelos.lector import VinculoLector
+    with Session(motor) as sesion:
+        policias = sesion.execute(select(VinculoLector).where(VinculoLector.tipo == 'policia')).scalars().all()
+        ids_cuentas = {v.creado_por_cuenta for v in policias if v.creado_por_cuenta}
+        operadores_pol = {f['id']: f for f in sesion.execute(select(
+            UsuarioSistema.id, UsuarioSistema.username, UsuarioSistema.nombre).where(
+            UsuarioSistema.id.in_(ids_cuentas or {0}))).mappings()}
+    for v in policias:
+        momento = v.created_at.replace(tzinfo=bolivia)
+        if fecha is not None and momento.date() != fecha:
+            continue
+        cuenta = operadores_pol.get(v.creado_por_cuenta)
+        fila = {
+            'tipo': 'policia', 'registrada_en': momento.isoformat(), 'activo': bool(v.activo),
+            'comensal': {'usuario_id': None, 'nombre': v.nombre or 'Policía', 'legajo': v.documento,
+                         'categoria': 'Policías', 'servicio': None, 'disponible': True},
+            'cuenta': {'id': v.creado_por_cuenta, 'usuario': cuenta['username'] if cuenta else None,
+                       'nombre': cuenta['nombre'] if cuenta else None, 'disponible': cuenta is not None},
+        }
+        texto = ' '.join(str(x) for x in (v.nombre, v.documento, 'policia policías') if x)
+        if not termino or termino in normalizar(texto):
+            filas.append((momento, fila))
     for registro in registros:
         uid, cid = registro['usuario_id'], registro['cuenta_id']
         ficha, cuenta = personas.get(uid), cuentas.get(cid)
@@ -183,7 +207,8 @@ def listar_registros(motor, busqueda='', limite=50, desplazamiento=0, fecha=None
         }
         texto = ' '.join(str(v) for bloque in (fila['comensal'], fila['cuenta']) for v in bloque.values() if v is not None)
         if not termino or termino in normalizar(texto):
-            filas.append(fila)
+            filas.append((momentos[uid], {'tipo': 'personal', **fila}))
+    filas = [f for _, f in sorted(filas, key=lambda par: par[0], reverse=True)]
     return {'datos': filas[desplazamiento:desplazamiento + limite], 'total': len(filas),
             'limite': limite, 'desplazamiento': desplazamiento, 'modo': 'simulado'}
 
@@ -216,6 +241,12 @@ def instalar(app, motor, servidor, huella):
     class Lectura(BaseModel):
         model_config = ConfigDict(extra='forbid')
         referencia: str
+
+    class AltaPolicia(BaseModel):
+        """Primer registro de un policía: no está en el padrón, se escribe su nombre."""
+        model_config = ConfigDict(extra='forbid')
+        nombre: Annotated[str, Field(min_length=3, max_length=100)]
+        documento: Annotated[str | None, Field(default=None, max_length=30, pattern=r'^[A-Za-z0-9 ./-]*$')] = None
 
     def comprobar_corrida():
         datos = c.leer_corrida(servidor)
@@ -280,6 +311,81 @@ def instalar(app, motor, servidor, huella):
         try:
             comprobar_corrida()
             return lector_enrolado.procesar(motor, servidor, huella, usuario.id, solicitud.referencia, clave)
+        except c.Abortado as error:
+            raise HTTPException(409, detail=str(error)) from None
+
+    from app.modelos.lector import VinculoLector
+    import policia_qa
+
+    def _policia(v):
+        return {'modo': 'simulado', 'vinculo_id': v.id, 'identificador': v.identificador,
+                'nombre': v.nombre, 'documento': v.documento, 'activo': bool(v.activo)}
+
+    @router.post('/policias')
+    def alta_policia(solicitud: AltaPolicia, usuario: UsuarioActual,
+                     clave: Annotated[str, Header(alias='Idempotency-Key')]):
+        """Vincula una huella de policía simulada, con su nombre. No registra comida."""
+        try:
+            comprobar_corrida()
+            nombre = ' '.join(solicitud.nombre.split())
+            documento = (solicitud.documento or '').strip() or None
+            if len(nombre) < 3:
+                raise HTTPException(422, detail='Escribe el nombre completo del policía.')
+            try:
+                identificador = f'qa-pol-{UUID(clave).hex[:16]}'
+            except ValueError:
+                raise HTTPException(422, detail='Falta la cabecera Idempotency-Key o no es un UUID v4.') from None
+            cuenta_id = usuario.id
+            with Session(motor, expire_on_commit=False) as sesion:
+                previo = sesion.execute(select(VinculoLector).where(
+                    VinculoLector.identificador == identificador)).scalar_one_or_none()
+                if previo is not None:
+                    if previo.nombre != nombre or previo.documento != documento:
+                        raise HTTPException(409, detail='Esa solicitud ya registró a otro policía.')
+                    return {**_policia(previo), 'ya_registrada': True}
+                vinculo = VinculoLector(identificador=identificador, tipo='policia', usuario_id=None,
+                                        nombre=nombre, documento=documento, activo=1,
+                                        creado_por_cuenta=cuenta_id)
+                sesion.add(vinculo)
+                sesion.commit()
+                return {**_policia(vinculo), 'ya_registrada': False}
+        except c.Abortado as error:
+            raise HTTPException(409, detail=str(error)) from None
+
+    @router.post('/policias/{vinculo_id}/lecturas')
+    def leer_policia(vinculo_id: int, usuario: UsuarioActual,
+                     clave: Annotated[str, Header(alias='Idempotency-Key')]):
+        """Una lectura de la huella del policía por la lógica real del lector."""
+        from app.logica import intervencion, lector
+        try:
+            comprobar_corrida()
+            clave_valida = intervencion.normalizar_clave(clave)
+            if clave_valida is None:
+                raise HTTPException(422, detail='Falta la cabecera Idempotency-Key o no es un UUID v4.')
+            with Session(motor, expire_on_commit=False) as sesion:
+                vinculo = sesion.get(VinculoLector, vinculo_id)
+                if vinculo is None or vinculo.tipo != 'policia' or not vinculo.activo:
+                    raise HTTPException(404, detail='Ese policía no tiene una huella activa.')
+                identificador = vinculo.identificador
+                sesion.rollback()
+                resultado = lector.registrar_lectura(sesion, dispositivo=policia_qa.DISPOSITIVO,
+                                                     clave=clave_valida, identificador=identificador)
+            return {'modo': 'simulado', **resultado.cuerpo}
+        except c.Abortado as error:
+            raise HTTPException(409, detail=str(error)) from None
+
+    def listar_policias():
+        with Session(motor) as sesion:
+            filas = sesion.execute(select(VinculoLector).where(
+                VinculoLector.tipo == 'policia', VinculoLector.activo == 1,
+            ).order_by(VinculoLector.created_at.desc(), VinculoLector.id.desc())).scalars().all()
+            return [{**_policia(v), 'registrada_en': v.created_at.isoformat()} for v in filas]
+
+    @router.get('/policias')
+    def policias_cocina(usuario: UsuarioActual):
+        try:
+            comprobar_corrida()
+            return listar_policias()
         except c.Abortado as error:
             raise HTTPException(409, detail=str(error)) from None
 

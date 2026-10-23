@@ -126,3 +126,33 @@ def test_filtro_por_dia_usa_la_hora_de_bolivia(circuito):
                 e.listar_registros(motor, fecha=date(2026, 10, 21))['datos']] == [900102]
         assert e.listar_registros(motor, fecha=date(2026, 10, 23))['total'] == 0
         assert e.listar_registros(motor)['total'] == 2
+
+
+def test_los_policias_aparecen_en_el_registro_con_su_nombre(circuito):
+    from datetime import date, datetime
+    motor, _ = circuito
+    with c.app_sin_dotenv():
+        from app.modelos.lector import VinculoLector
+        from app.modelos.usuarios import UsuarioSistema
+        with Session(motor) as sesion:
+            sesion.add(UsuarioSistema(id=7, username='cocinera1', nombre='Operadora Uno', rol='cocinera',
+                                      password_hash='fixture-no-autenticable', debe_cambiar=False, activo=True))
+            sesion.add(VinculoLector(identificador='qa-pol-1', tipo='policia', nombre='Juan Perez',
+                                     documento='PL-1234', activo=1, creado_por_cuenta=7,
+                                     created_at=datetime(2026, 10, 22, 21, 0), updated_at=datetime(2026, 10, 22, 21, 0)))
+            sesion.commit()
+        e.registrar(900101, 2, str(uuid4()))
+        pagina = e.listar_registros(motor)
+        policias = [f for f in pagina['datos'] if f['tipo'] == 'policia']
+        assert len(policias) == 1 and pagina['total'] == 2
+        fila = policias[0]
+        assert fila['comensal'] == {'usuario_id': None, 'nombre': 'Juan Perez', 'legajo': 'PL-1234',
+                                    'categoria': 'Policías', 'servicio': None, 'disponible': True}
+        assert fila['cuenta']['usuario'] == 'cocinera1'
+        assert fila['registrada_en'] == '2026-10-22T21:00:00-04:00'
+        assert {f['tipo'] for f in pagina['datos']} == {'personal', 'policia'}
+        assert e.listar_registros(motor, busqueda='pl-1234')['total'] == 1
+        assert e.listar_registros(motor, busqueda='policías')['total'] == 1
+        # El alta del policía fue el 22 (hora de Bolivia): el 21 no lo muestra; el 22 sí.
+        assert all(f['tipo'] != 'policia' for f in e.listar_registros(motor, fecha=date(2026, 10, 21))['datos'])
+        assert any(f['tipo'] == 'policia' for f in e.listar_registros(motor, fecha=date(2026, 10, 22))['datos'])

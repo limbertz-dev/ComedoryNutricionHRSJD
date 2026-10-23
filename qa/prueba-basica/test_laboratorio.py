@@ -283,3 +283,17 @@ def test_caso_desconocido_nombra_las_opciones():
     control = _control_policia(True)
     with pytest.raises(c.Abortado, match='Policía'):
         control.simular({'caso': 'qa09'})
+
+
+def test_policia_elegido_se_pasa_al_lector():
+    control = _control_policia(True, '{"valido": true, "comida": "Cena", "nombre": "Juan Perez", "detalle": "Ración habilitada · 1 de policía en esta comida"}\n')
+    control.simular({'caso': 'policia', 'vinculo_id': 9})
+    control.ejecutar_script.assert_called_once_with('policia_qa.py', '--leer', '--vinculo', '9')
+    assert control.ultima_accion.startswith('Juan Perez registrado en Cena')
+
+
+def test_policia_elegido_invalido_no_ejecuta():
+    control = _control_policia(True)
+    with pytest.raises(c.Abortado, match='Elige un policía'):
+        control.simular({'caso': 'policia', 'vinculo_id': '9; DROP'})
+    control.ejecutar_script.assert_not_called()

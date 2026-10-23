@@ -79,6 +79,16 @@ function dibujar() {
   }
   const policia = document.querySelector('#policia');
   const policias = estado.policias ?? { dia: 0, comida: 0 };
+  const selector = document.querySelector('#policia-elegido');
+  const elegido = selector.value;
+  const registrados = (estado.policias_registrados ?? []).filter(p => p.nombre !== 'Policía de prueba QA');
+  const firma = registrados.map(p => `${p.id}:${p.nombre}:${p.documento ?? ''}`).join('|');
+  if (selector.dataset.firma !== firma) {
+    selector.replaceChildren(new Option('Policía de prueba QA', ''),
+      ...registrados.map(p => new Option(p.documento ? `${p.nombre} · ${p.documento}` : p.nombre, String(p.id))));
+    selector.value = registrados.some(p => String(p.id) === elegido) ? elegido : '';
+    selector.dataset.firma = firma;
+  }
   policia.querySelector('.estado').textContent = policias.dia
     ? `${policias.comida} en ${estado.servicio} · ${policias.dia} en el día` : 'Sin simular';
   policia.querySelector('.detalle').textContent = policias.dia
@@ -236,7 +246,8 @@ document.querySelector('.simular-policia').addEventListener('click', () => {
   if (!disponible()) return;
   if (repeticionPendiente) { mostrarAviso('Verifica primero la lectura pendiente de QA 01.', true); return; }
   if (!estado.servicio_elegido_vigente) { mostrarAviso('Elige primero una comida arriba para usar su horario.', true); return; }
-  ejecutar('/simular', { caso: 'policia' });
+  const elegido = document.querySelector('#policia-elegido').value;
+  ejecutar('/simular', { caso: 'policia', ...(elegido ? { vinculo_id: Number(elegido) } : {}) });
 });
 for (const boton of document.querySelectorAll('.aprobar, .rechazar')) boton.addEventListener('click', () => {
   if (!disponible()) return;

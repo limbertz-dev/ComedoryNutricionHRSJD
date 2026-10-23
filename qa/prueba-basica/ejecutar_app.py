@@ -20,6 +20,9 @@ def permisos_modo(modo, laboratorio=False):
             *((c.SIM, t, 'INSERT') for t in (
                 'intentos_login', 'intervenciones_lectura', 'asistencias')),
             *(((c.SIM, 'lecturas_biometricas', 'INSERT'),) if laboratorio else ()),
+            # Policías del laboratorio: alta de su huella y su ración por el lector.
+            *(((c.SIM, t, 'INSERT') for t in ('vinculos_lector', 'raciones_policia', 'solicitudes_lector'))
+              if laboratorio else ()),
         )
     raise c.Abortado("Modo inválido")
 
