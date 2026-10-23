@@ -1538,6 +1538,20 @@ function adaptarPersonaChecklist(p) {
   };
 }
 
+/** Una ración de policía de la comida en curso, validada. */
+function adaptarPoliciaChecklist(p) {
+  if (!Number.isSafeInteger(p?.racion_id) || p.racion_id <= 0 || typeof p.nombre !== 'string') {
+    throw new Error('La API devolvió un checklist inválido.');
+  }
+  return {
+    id: p.racion_id,
+    nombre: p.nombre,
+    fechaHora: p.fecha_hora ?? null,
+    origen: p.origen === 'checklist' ? 'checklist' : 'huella',
+    anulable: p.anulable === true,
+  };
+}
+
 /**
  * GET /pantalla/checklist: quiénes tienen derecho a la comida en curso (turno
  * de 12 h o más y categoría permitida, lo decide el servidor) y si ya la
@@ -1555,7 +1569,34 @@ export async function obtenerChecklist({ signal } = {}) {
     comida: dato.comida ?? null,
     fechaComida: dato.fecha_comida ?? null,
     personas: dato.personas.map(adaptarPersonaChecklist),
+    policias: (Array.isArray(dato.policias) ? dato.policias : []).map(adaptarPoliciaChecklist),
   };
+}
+
+/**
+ * POST /asistencias/checklist/policias (solo cocinera): el policía no está en
+ * el padrón, se escribe su nombre. Vía libre, solo con una comida en curso; un
+ * rechazo llega como { valido: false, motivo }. Un nombre inválido es 422.
+ */
+export async function registrarPoliciaEnChecklist(nombre, { signal } = {}) {
+  const limpio = typeof nombre === 'string' ? nombre.trim().replace(/\s+/g, ' ') : '';
+  if (limpio.length < 3) throw new Error('Escriba el nombre del policía.');
+  const dato = await solicitarApi('/asistencias/checklist/policias', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nombre: limpio }),
+    signal,
+  });
+  if (typeof dato?.valido !== 'boolean') throw new Error('La API devolvió una respuesta inválida.');
+  return dato;
+}
+
+/** DELETE /asistencias/checklist/policias/{id}: solo la marca propia, con la comida abierta. */
+export async function desmarcarPoliciaEnChecklist(racionId, { signal } = {}) {
+  if (!Number.isInteger(racionId) || racionId <= 0) throw new Error('Ración inválida.');
+  return solicitarApi(`/asistencias/checklist/policias/${racionId}`, {
+    method: 'DELETE', motivosLocales: ['otra_cuenta'], signal,
+  });
 }
 
 /**

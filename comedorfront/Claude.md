@@ -34,7 +34,10 @@ Secciones del sidebar (`src/navegacion.js`):
    permitidas; lo decide el servidor) y marca la entrega con
    `POST /asistencias/checklist` (`metodo='checklist'`, mismas reglas que la
    huella). Solo la misma cocinera deshace su marca, mientras la comida siga
-   abierta y sin temporizador (`DELETE /asistencias/checklist/{id}`). El panel flotante
+   abierta y sin temporizador (`DELETE /asistencias/checklist/{id}`). «Nuevo
+   policía» registra por nombre una ración de policía sin huella (vía libre, solo
+   en horario, columna Policías: `POST /asistencias/checklist/policias`); los
+   policías de la comida (checklist y huella) se listan aparte. El panel flotante
    cambia entre el checklist y Control Biométrico.
 1. **Control Biométrico** — marcaciones en vivo, solo para la cocinera, en
    pantalla completa sin sidebar ni header. Las lecturas las registra el

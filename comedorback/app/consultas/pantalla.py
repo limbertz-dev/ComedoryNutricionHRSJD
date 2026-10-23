@@ -505,7 +505,7 @@ def ultimas_marcaciones(
             RacionPolicia.id.label("id"),
             literal(None).label("usuario_id"),
             RacionPolicia.fecha_hora,
-            func.coalesce(VinculoLector.nombre, policia.NOMBRE).label("nombre"),
+            func.coalesce(RacionPolicia.nombre, VinculoLector.nombre, policia.NOMBRE).label("nombre"),
             literal("Policías").label("categoria"),
             RacionPolicia.comida_id,
             comida_policia.nombre.label("comida"),
@@ -517,7 +517,7 @@ def ultimas_marcaciones(
             literal(None).label("lectura_motivo"),
             literal(None).label("asistencia_id"),
             literal(None).label("racion_usuario_id"),
-            func.coalesce(VinculoLector.nombre, policia.NOMBRE).label("racion_nombre"),
+            func.coalesce(RacionPolicia.nombre, VinculoLector.nombre, policia.NOMBRE).label("racion_nombre"),
             RacionPolicia.fecha_comida.label("racion_fecha_comida"),
             RacionPolicia.fecha_hora.label("racion_fecha_hora"),
         )
@@ -677,7 +677,7 @@ def _enriquecer(
         f.lectura_id: f for f in sesion.execute(
             select(RacionPolicia.lectura_id, RacionPolicia.fecha_comida, RacionPolicia.fecha_hora,
                    Comida.nombre.label("comida"),
-                   func.coalesce(VinculoLector.nombre, policia.NOMBRE).label("nombre"))
+                   func.coalesce(RacionPolicia.nombre, VinculoLector.nombre, policia.NOMBRE).label("nombre"))
             .outerjoin(VinculoLector, VinculoLector.id == RacionPolicia.vinculo_id)
             .outerjoin(Comida, Comida.id == RacionPolicia.comida_id)
             .where(RacionPolicia.lectura_id.in_(lecturas_ids or [0]))

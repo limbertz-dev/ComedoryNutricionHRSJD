@@ -364,15 +364,23 @@ class AnulacionChecklist(Base):
     """
 
     __tablename__ = "anulaciones_checklist"
+    # Una fila es de personal (asistencia_id, usuario_id) o de un policía del
+    # checklist (racion_policia_id, nombre).
     __table_args__ = opciones(
         COMENTARIO_TABLA_ANULACIONES,
         Index("idx_anulaciones_checklist_fecha_comida", "fecha_comida", "comida_id"),
     )
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
-    asistencia_id: Mapped[int] = mapped_column(ID, comment=COMENTARIO_ANULACION_ASISTENCIA)
-    usuario_id: Mapped[int] = mapped_column(
+    asistencia_id: Mapped[int | None] = mapped_column(ID, comment=COMENTARIO_ANULACION_ASISTENCIA)
+    usuario_id: Mapped[int | None] = mapped_column(
         ID, comment="users.id del comensal desmarcado, sin FK entre bases."
+    )
+    racion_policia_id: Mapped[int | None] = mapped_column(
+        ID, comment="raciones_policia.id que se borro (policia del checklist). Sin FK."
+    )
+    nombre: Mapped[str | None] = mapped_column(
+        String(100), comment="Solo policias: el nombre que tenia la racion anulada."
     )
     fecha_comida: Mapped[date] = mapped_column(Date)
     comida_id: Mapped[int] = mapped_column(ID)
