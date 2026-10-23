@@ -127,6 +127,16 @@ class PersonaChecklist(BaseModel):
     )
 
 
+class PoliciaChecklist(BaseModel):
+    """Una ración de policía de la comida en curso."""
+
+    racion_id: int
+    nombre: str
+    fecha_hora: datetime
+    origen: Literal["checklist", "huella"]
+    anulable: bool = False
+
+
 class Checklist(BaseModel):
     momento: datetime
     fuera_de_horario: bool
@@ -134,10 +144,31 @@ class Checklist(BaseModel):
     comida: str | None = None
     fecha_comida: date | None = None
     personas: list[PersonaChecklist]
+    policias: list[PoliciaChecklist] = []
 
 
 class SolicitudChecklist(BaseModel):
     usuario_id: int = Field(gt=0, description="users.id de quien recibe la ración.")
+
+
+class SolicitudPoliciaChecklist(BaseModel):
+    nombre: str = Field(max_length=200, description="Nombre del policía, escrito por cocina.")
+
+
+class RespuestaPoliciaChecklist(BaseModel):
+    valido: bool
+    motivo: str | None = Field(default=None, description="fuera_horario | sin_columna_policias")
+    nombre: str
+    detalle: str
+    racion_id: int | None = None
+    comida: str | None = None
+    fecha_comida: date | None = None
+
+
+class RespuestaAnulacionPolicia(BaseModel):
+    racion_id: int
+    nombre: str | None
+    anulada_en: datetime
 
 
 class RespuestaAnulacion(BaseModel):

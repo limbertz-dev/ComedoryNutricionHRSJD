@@ -6,7 +6,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { desmarcarEnChecklist, marcarEnChecklist, obtenerChecklist } from '../src/api.js';
+import {
+  desmarcarEnChecklist, desmarcarPoliciaEnChecklist, marcarEnChecklist, obtenerChecklist,
+  registrarPoliciaEnChecklist,
+} from '../src/api.js';
 import {
   avisoDeMarca,
   contarChecklist,
@@ -127,4 +130,56 @@ test('Deshacer aparece sin temporizador y solo en las marcas propias', () => {
   }, filtroInicial: 'entregadas' }));
   assert.equal(html.match(/>Deshacer</g)?.length, 1);
   assert.doesNotMatch(html, /Deshacer ·|\d:\d\d<\/span><\/button>/);
+});
+
+test('contrato: policías del checklist (lista, registro por nombre y deshacer)', async () => {
+  await conFetch([
+    { status: 200, json: {
+      momento: '2026-10-19T12:30:00', fuera_de_horario: false, comida_id: 2, comida: 'Almuerzo',
+      fecha_comida: '2026-10-19', personas: [],
+      policias: [{ racion_id: 5, nombre: 'Juan Pérez', fecha_hora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true }],
+    } },
+    { status: 200, json: { valido: true, nombre: 'Juan Pérez', detalle: 'ok', racion_id: 6 } },
+    { status: 200, json: { racion_id: 6, nombre: 'Juan Pérez', anulada_en: '2026-10-19T12:31:00' } },
+  ], async (llamadas) => {
+    const lista = await obtenerChecklist();
+    assert.deepEqual(lista.policias[0], {
+      id: 5, nombre: 'Juan Pérez', fechaHora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true,
+    });
+    const r = await registrarPoliciaEnChecklist('  Juan   Pérez ');
+    assert.equal(r.valido, true);
+    assert.match(llamadas[1].url, /\/asistencias\/checklist\/policias$/);
+    assert.deepEqual(JSON.parse(llamadas[1].cuerpo), { nombre: 'Juan Pérez' });
+    await desmarcarPoliciaEnChecklist(6);
+    assert.equal(llamadas[2].metodo, 'DELETE');
+    assert.match(llamadas[2].url, /\/asistencias\/checklist\/policias\/6$/);
+  });
+  await assert.rejects(registrarPoliciaEnChecklist('  '), /nombre del policía/);
+});
+
+test('Nuevo policía: botón, formulario solo con nombre y lista de policías de la comida', () => {
+  const datos = {
+    momento: '2026-10-19T12:30:00', fueraDeHorario: false, comidaId: 2, comida: 'Almuerzo',
+    fechaComida: '2026-10-19',
+    personas: [{ id: 1, nombre: 'Zoila', servida: false }],
+    policias: [
+      { id: 5, nombre: 'Juan Pérez', fechaHora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true },
+      { id: 6, nombre: 'Policía', fechaHora: '2026-10-19T12:12:00', origen: 'huella', anulable: false },
+    ],
+  };
+  const cerrado = renderToStaticMarkup(h(ChecklistCocina, { datosIniciales: datos }));
+  assert.match(cerrado, />Nuevo policía</);
+  assert.doesNotMatch(cerrado, /Nombre completo/);
+  assert.match(cerrado, /Policías en esta comida/);
+  assert.match(cerrado, /Juan Pérez/);
+  assert.match(cerrado, /Checklist · 12:10/);
+  assert.match(cerrado, /Huella · 12:12/);
+  // Solo la ración propia del checklist ofrece Deshacer.
+  assert.equal(cerrado.match(/>Deshacer</g)?.length, 1);
+
+  const abierto = renderToStaticMarkup(h(ChecklistCocina, { datosIniciales: datos, nuevoPoliciaInicial: true }));
+  assert.match(abierto, /<form[^>]*aria-label="Nuevo policía"/);
+  assert.match(abierto, /Nombre completo/);
+  assert.equal(abierto.match(/<input/g).length, 2, 'buscador + nombre: sin CI ni otros campos');
+  assert.match(abierto, /Entregar ración/);
 });

@@ -95,10 +95,10 @@ function PuertaDeSesion() {
 export function Panel({ rol, usuario = null, seccionInicial = undefined }) {
   /* Persistida en localStorage: un F5 en Historial o Reportes no debe
      devolver forzadamente a la primera sección. Si lo guardado no le
-     corresponde al rol, arranca en su primera sección. La cocinera abre
-     siempre en el checklist, su pantalla principal. */
+     corresponde al rol, arranca en su primera sección. La cocinera conserva
+     Checklist o Control Biométrico según su última selección. */
   const [seccionActiva, setSeccionActiva] = useState(() => seccionInicial
-    ?? (rol === 'cocinera' ? seccionInicialDeRol(rol) : leerSeccionGuardada(rol)));
+    ?? leerSeccionGuardada(rol));
   /* Sección cuya consulta respondió 403: se reemplaza por «Sin permiso» hasta
      que se elija otra, para que nunca quede a la vista con datos a medias. */
   const [seccionVedada, setSeccionVedada] = useState(null);
