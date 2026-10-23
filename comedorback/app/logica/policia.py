@@ -32,11 +32,11 @@ def _en_comida(sesion: Session, fecha_comida, comida_id) -> int:
     ).scalar_one()
 
 
-def registrar(sesion: Session, *, vinculo_id: int, dispositivo: str) -> dict:
+def registrar(sesion: Session, *, vinculo_id: int, dispositivo: str, nombre: str | None = None) -> dict:
     """La respuesta, con la misma forma que una marcación del lector. No hace
     COMMIT: lo hace quien guarda el envío, en la misma transacción."""
     base = {
-        "usuario_id": None, "nombre": NOMBRE, "servicio_id": None,
+        "usuario_id": None, "nombre": nombre or NOMBRE, "servicio_id": None,
         "lectura_id": None, "asistencia_id": None, "raciones_restantes": None,
     }
     momento = reloj.ahora()

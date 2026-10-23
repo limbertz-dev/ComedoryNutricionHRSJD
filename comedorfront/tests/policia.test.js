@@ -104,3 +104,60 @@ test('las tarjetas de comida y el resumen suman los policías aparte del cupo', 
   assert.match(html, /Aceptadas<\/dt><dd>0<\/dd><small>de 3 previstas/);
   assert.match(html, /Policías<\/dt><dd>2<\/dd><small>Aparte del cupo del personal/);
 });
+
+// --- registro de policías (QA) --------------------------------------------------
+
+import { registrarPoliciaQa, leerPoliciaQa } from '../src/api.js';
+import RegistrarHuella from '../src/components/secciones/RegistrarHuella.jsx';
+import HuellasRegistradas from '../src/components/secciones/HuellasRegistradas.jsx';
+
+const CLAVE = '11111111-1111-4111-8111-111111111111';
+
+test('el registro ofrece Personal o Policía, salvo en un caso fijo del simulador', () => {
+  const html = renderToStaticMarkup(h(RegistrarHuella, { personasIniciales: [] }));
+  assert.match(html, /role="radiogroup" aria-label="¿A quién se registra\?"/);
+  assert.match(html, /Personal del padrón/);
+  assert.match(html, />Policía</);
+  const caso = renderToStaticMarkup(h(RegistrarHuella, { personasIniciales: [], usuarioRequerido: 900101 }));
+  assert.doesNotMatch(caso, /radiogroup/);
+});
+
+test('el alta de un policía exige nombre completo y valida el CI o la placa', async () => {
+  await assert.rejects(registrarPoliciaQa({ nombre: '  ' }, CLAVE), /nombre completo/);
+  await assert.rejects(registrarPoliciaQa({ nombre: 'Juan Perez', documento: '<x>' }, CLAVE), /CI o la placa/);
+  let cuerpo;
+  globalThis.fetch = async (_url, opciones) => {
+    cuerpo = JSON.parse(opciones.body);
+    return json({ modo: 'simulado', vinculo_id: 9, identificador: 'qa-pol-1', nombre: 'Juan Perez', documento: null, ya_registrada: false });
+  };
+  const dato = await registrarPoliciaQa({ nombre: '  Juan   Perez ', documento: '' }, CLAVE);
+  assert.deepEqual(cuerpo, { nombre: 'Juan Perez', documento: null });
+  assert.equal(dato.vinculo_id, 9);
+});
+
+test('la lectura de prueba del policía va a su propio endpoint', async () => {
+  let ruta;
+  globalThis.fetch = async (url) => { ruta = new URL(url).pathname; return json({ modo: 'simulado', valido: true, nombre: 'Juan Perez' }); };
+  assert.equal((await leerPoliciaQa(9, CLAVE)).valido, true);
+  assert.equal(ruta, '/_qa/enrolamiento/policias/9/lecturas');
+  await assert.rejects(leerPoliciaQa(0, CLAVE), /Primero registra/);
+});
+
+test('Huellas registradas muestra al policía con su CI o placa y la etiqueta Policía', () => {
+  const pagina = { total: 1, limite: 50, desplazamiento: 0, modo: 'simulado', datos: [{
+    tipo: 'policia', registrada_en: '2026-10-22T21:00:00-04:00', activo: true,
+    comensal: { usuario_id: null, nombre: 'Juan Perez', legajo: 'PL-1234', categoria: 'Policías', servicio: null, disponible: true },
+    cuenta: { id: 3, usuario: 'cocinera1', nombre: 'Cocinera Uno', disponible: true },
+  }] };
+  const html = renderToStaticMarkup(h(HuellasRegistradas, { inicial: { pagina } }));
+  assert.match(html, /Juan Perez/);
+  assert.match(html, /CI o placa PL-1234/);
+  assert.match(html, /Fuera del padrón · vía libre/);
+  assert.match(html, />Policía</);
+});
+
+test('Control Biométrico muestra el nombre del policía', () => {
+  const evento = eventoDeFila({ ...policia, persona: { id: null, nombre: 'Juan Perez', categoria: 'Policías' } });
+  assert.equal(evento.persona.nombre, 'Juan Perez');
+  assert.equal(evento.titulo, 'Policía registrado');
+});
