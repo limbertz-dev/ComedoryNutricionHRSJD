@@ -93,6 +93,7 @@ export default function AppSelect({
                 <button
                   type="button"
                   role="option"
+                  data-value={opcion.value}
                   className={isSelected ? 'selected' : undefined}
                   aria-selected={isSelected}
                   disabled={opcion.disabled}
