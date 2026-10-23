@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Boton from '../ui/Boton.jsx';
 import Etiqueta from '../ui/Etiqueta.jsx';
-import { IconoBuscar, IconoCheck, IconoEquis, IconoAlerta, IconoUsuario } from '../ui/Iconos.jsx';
+import { IconoBuscar, IconoCheck, IconoEquis, IconoAlerta, IconoUsuario, IconoEscudo } from '../ui/Iconos.jsx';
 import {
   obtenerComidasDelDia,
   obtenerUltimasMarcaciones,
@@ -90,9 +90,11 @@ export function resumenDePestana(dia, pestana) {
   const rechazos = { noIdentificado: 0, sinDerecho: 0, duplicado: 0 };
   let servidas = 0;
   let manuales = 0;
+  let policias = 0;
   for (const comida of elegidas) {
     servidas += comida.servidas;
     manuales += comida.manuales;
+    policias += comida.policias ?? 0;
     for (const clave of Object.keys(rechazos)) rechazos[clave] += comida.rechazos[clave];
   }
   const comida = pestana === null ? null : elegidas[0];
@@ -100,6 +102,7 @@ export function resumenDePestana(dia, pestana) {
     comida,
     servidas,
     manuales,
+    policias,
     rechazadas: rechazos.noIdentificado + rechazos.sinDerecho + rechazos.duplicado,
     motivos: MOTIVOS_RESUMEN
       .map(([clave, etiqueta]) => ({ clave, etiqueta, cantidad: rechazos[clave] }))
@@ -410,6 +413,14 @@ export default function Supervision({
                   <span className="solo-lectores">Manuales: </span>
                   {comida.manuales}
                 </span>
+                <span
+                  className="supervision__pestana-cifra supervision__pestana-cifra--policia"
+                  data-tooltip="Policías (aparte del cupo del personal)"
+                >
+                  <IconoEscudo tamano={14} />
+                  <span className="solo-lectores">Policías: </span>
+                  {comida.policias ?? 0}
+                </span>
               </span>
             </button>
           );
@@ -693,6 +704,14 @@ function ResumenPestana({ resumen, dia }) {
           </dt>
           <dd>{resumen.manuales}</dd>
           <small>Incluidas en las aceptadas</small>
+        </div>
+
+        <div className="supervision__cifra supervision__cifra--policia">
+          <dt>
+            <IconoEscudo tamano={16} /> Policías
+          </dt>
+          <dd>{resumen.policias}</dd>
+          <small>Aparte del cupo del personal</small>
         </div>
       </dl>
     </section>

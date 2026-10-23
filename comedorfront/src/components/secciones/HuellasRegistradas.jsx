@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { obtenerRegistrosHuellas } from '../../api.js';
 import Boton from '../ui/Boton.jsx';
 import Etiqueta from '../ui/Etiqueta.jsx';
+import SelectorCalendario, { valorFecha } from './SelectorCalendario.jsx';
 import './HuellasRegistradas.css';
 
 const FECHA = new Intl.DateTimeFormat('es-BO', {
@@ -9,7 +10,7 @@ const FECHA = new Intl.DateTimeFormat('es-BO', {
 });
 
 /** La jefa consulta el vínculo y la cuenta que realizó el alta, sin modificarlo. */
-export default function HuellasRegistradas({ version = 0, consultar = obtenerRegistrosHuellas, inicial }) {
+export default function HuellasRegistradas({ version = 0, consultar = obtenerRegistrosHuellas, inicial, hoy = new Date() }) {
   const [pagina, setPagina] = useState(inicial?.pagina ?? null);
   const [error, setError] = useState(inicial?.error ?? '');
   const [cargando, setCargando] = useState(!inicial);
@@ -17,17 +18,24 @@ export default function HuellasRegistradas({ version = 0, consultar = obtenerReg
   const [termino, setTermino] = useState('');
   const [desplazamiento, setDesplazamiento] = useState(0);
   const [refresco, setRefresco] = useState(0);
+  /* Filtro por un solo día (hoy al abrir); null = todas las fechas. */
+  const [fecha, setFecha] = useState(() => valorFecha(hoy));
 
   useEffect(() => {
     if (inicial) return undefined;
     const controlador = new AbortController();
     setCargando(true);
-    consultar({ busqueda: termino, limite: 50, desplazamiento, signal: controlador.signal })
+    consultar({ busqueda: termino, limite: 50, desplazamiento, fecha, signal: controlador.signal })
       .then(datos => { if (!controlador.signal.aborted) { setPagina(datos); setError(''); } })
       .catch(fallo => { if (!controlador.signal.aborted) setError(fallo.message); })
       .finally(() => { if (!controlador.signal.aborted) setCargando(false); });
     return () => controlador.abort();
-  }, [inicial, consultar, termino, desplazamiento, version, refresco]);
+  }, [inicial, consultar, termino, desplazamiento, fecha, version, refresco]);
+
+  function elegirFecha(valor) {
+    setFecha(valor);
+    setDesplazamiento(0);
+  }
 
   function buscar(evento) {
     evento.preventDefault();
@@ -57,6 +65,12 @@ export default function HuellasRegistradas({ version = 0, consultar = obtenerReg
           <Boton type="submit" variante="secundario" tamano="sm" disabled={cargando}>Buscar</Boton>
         </div>
       </form>
+      <div className="huellas-registro__fecha-filtro" role="group" aria-label="Filtrar por día del alta">
+        <SelectorCalendario alcance="diario" fecha={fecha ?? valorFecha(hoy)} mes={(fecha ?? valorFecha(hoy)).slice(0, 7)}
+          hoy={hoy} onFecha={elegirFecha} onMes={() => {}} />
+        <Boton variante={fecha === null ? 'primario' : 'fantasma'} tamano="sm" disabled={cargando || fecha === null}
+          onClick={() => elegirFecha(null)}>Todas las fechas</Boton>
+      </div>
       {error ? <p className="huellas-registro__estado huellas-registro__estado--error" role="alert">
         {pagina ? 'Se conserva la última consulta. ' : ''}{error} Usa «Actualizar huellas» para reintentar.
       </p> : null}
@@ -64,7 +78,9 @@ export default function HuellasRegistradas({ version = 0, consultar = obtenerReg
         {pagina ? 'Actualizando el registro de huellas…' : 'Cargando huellas registradas…'}
       </p> : null}
       {pagina && !cargando && filas.length === 0 ? <p className="huellas-registro__estado" role="status">
-        {termino ? 'No hay huellas que coincidan con la búsqueda.' : 'Todavía no hay huellas registradas. Las nuevas altas aparecerán aquí con su comensal y responsable.'}
+        {termino ? 'No hay huellas que coincidan con la búsqueda.'
+          : fecha ? 'No hubo altas de huella ese día. Elige otro día o «Todas las fechas».'
+            : 'Todavía no hay huellas registradas. Las nuevas altas aparecerán aquí con su comensal y responsable.'}
       </p> : null}
       {filas.length > 0 ? <>
         <div className="huellas-registro__tabla-caja" role="region" aria-label="Tabla de huellas registradas" tabIndex={0}>

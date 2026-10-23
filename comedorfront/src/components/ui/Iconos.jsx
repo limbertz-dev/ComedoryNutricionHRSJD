@@ -193,6 +193,16 @@ export function IconoUsuario(props) {
   );
 }
 
+/** Escudo: raciones de policía (vía libre, sin persona del padrón). */
+export function IconoEscudo(props) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z" />
+      <path d="M9.2 12.2l1.9 1.9 3.8-3.9" />
+    </Svg>
+  );
+}
+
 export function IconoCandado(props) {
   return (
     <Svg {...props}>
