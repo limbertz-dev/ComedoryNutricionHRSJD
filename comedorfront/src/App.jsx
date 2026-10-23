@@ -4,6 +4,7 @@ import Header from './components/layout/Header.jsx';
 import PanelSesionCocinera from './components/layout/PanelSesionCocinera.jsx';
 import Sidebar from './components/layout/Sidebar.jsx';
 import PantallaEnVivo from './components/secciones/PantallaEnVivo.jsx';
+import ChecklistCocina from './components/secciones/ChecklistCocina.jsx';
 import Supervision from './components/secciones/Supervision.jsx';
 import Administracion from './components/secciones/Administracion.jsx';
 import CuentasLectura from './components/secciones/CuentasLectura.jsx';
@@ -91,11 +92,13 @@ function PuertaDeSesion() {
   return <Panel rol={rol} usuario={usuario} />;
 }
 
-export function Panel({ rol, usuario = null }) {
+export function Panel({ rol, usuario = null, seccionInicial = undefined }) {
   /* Persistida en localStorage: un F5 en Historial o Reportes no debe
-     devolver forzadamente a Control Biométrico. Si lo guardado no le
-     corresponde al rol, arranca en su primera sección. */
-  const [seccionActiva, setSeccionActiva] = useState(() => leerSeccionGuardada(rol));
+     devolver forzadamente a la primera sección. Si lo guardado no le
+     corresponde al rol, arranca en su primera sección. La cocinera abre
+     siempre en el checklist, su pantalla principal. */
+  const [seccionActiva, setSeccionActiva] = useState(() => seccionInicial
+    ?? (rol === 'cocinera' ? seccionInicialDeRol(rol) : leerSeccionGuardada(rol)));
   /* Sección cuya consulta respondió 403: se reemplaza por «Sin permiso» hasta
      que se elija otra, para que nunca quede a la vista con datos a medias. */
   const [seccionVedada, setSeccionVedada] = useState(null);
@@ -142,6 +145,9 @@ export function Panel({ rol, usuario = null }) {
      backend ya la negó con 403. */
   const permitida = puedeVerSeccion(rol, seccionActiva) && seccionVedada !== seccionActiva;
   const esPantallaEnVivo = permitida && seccionActiva === 'vivo';
+  const esChecklist = permitida && seccionActiva === 'checklist';
+  /* Las pantallas de cocina muestran su propio estado: arriba solo errores. */
+  const esVistaCocina = esPantallaEnVivo || esChecklist;
   const seccion = permitida ? buscarSeccion(seccionActiva) : SECCION_SIN_PERMISO;
 
   function manejarCambiarSeccion(id) {
@@ -155,7 +161,10 @@ export function Panel({ rol, usuario = null }) {
   return (
     <div className={`app${esCocinera ? ' app--pantalla-completa' : ''}`}>
       {esCocinera ? (
-        <PanelSesionCocinera />
+        <PanelSesionCocinera
+          seccionActiva={seccionActiva}
+          onCambiarSeccion={manejarCambiarSeccion}
+        />
       ) : (
         <Sidebar
           seccionActiva={seccionActiva}
@@ -168,17 +177,17 @@ export function Panel({ rol, usuario = null }) {
       )}
 
       <main className={`app__main${esPantallaEnVivo ? ' app__main--sin-scroll' : ''}`}>
-        {permitida && usaComedor && (!esPantallaEnVivo || errorApi || errorEstado) ? (
+        {permitida && usaComedor && (!esVistaCocina || errorApi || errorEstado) ? (
           <div className="app__estado-api">
-            {!esPantallaEnVivo ? (
+            {!esVistaCocina ? (
               <p id="estado-api" role="status">
                 {cargandoPersonal ? 'Cargando padrón…' : `${estado.personal.length} ${estado.personal.length === 1 ? 'comensal cargado' : 'comensales cargados'}.`}
               </p>
             ) : null}
             {errorApi ? <p role="alert">{errorApi}</p> : null}
-            {!esPantallaEnVivo && cargandoEstado ? <p role="status">Consultando estado del comedor…</p> : null}
+            {!esVistaCocina && cargandoEstado ? <p role="status">Consultando estado del comedor…</p> : null}
             {errorEstado ? <p role="alert">{errorEstado} <Boton variante="fantasma" onClick={recargarEstado}>Reintentar estado</Boton></p> : null}
-            {!esPantallaEnVivo && pantalla?.fuera_de_horario ? <p role="status">Fuera de horario: no hay comida vigente y no se pueden registrar asistencias.</p> : null}
+            {!esVistaCocina && pantalla?.fuera_de_horario ? <p role="status">Fuera de horario: no hay comida vigente y no se pueden registrar asistencias.</p> : null}
           </div>
         ) : null}
         {/* La `key` reinicia la animación de entrada en cada cambio de sección. */}
@@ -189,6 +198,8 @@ export function Panel({ rol, usuario = null }) {
                 : () => manejarCambiarSeccion(seccionInicialDeRol(rol))}
             />
           ) : null}
+
+          {esChecklist ? <ChecklistCocina /> : null}
 
           {esPantallaEnVivo ? (
             <PantallaEnVivo

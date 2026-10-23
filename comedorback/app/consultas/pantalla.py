@@ -477,7 +477,10 @@ def ultimas_marcaciones(
             literal("aceptada").label("resultado"),
             literal(None).label("motivo"),
             literal(True).label("valido"),
-            literal("registro-manual").label("dispositivo"),
+            case(
+                (Asistencia.metodo == "checklist", literal("checklist-cocina")),
+                else_=literal("registro-manual"),
+            ).label("dispositivo"),
             literal(None).label("lectura_resultado"),
             literal(None).label("lectura_motivo"),
             Asistencia.id.label("asistencia_id"),
@@ -490,7 +493,8 @@ def ultimas_marcaciones(
         .outerjoin(Comensal, Comensal.usuario_id == Asistencia.usuario_id)
         .outerjoin(Comida, Comida.id == Asistencia.comida_id)
         .where(
-            Asistencia.metodo == "manual",
+            # La rama sin lectura: manual de jefatura y checklist de cocina.
+            Asistencia.metodo.in_(("manual", "checklist")),
             Asistencia.lectura_id.is_(None),
             func.date(Asistencia.fecha_hora) == dia,
         )

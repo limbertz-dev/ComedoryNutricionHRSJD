@@ -1518,6 +1518,72 @@ export async function obtenerPoliciasActivos({ signal } = {}) {
   return datos.map((p) => ({ id: p.id, nombre: p.nombre, documento: p.documento ?? null }));
 }
 
+/** Una persona del checklist, validada. */
+function adaptarPersonaChecklist(p) {
+  if (!Number.isSafeInteger(p?.usuario_id) || p.usuario_id <= 0 || typeof p.servida !== 'boolean'
+    || (p.asistencia_id != null && !Number.isSafeInteger(p.asistencia_id))) {
+    throw new Error('La API devolvió un checklist inválido.');
+  }
+  return {
+    id: p.usuario_id,
+    nombre: p.nombre || `Comensal ${p.usuario_id}`,
+    categoria: p.categoria ?? null,
+    servicio: p.servicio ?? null,
+    turno: p.turno ?? null,
+    servida: p.servida,
+    metodo: p.metodo ?? null,
+    asistenciaId: p.asistencia_id ?? null,
+    fechaHora: p.fecha_hora ?? null,
+    anulableHasta: p.anulable_hasta ?? null,
+  };
+}
+
+/**
+ * GET /pantalla/checklist: quiénes tienen derecho a la comida en curso (turno
+ * de 12 h o más y categoría permitida, lo decide el servidor) y si ya la
+ * recibieron. Fuera de horario la lista viene vacía.
+ */
+export async function obtenerChecklist({ signal } = {}) {
+  const dato = await solicitarApi('/pantalla/checklist', { signal });
+  if (typeof dato?.fuera_de_horario !== 'boolean' || !Array.isArray(dato.personas)) {
+    throw new Error('La API devolvió un checklist inválido.');
+  }
+  return {
+    momento: dato.momento ?? null,
+    fueraDeHorario: dato.fuera_de_horario,
+    comidaId: dato.comida_id ?? null,
+    comida: dato.comida ?? null,
+    fechaComida: dato.fecha_comida ?? null,
+    minutosParaAnular: dato.minutos_para_anular ?? 5,
+    personas: dato.personas.map(adaptarPersonaChecklist),
+  };
+}
+
+/**
+ * POST /asistencias/checklist (solo cocinera). El servidor aplica las mismas
+ * reglas que la huella: un rechazo llega como { valido: false, motivo }.
+ */
+export async function marcarEnChecklist(usuarioId, { signal } = {}) {
+  if (!Number.isInteger(usuarioId) || usuarioId <= 0) throw new Error('Persona inválida.');
+  const dato = await solicitarApi('/asistencias/checklist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ usuario_id: usuarioId }),
+    signal,
+  });
+  if (typeof dato?.valido !== 'boolean') throw new Error('La API devolvió una marcación inválida.');
+  return dato;
+}
+
+/** DELETE /asistencias/checklist/{id}: solo la marca propia y reciente. */
+export async function desmarcarEnChecklist(asistenciaId, { signal } = {}) {
+  if (!Number.isInteger(asistenciaId) || asistenciaId <= 0) throw new Error('Ración inválida.');
+  // 403 otra_cuenta es un rechazo de esa marca, no una sección vedada.
+  return solicitarApi(`/asistencias/checklist/${asistenciaId}`, {
+    method: 'DELETE', motivosLocales: ['otra_cuenta'], signal,
+  });
+}
+
 /**
  * POST /asistencias/lecturas/{id}/identificar-policia (solo cocinera): la
  * huella no reconocida era de un policía. `clave` se repite SOLO para

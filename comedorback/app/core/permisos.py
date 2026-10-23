@@ -41,6 +41,12 @@ MARCACION_MANUAL: frozenset[str] = JEFATURA
 # siendo MARCACION_MANUAL y no deja vínculo con ninguna lectura).
 IDENTIFICACION_LECTURA: frozenset[str] = frozenset({"cocinera"})
 
+# Quién marca y desmarca en el checklist de la comida en curso: solo la
+# cocinera, mientras el lector no esté. No es la marcación manual de jefatura:
+# pasa por las mismas reglas que la huella (turno de 12 h, categorías
+# permitidas, horario, duplicado) y solo para la comida que está abierta.
+CHECKLIST_COCINA: frozenset[str] = frozenset({"cocinera"})
+
 # Quién consulta las intervenciones de cocina: solo la jefa. Sistemas queda
 # fuera y no recibe ni los responsables ni las vistas nuevas.
 CONSULTA_INTERVENCIONES: frozenset[str] = frozenset({"jefa"})

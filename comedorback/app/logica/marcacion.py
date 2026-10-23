@@ -35,6 +35,12 @@ from app.modelos.heredados import Comensal, Comida
 
 CODIGO_SIN_CLASIFICAR = "sin_clasificar"
 
+TEXTOS_VALIDA = {
+    "biometrico": ("Marcación válida", "Ración habilitada — puede pasar al comedor"),
+    "manual": ("Ración manual habilitada", "Ración autorizada manualmente — comensal registrado"),
+    "checklist": ("Ración entregada", "Marcada en el checklist de cocina"),
+}
+
 
 @dataclass(frozen=True)
 class ComidaEnCurso:
@@ -303,15 +309,12 @@ def registrar_marcacion(
             )
         raise
 
+    titulo, detalle = TEXTOS_VALIDA.get(metodo, TEXTOS_VALIDA["biometrico"])
     return Resultado(
         valido=True,
         motivo=None,
-        titulo="Ración manual habilitada" if metodo == "manual" else "Marcación válida",
-        detalle=(
-            "Ración autorizada manualmente — comensal registrado"
-            if metodo == "manual"
-            else "Ración habilitada — puede pasar al comedor"
-        ),
+        titulo=titulo,
+        detalle=detalle,
         usuario_id=usuario_id,
         nombre=nombre,
         comida=comida.comida,

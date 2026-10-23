@@ -65,9 +65,9 @@ const marcacionFixture = (cambios = {}) => ({
 // -------------------------------------------------------------
 // 1. Permisos
 // -------------------------------------------------------------
-test('permisos: cocinera sigue en [vivo], la jefa abre supervision y ya no vivo, sistemas ya no ve supervision', () => {
-  // Cocinera sigue en ['vivo']
-  assert.deepEqual(seccionesPermitidas('cocinera'), ['vivo']);
+test('permisos: cocinera en [checklist, vivo], la jefa abre supervision y ya no vivo, sistemas ya no ve supervision', () => {
+  // Cocinera: checklist (principal) y vivo
+  assert.deepEqual(seccionesPermitidas('cocinera'), ['checklist', 'vivo']);
   assert.equal(puedeVerSeccion('cocinera', 'vivo'), true);
   assert.equal(puedeVerSeccion('cocinera', 'supervision'), false);
 
@@ -85,8 +85,8 @@ test('permisos: cocinera sigue en [vivo], la jefa abre supervision y ya no vivo,
 
   // Cocinera con 'vivo' guardada permanece en 'vivo'
   assert.equal(resolverSeccionGuardada('cocinera', 'vivo'), 'vivo');
-  // Cocinera con 'supervision' guardada vuelve a 'vivo'
-  assert.equal(resolverSeccionGuardada('cocinera', 'supervision'), 'vivo');
+  // Cocinera con 'supervision' guardada vuelve a su principal, el checklist
+  assert.equal(resolverSeccionGuardada('cocinera', 'supervision'), 'checklist');
 });
 
 // -------------------------------------------------------------

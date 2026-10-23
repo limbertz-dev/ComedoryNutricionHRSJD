@@ -660,12 +660,12 @@ test('una huella identificada por cocina se muestra como entrega, sin decir que 
 
 test('el panel de la cocinera monta las huellas por identificar; jefa y sistemas no pueden operarla', () => {
   const localOriginal = globalThis.localStorage;
-  const montar = (rol, guardada = null) => {
+  const montar = (rol, guardada = null, seccionInicial = undefined) => {
     globalThis.localStorage = { getItem: () => guardada, setItem: () => {}, removeItem: () => {} };
-    return renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol, usuario: `${rol}.test` })));
+    return renderToStaticMarkup(h(ProveedorSesion, null, h(Panel, { rol, usuario: `${rol}.test`, seccionInicial })));
   };
   try {
-    const cocina = montar('cocinera');
+    const cocina = montar('cocinera', null, 'vivo');
     assert.match(cocina, /Huellas por identificar/);
     assert.match(cocina, /Consultando huellas por identificar…/);
     assert.doesNotMatch(cocina, /Intervenciones de cocina/);

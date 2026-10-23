@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from app.core.autorizacion import (
     ErrorAuth,
     UsuarioActual,
+    UsuarioChecklist,
     UsuarioIdentificador,
     exigir_metodo_marcacion,
     exigir_origen_biometrico,
@@ -19,12 +20,14 @@ from app.esquemas.intervenciones import (
     SolicitudIdentificacion,
 )
 from app.esquemas.marcacion import (
+    RespuestaAnulacion,
     RespuestaIdentificacionPolicia,
     RespuestaMarcacion,
+    SolicitudChecklist,
     SolicitudIdentificacionPolicia,
     SolicitudMarcacion,
 )
-from app.logica import intervencion, marcacion, policia
+from app.logica import checklist, intervencion, marcacion, policia
 
 router = APIRouter(prefix="/asistencias", tags=["asistencias"])
 
@@ -180,3 +183,48 @@ def identificar_policia(
     except policia.ErrorIdentificacionPolicia as error:
         return JSONResponse(status_code=error.status, content={"detail": error.detalle, "motivo": error.motivo})
     return RespuestaIdentificacionPolicia(**resultado)
+
+
+@router.post(
+    "/checklist",
+    response_model=RespuestaMarcacion,
+    summary="Marcar en el checklist de cocina",
+)
+def marcar_checklist(
+    sesion: SesionDep,
+    solicitud: SolicitudChecklist,
+    usuario: UsuarioChecklist,
+) -> RespuestaMarcacion:
+    """Solo cocinera. Registra la ración de la comida en curso con las mismas
+    reglas que la huella (horario, duplicado, turno de 12 h y categorías
+    permitidas). Un rechazo es 200 con `valido=false`, como en el lector."""
+    resultado = checklist.marcar(sesion, usuario.id, solicitud.usuario_id)
+    return RespuestaMarcacion(**vars(resultado))
+
+
+@router.delete(
+    "/checklist/{asistencia_id}",
+    response_model=RespuestaAnulacion,
+    summary="Desmarcar una ración del checklist",
+    responses={403: {"description": "La marcó otra cuenta"}, 404: {"description": "No existe"}, 409: {"description": "No se puede desmarcar"}},
+)
+def desmarcar_checklist(
+    sesion: SesionDep,
+    asistencia_id: Annotated[int, Path(gt=0, description="asistencias.id")],
+    usuario: UsuarioChecklist,
+):
+    """Solo cocinera, solo su propia marca, dentro de los minutos de gracia y
+    con la comida todavía abierta. La copia queda en anulaciones_checklist."""
+    cuenta_id = usuario.id
+    try:
+        anulacion = checklist.anular(sesion, cuenta_id, asistencia_id)
+    except checklist.ErrorChecklist as error:
+        sesion.rollback()
+        return JSONResponse(
+            status_code=error.status, content={"detail": error.detalle, "motivo": error.motivo}
+        )
+    return RespuestaAnulacion(
+        asistencia_id=anulacion.asistencia_id,
+        usuario_id=anulacion.usuario_id,
+        anulada_en=anulacion.anulada_en,
+    )

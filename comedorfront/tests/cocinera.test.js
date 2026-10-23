@@ -16,8 +16,44 @@ import PanelSesionCocinera, {
 
 const conSesion = (elemento) => h(ProveedorSesion, null, elemento);
 
-test('con rol cocinera no hay sidebar ni header y Control Biométrico ocupa toda la ventana', () => {
+test('la cocinera abre en el checklist de comida, a pantalla completa', () => {
   const html = renderToStaticMarkup(conSesion(h(Panel, { rol: 'cocinera' })));
+
+  assert.doesNotMatch(html, /class="sidebar"/);
+  assert.doesNotMatch(html, /<header class="header"/);
+  assert.match(html, /app--pantalla-completa/);
+  assert.match(html, /aria-label="Checklist de comida"/);
+  assert.match(html, /Cargando la lista de la comida…/);
+  // Control Biométrico ya no es la principal.
+  assert.doesNotMatch(html, /Huellas por identificar|Marcaciones del turno/);
+  // Sin el aviso de padrón cargado de las secciones de jefatura.
+  assert.doesNotMatch(html, /comensales? cargados?/);
+  assert.match(html, /aria-label="Menú de sesión"/);
+});
+
+test('el panel flotante cambia entre checklist y Control Biométrico', () => {
+  const props = {
+    cajaRef: { current: null }, abierto: true, onAlternar() {}, usuario: 'maria.cocina',
+    rol: 'cocinera', onCerrarSesion() {},
+  };
+  const enChecklist = renderToStaticMarkup(h(CajaSesionCocinera, {
+    ...props, seccionActiva: 'checklist', onCambiarSeccion() {},
+  }));
+  assert.match(enChecklist, /Ir a Control Biométrico/);
+  assert.doesNotMatch(enChecklist, /Ir al Checklist de comida/);
+
+  const enVivo = renderToStaticMarkup(h(CajaSesionCocinera, {
+    ...props, seccionActiva: 'vivo', onCambiarSeccion() {},
+  }));
+  assert.match(enVivo, /Ir al Checklist de comida/);
+
+  // Sin callback no se ofrece el cambio.
+  const sinCambio = renderToStaticMarkup(h(CajaSesionCocinera, props));
+  assert.doesNotMatch(sinCambio, /Ir a Control Biométrico|Ir al Checklist/);
+});
+
+test('con rol cocinera en Control Biométrico, la pantalla del lector ocupa toda la ventana', () => {
+  const html = renderToStaticMarkup(conSesion(h(Panel, { rol: 'cocinera', seccionInicial: 'vivo' })));
 
   // Sin sidebar ni header, con el modificador de pantalla completa
   assert.doesNotMatch(html, /class="sidebar"/);

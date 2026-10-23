@@ -28,6 +28,14 @@ La referencia de endpoints, adaptadores y reglas de presentación es `README.md`
 
 Secciones del sidebar (`src/navegacion.js`):
 
+0. **Checklist de comida** — pantalla principal de la cocinera mientras no esté
+   el lector, a pantalla completa. Lista a quienes tienen derecho a la comida
+   en curso (`GET /pantalla/checklist`: turno de 12 h o más, categorías
+   permitidas; lo decide el servidor) y marca la entrega con
+   `POST /asistencias/checklist` (`metodo='checklist'`, mismas reglas que la
+   huella). Solo la misma cocinera deshace su marca, dentro de 5 minutos y con
+   la comida abierta (`DELETE /asistencias/checklist/{id}`). El panel flotante
+   cambia entre el checklist y Control Biométrico.
 1. **Control Biométrico** — marcaciones en vivo, solo para la cocinera, en
    pantalla completa sin sidebar ni header. Las lecturas las registra el
    lector autorizado; el navegador nunca declara una marcación biométrica.
@@ -67,8 +75,9 @@ El acceso es real (`POST /auth/login`, `GET /auth/yo`, `POST /auth/cambio-passwo
 sesión vive en `src/sesion.js` + `src/hooks/useSesion.js`, `api.js` firma cada petición con
 `Authorization: Bearer` y convierte 401 en «Sesión expirada», 403 en «Sin permiso» y 428 en
 cambio obligatorio de contraseña. Qué ve cada rol está solo en `src/permisos.js`: la
-cocinera ve solo Control Biométrico, en pantalla completa con su panel flotante de
-sesión (usuario, rol, pantalla completa y cierre de sesión); la jefa ve Supervisión, Resumen, Historial, Reportes y Cuentas (solo
+cocinera ve el Checklist de comida (su principal) y Control Biométrico, en pantalla
+completa con su panel flotante de sesión (usuario, rol, cambio de pantalla, pantalla
+completa y cierre de sesión); la jefa ve Supervisión, Resumen, Historial, Reportes y Cuentas (solo
 lectura); sistemas ve Supervisión, Resumen, Historial, Reportes, Reglas del
 sistema y Administración de cuentas; nadie ve Control Biométrico salvo la
 cocinera, y un rol desconocido no ve nada. Ninguna sección se monta sin pasar
