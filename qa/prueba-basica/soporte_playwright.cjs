@@ -40,7 +40,7 @@ async function salud() {
       const res = await fetch(`${API}/salud`, { signal: AbortSignal.timeout(2000) });
       if (!res.ok) return false;
       const d = await res.json();
-      for (const [campo, valor] of Object.entries({ estado: 'ok', entorno: 'desarrollo', base_datos: 'bd_nutricion_escenario_sim', base_turnos: 'bd_turnos_escenario_demo', revision_alembic: 'c1f4e6a8b0d3' })) assert.equal(d[campo], valor);
+      for (const [campo, valor] of Object.entries({ estado: 'ok', entorno: 'desarrollo', base_datos: 'bd_nutricion_escenario_sim', base_turnos: 'bd_turnos_escenario_demo', revision_alembic: 'd5a7c9e1f3b5' })) assert.equal(d[campo], valor);
       return true;
     } catch (error) { if (error instanceof assert.AssertionError) throw error; return false; }
   }, 'La API QA no respondió con una salud válida en 25 segundos.');
