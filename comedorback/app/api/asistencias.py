@@ -213,8 +213,7 @@ def desmarcar_checklist(
     asistencia_id: Annotated[int, Path(gt=0, description="asistencias.id")],
     usuario: UsuarioChecklist,
 ):
-    """Solo cocinera, solo su propia marca, dentro de los minutos de gracia y
-    con la comida todavía abierta. La copia queda en anulaciones_checklist."""
+    """Solo cocinera, solo su propia marca y con la comida todavía abierta. La copia queda en anulaciones_checklist."""
     cuenta_id = usuario.id
     try:
         anulacion = checklist.anular(sesion, cuenta_id, asistencia_id)

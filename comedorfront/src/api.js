@@ -1534,7 +1534,7 @@ function adaptarPersonaChecklist(p) {
     metodo: p.metodo ?? null,
     asistenciaId: p.asistencia_id ?? null,
     fechaHora: p.fecha_hora ?? null,
-    anulableHasta: p.anulable_hasta ?? null,
+    anulable: p.anulable === true,
   };
 }
 
@@ -1554,7 +1554,6 @@ export async function obtenerChecklist({ signal } = {}) {
     comidaId: dato.comida_id ?? null,
     comida: dato.comida ?? null,
     fechaComida: dato.fecha_comida ?? null,
-    minutosParaAnular: dato.minutos_para_anular ?? 5,
     personas: dato.personas.map(adaptarPersonaChecklist),
   };
 }
@@ -1575,7 +1574,7 @@ export async function marcarEnChecklist(usuarioId, { signal } = {}) {
   return dato;
 }
 
-/** DELETE /asistencias/checklist/{id}: solo la marca propia y reciente. */
+/** DELETE /asistencias/checklist/{id}: solo la marca propia, con la comida abierta. */
 export async function desmarcarEnChecklist(asistenciaId, { signal } = {}) {
   if (!Number.isInteger(asistenciaId) || asistenciaId <= 0) throw new Error('Ración inválida.');
   // 403 otra_cuenta es un rechazo de esa marca, no una sección vedada.

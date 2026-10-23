@@ -346,8 +346,8 @@ class Asistencia(Base):
 
 # Idénticos carácter por carácter a los de la migración b3e5f7a9c1d4.
 COMENTARIO_TABLA_ANULACIONES = (
-    "Raciones del checklist que la misma cocinera desmarco a los pocos "
-    "minutos. Solo inserciones: la asistencia se borra y aqui queda su copia."
+    "Raciones del checklist que la misma cocinera desmarco con la comida "
+    "abierta. Solo inserciones: la asistencia se borra y aqui queda su copia."
 )
 COMENTARIO_ANULACION_ASISTENCIA = (
     "asistencias.id que se borro. Sin FK: la fila ya no existe."
@@ -358,7 +358,7 @@ class AnulacionChecklist(Base):
     """Una ración del checklist que se deshizo por error de la cocinera.
 
     La ración es un hecho histórico y no se borra... salvo esta excepción
-    acotada: la marcó la misma cuenta hace pocos minutos y la comida sigue
+    acotada: la marcó la misma cuenta y la comida sigue
     abierta (app/logica/checklist.py). Para que la excepción no deje huecos,
     la copia de la ración y quién la anuló quedan aquí.
     """

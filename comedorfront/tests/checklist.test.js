@@ -10,10 +10,7 @@ import { desmarcarEnChecklist, marcarEnChecklist, obtenerChecklist } from '../sr
 import {
   avisoDeMarca,
   contarChecklist,
-  desfaseConServidor,
   filtrarChecklist,
-  formatoCuentaRegresiva,
-  segundosParaDeshacer,
   serviciosDeChecklist,
 } from '../src/checklist.js';
 import ChecklistCocina from '../src/components/secciones/ChecklistCocina.jsx';
@@ -54,18 +51,6 @@ test('conteo, servicios y filtros del checklist', () => {
   assert.deepEqual(filtrarChecklist(PERSONAS, { estado: 'todas', servicio: 'LABORATORIO' }).map((p) => p.id), [1, 3]);
 });
 
-test('el plazo para deshacer se cuenta con la hora del servidor', () => {
-  // La PC va 1 h adelantada respecto del servidor (p. ej. reloj de laboratorio).
-  const recibido = new Date(2026, 9, 19, 13, 0, 0).getTime();
-  const desfase = desfaseConServidor('2026-10-19T12:00:00', recibido);
-  assert.equal(desfase, 3600 * 1000);
-  assert.equal(segundosParaDeshacer('2026-10-19T12:04:30', desfase, recibido), 270);
-  assert.equal(segundosParaDeshacer('2026-10-19T11:59:00', desfase, recibido), 0);
-  assert.equal(segundosParaDeshacer(null, desfase, recibido), 0);
-  assert.equal(formatoCuentaRegresiva(270), '4:30');
-  assert.equal(formatoCuentaRegresiva(5), '0:05');
-});
-
 test('avisos de marca según la respuesta del servidor', () => {
   assert.equal(avisoDeMarca({ valido: true }, 'Ana').tipo, 'exito');
   assert.match(avisoDeMarca({ valido: false, motivo: 'duplicado' }, 'Ana').texto, /ya recibió/);
@@ -76,10 +61,10 @@ test('contrato: GET /pantalla/checklist, POST y DELETE /asistencias/checklist', 
   await conFetch([
     { status: 200, json: {
       momento: '2026-10-19T12:30:00', fuera_de_horario: false, comida_id: 2, comida: 'Almuerzo',
-      fecha_comida: '2026-10-19', minutos_para_anular: 5,
+      fecha_comida: '2026-10-19',
       personas: [{ usuario_id: 7, nombre: 'Ana', categoria: 'Medicos', servicio: 'LAB', turno: 'T1',
         servida: true, metodo: 'checklist', asistencia_id: 70, fecha_hora: '2026-10-19T12:29:00',
-        anulable_hasta: '2026-10-19T12:34:00' }],
+        anulable: true }],
     } },
     { status: 200, json: { valido: true, titulo: 'Ración entregada', detalle: '' } },
     { status: 403, json: { detail: 'Solo puede desmarcar quien marcó la ración.', motivo: 'otra_cuenta' } },
@@ -88,7 +73,7 @@ test('contrato: GET /pantalla/checklist, POST y DELETE /asistencias/checklist', 
     assert.equal(lista.comida, 'Almuerzo');
     assert.equal(lista.personas[0].id, 7);
     assert.equal(lista.personas[0].asistenciaId, 70);
-    assert.equal(lista.personas[0].anulableHasta, '2026-10-19T12:34:00');
+    assert.equal(lista.personas[0].anulable, true);
 
     const marca = await marcarEnChecklist(7);
     assert.equal(marca.valido, true);
@@ -105,7 +90,7 @@ test('contrato: GET /pantalla/checklist, POST y DELETE /asistencias/checklist', 
 test('la pantalla muestra la comida, los conteos y la marca de cada persona', () => {
   const html = renderToStaticMarkup(h(ChecklistCocina, { datosIniciales: {
     momento: '2026-10-19T12:30:00', fueraDeHorario: false, comidaId: 2, comida: 'Almuerzo',
-    fechaComida: '2026-10-19', minutosParaAnular: 5,
+    fechaComida: '2026-10-19',
     personas: [
       { id: 1, nombre: 'Zoila Pérez', categoria: 'Medicos', servicio: 'LAB', turno: 'T1', servida: false },
       { id: 2, nombre: 'Ana Mamani', categoria: 'Medicos', servicio: 'IMG', turno: 'T1', servida: true,
@@ -129,4 +114,17 @@ test('fuera de horario solo se muestra el aviso', () => {
   } }));
   assert.match(html, /Fuera de horario/);
   assert.doesNotMatch(html, /role="checkbox"/);
+});
+
+test('Deshacer aparece sin temporizador y solo en las marcas propias', () => {
+  const html = renderToStaticMarkup(h(ChecklistCocina, { datosIniciales: {
+    momento: '2026-10-19T12:30:00', fueraDeHorario: false, comidaId: 2, comida: 'Almuerzo',
+    fechaComida: '2026-10-19',
+    personas: [
+      { id: 1, nombre: 'Propia', servida: true, metodo: 'checklist', fechaHora: '2026-10-19T12:01:00', anulable: true, asistenciaId: 10 },
+      { id: 2, nombre: 'Ajena', servida: true, metodo: 'checklist', fechaHora: '2026-10-19T12:02:00', anulable: false, asistenciaId: 11 },
+    ],
+  }, filtroInicial: 'entregadas' }));
+  assert.equal(html.match(/>Deshacer</g)?.length, 1);
+  assert.doesNotMatch(html, /Deshacer ·|\d:\d\d<\/span><\/button>/);
 });

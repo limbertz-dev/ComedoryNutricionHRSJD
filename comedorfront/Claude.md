@@ -33,8 +33,8 @@ Secciones del sidebar (`src/navegacion.js`):
    en curso (`GET /pantalla/checklist`: turno de 12 h o más, categorías
    permitidas; lo decide el servidor) y marca la entrega con
    `POST /asistencias/checklist` (`metodo='checklist'`, mismas reglas que la
-   huella). Solo la misma cocinera deshace su marca, dentro de 5 minutos y con
-   la comida abierta (`DELETE /asistencias/checklist/{id}`). El panel flotante
+   huella). Solo la misma cocinera deshace su marca, mientras la comida siga
+   abierta y sin temporizador (`DELETE /asistencias/checklist/{id}`). El panel flotante
    cambia entre el checklist y Control Biométrico.
 1. **Control Biométrico** — marcaciones en vivo, solo para la cocinera, en
    pantalla completa sin sidebar ni header. Las lecturas las registra el
