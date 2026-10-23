@@ -52,10 +52,18 @@ export default function HuellasRegistradas({ version = 0, consultar = obtenerReg
           <h2 id="huellas-registro-titulo">Huellas registradas</h2>
           <p>Comensal vinculado y cuenta que realizó cada alta. Hora de Bolivia.</p>
         </div>
-        <Boton variante="secundario" tamano="sm" disabled={cargando}
-          onClick={() => setRefresco(valor => valor + 1)}>
-          {cargando ? 'Actualizando huellas…' : 'Actualizar huellas'}
-        </Boton>
+        <div className="huellas-registro__acciones">
+          <div className="huellas-registro__fecha-filtro" role="group" aria-label="Filtrar por día del alta">
+            <SelectorCalendario alcance="diario" fecha={fecha ?? valorFecha(hoy)} mes={(fecha ?? valorFecha(hoy)).slice(0, 7)}
+              hoy={hoy} onFecha={elegirFecha} onMes={() => {}} />
+            <Boton variante={fecha === null ? 'primario' : 'fantasma'} tamano="sm" disabled={cargando || fecha === null}
+              onClick={() => elegirFecha(null)}>Todas las fechas</Boton>
+          </div>
+          <Boton variante="secundario" tamano="sm" disabled={cargando}
+            onClick={() => setRefresco(valor => valor + 1)}>
+            {cargando ? 'Actualizando huellas…' : 'Actualizar huellas'}
+          </Boton>
+        </div>
       </header>
       <form className="huellas-registro__busqueda" role="search" aria-label="Buscar huellas registradas" onSubmit={buscar}>
         <label htmlFor="huellas-registro-busqueda">Buscar comensal o cuenta</label>
@@ -65,12 +73,6 @@ export default function HuellasRegistradas({ version = 0, consultar = obtenerReg
           <Boton type="submit" variante="secundario" tamano="sm" disabled={cargando}>Buscar</Boton>
         </div>
       </form>
-      <div className="huellas-registro__fecha-filtro" role="group" aria-label="Filtrar por día del alta">
-        <SelectorCalendario alcance="diario" fecha={fecha ?? valorFecha(hoy)} mes={(fecha ?? valorFecha(hoy)).slice(0, 7)}
-          hoy={hoy} onFecha={elegirFecha} onMes={() => {}} />
-        <Boton variante={fecha === null ? 'primario' : 'fantasma'} tamano="sm" disabled={cargando || fecha === null}
-          onClick={() => elegirFecha(null)}>Todas las fechas</Boton>
-      </div>
       {error ? <p className="huellas-registro__estado huellas-registro__estado--error" role="alert">
         {pagina ? 'Se conserva la última consulta. ' : ''}{error} Usa «Actualizar huellas» para reintentar.
       </p> : null}

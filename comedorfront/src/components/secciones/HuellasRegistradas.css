@@ -29,10 +29,10 @@
 .huellas-registro__paginas p { margin-right: auto; }
 
 /* Filtro por un solo día del alta, con el mismo selector que el resto de la app. */
+.huellas-registro__acciones,
 .huellas-registro__fecha-filtro {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--e-3);
-  margin-bottom: var(--e-4);
 }

@@ -9,6 +9,7 @@ import {
 import { diaLegible } from '../../dias.js';
 import IntervencionesCocina from './IntervencionesCocina.jsx';
 import HuellasRegistradas from './HuellasRegistradas.jsx';
+import SelectorCalendario from './SelectorCalendario.jsx';
 import './Supervision.css';
 
 /** Filas por consulta: alcanza para el día completo del comedor (≈450 lecturas). */
@@ -207,6 +208,11 @@ export default function Supervision({
   const [dia, setDia] = useState(comidasIniciales);
   const [marcaciones, setMarcaciones] = useState(marcacionesIniciales);
   const [actualizado, setActualizado] = useState(actualizadoInicial);
+  /* Día consultado: null sigue el día del servidor (el del reloj del comedor).
+     `hoyServidor` es ese día, para el selector y el botón «Volver a hoy». */
+  const [fechaElegida, setFechaElegida] = useState(null);
+  const [hoyServidor, setHoyServidor] = useState(comidasIniciales?.fecha ?? null);
+  const fechaConsulta = fechaElegida ?? fecha ?? null;
 
   /* Pestaña activa: null es "Todas". Arranca en la comida en curso. */
   const [pestana, setPestana] = useState(() => pestanaPorDefecto(comidasIniciales?.comidas ?? []));
@@ -227,8 +233,9 @@ export default function Supervision({
       setActualizando(true);
     }
     try {
-      const diaServidor = await obtenerComidasDelDia({ fecha, signal });
+      const diaServidor = await obtenerComidasDelDia({ fecha: fechaConsulta, signal });
       if (signal?.aborted) return;
+      if (fechaConsulta === null) setHoyServidor(diaServidor.fecha);
       /* La pestaña por defecto sale de las comidas recién llegadas, salvo que
          ya se haya elegido una a mano. */
       let tab = comidaId !== undefined ? comidaId : pestanaRef.current;
@@ -236,7 +243,7 @@ export default function Supervision({
         tab = pestanaPorDefecto(diaServidor.comidas);
         setPestana(tab);
       }
-      const ultimas = await obtenerUltimasMarcaciones({ fecha, limite: LIMITE_SUPERVISION, comidaId: tab, signal });
+      const ultimas = await obtenerUltimasMarcaciones({ fecha: fechaConsulta ?? diaServidor.fecha, limite: LIMITE_SUPERVISION, comidaId: tab, signal });
       if (signal?.aborted) return;
       setDia(diaServidor);
       setMarcaciones(ultimas);
@@ -259,7 +266,7 @@ export default function Supervision({
         }
       }
     }
-  }, [fecha]);
+  }, [fechaConsulta]);
 
   useEffect(() => {
     return programarRefrescoSupervision({
@@ -300,10 +307,28 @@ export default function Supervision({
     version={actualizado?.getTime?.() ?? 0} inicial={huellasIniciales}
   /> : null;
 
+  function elegirDia(valor) {
+    pestanaTocada.current = false;
+    setFechaElegida(valor === hoyServidor ? null : valor);
+  }
+  const hoyComoFecha = hoyServidor ? new Date(`${hoyServidor}T12:00:00`) : new Date();
+  const diaVisible = fechaElegida ?? hoyServidor ?? dia?.fecha ?? null;
+  /* Arriba de todo, en todos los estados: elegir el día que se supervisa. */
+  const selectorDia = diaVisible ? (
+    <div className="supervision__dia" role="group" aria-label="Día que se supervisa">
+      <SelectorCalendario alcance="diario" fecha={diaVisible} mes={diaVisible.slice(0, 7)}
+        hoy={hoyComoFecha} onFecha={elegirDia} onMes={() => {}} />
+      {fechaElegida !== null ? (
+        <Boton variante="fantasma" tamano="sm" onClick={() => elegirDia(hoyServidor)}>Volver a hoy</Boton>
+      ) : null}
+    </div>
+  ) : null;
+
   /* Estados puros: Carga, Error y Vacío */
   if (cargando) {
     return (
       <div className="supervision">
+        {selectorDia}
         <p className="supervision__estado" role="status">Cargando supervisión…</p>
         {registroHuellas}
       </div>
@@ -313,6 +338,7 @@ export default function Supervision({
   if (error) {
     return (
       <div className="supervision">
+        {selectorDia}
         <div className="supervision__error" role="alert">
           <p>{error}</p>
           <Boton onClick={() => cargarDatos()}>Reintentar supervisión</Boton>
@@ -327,6 +353,7 @@ export default function Supervision({
   if (esVacioTotal) {
     return (
       <div className="supervision">
+        {selectorDia}
         <div className="supervision__barra-superior">
           <p className="supervision__vacio" role="status">
             No hay registros de supervisión para este día.
@@ -356,6 +383,7 @@ export default function Supervision({
 
   return (
     <div className="supervision">
+      {selectorDia}
 
       {avisos}
 
@@ -564,7 +592,7 @@ export default function Supervision({
       {puedeConsultarIntervenciones ? (
         <IntervencionesCocina
           key={pestana ?? 'todas'}
-          fecha={fecha}
+          fecha={fechaConsulta ?? diaVisible}
           comidaId={pestana}
           comida={resumen?.comida?.comida ?? null}
           version={actualizado?.getTime?.() ?? 0}
