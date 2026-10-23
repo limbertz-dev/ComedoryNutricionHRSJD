@@ -37,7 +37,7 @@ from app.modelos.comedor import (
     LecturaBiometrica,
 )
 from app.modelos.heredados import Comensal, Comida
-from app.modelos.lector import RacionPolicia
+from app.modelos.lector import RacionPolicia, VinculoLector
 
 
 @dataclass
@@ -501,7 +501,7 @@ def ultimas_marcaciones(
             RacionPolicia.id.label("id"),
             literal(None).label("usuario_id"),
             RacionPolicia.fecha_hora,
-            literal(policia.NOMBRE).label("nombre"),
+            func.coalesce(VinculoLector.nombre, policia.NOMBRE).label("nombre"),
             literal("Policías").label("categoria"),
             RacionPolicia.comida_id,
             comida_policia.nombre.label("comida"),
@@ -513,11 +513,12 @@ def ultimas_marcaciones(
             literal(None).label("lectura_motivo"),
             literal(None).label("asistencia_id"),
             literal(None).label("racion_usuario_id"),
-            literal(policia.NOMBRE).label("racion_nombre"),
+            func.coalesce(VinculoLector.nombre, policia.NOMBRE).label("racion_nombre"),
             RacionPolicia.fecha_comida.label("racion_fecha_comida"),
             RacionPolicia.fecha_hora.label("racion_fecha_hora"),
         )
         .select_from(RacionPolicia)
+        .outerjoin(VinculoLector, VinculoLector.id == RacionPolicia.vinculo_id)
         .outerjoin(comida_policia, comida_policia.id == RacionPolicia.comida_id)
         .where(func.date(RacionPolicia.fecha_hora) == dia)
     )
@@ -667,7 +668,7 @@ def _enriquecer(
             m.motivo_no_identificable = "no_aplica"
             m.resultado_final = {
                 "via": "policia", "asistencia_id": None,
-                "comensal": {"usuario_id": None, "nombre": policia.NOMBRE},
+                "comensal": {"usuario_id": None, "nombre": m.racion_nombre or policia.NOMBRE},
                 "comida": m.comida, "fecha_comida": m.racion_fecha_comida, "momento": m.racion_fecha_hora,
             }
             continue

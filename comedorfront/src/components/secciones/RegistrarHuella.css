@@ -70,3 +70,17 @@
   .registro-huella__filtros { margin-top: var(--e-2); }
   .registro-huella__captura { padding-top: 0; }
 }
+
+/* ¿Personal del padrón o policía? Dos opciones, como un interruptor. */
+.registro-huella__tipo { display: inline-flex; gap: var(--e-1); padding: var(--e-1); margin-bottom: var(--e-3); background: var(--c-superficie-2); border: 1px solid var(--c-borde); border-radius: var(--r-md, 12px); }
+.registro-huella__tipo-opcion { min-height: var(--alto-control-compacto); padding: var(--e-2) var(--e-4); color: var(--c-texto-2); background: transparent; border: 0; border-radius: var(--r-sm); font: inherit; font-weight: 700; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.registro-huella__tipo-opcion:hover:not(:disabled) { color: var(--c-texto); background: var(--c-acento-tenue); }
+.registro-huella__tipo-opcion--activa { color: #fff; background: var(--gradiente-acento); }
+.registro-huella__tipo-opcion--activa:hover:not(:disabled) { color: #fff; background: var(--gradiente-acento-hover); }
+.registro-huella__tipo-opcion:focus-visible { outline: 2px solid var(--c-acento-oscuro); outline-offset: 2px; }
+.registro-huella__tipo-opcion:disabled { cursor: not-allowed; opacity: 0.6; }
+.registro-huella__policia { display: grid; gap: var(--e-3); }
+.registro-huella__policia label { display: grid; gap: var(--e-1); font-weight: 700; font-size: var(--t-sm); }
+.registro-huella__policia small { color: var(--c-texto-2); font-weight: 600; }
+.registro-huella__policia input { min-height: var(--alto-control); padding: var(--e-2) var(--e-3); color: var(--c-texto); background: var(--c-superficie); border: 1px solid var(--c-borde-fuerte); border-radius: var(--r-sm); font: inherit; font-weight: 400; }
+.registro-huella__policia input:focus-visible { outline: 2px solid var(--c-acento-oscuro); outline-offset: 2px; }

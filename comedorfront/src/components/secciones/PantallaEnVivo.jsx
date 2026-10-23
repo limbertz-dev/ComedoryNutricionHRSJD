@@ -156,7 +156,7 @@ export function eventoDeFila(fila) {
       titulo: 'Policía registrado',
       detalle: 'Ración de policía habilitada — vía libre, cuenta en la columna Policías',
       hora: fila.hora,
-      persona: { id: null, nombre: 'Policía', categoria: 'Policías', legajo: '—' },
+      persona: { id: null, nombre: fila.persona?.nombre || 'Policía', categoria: 'Policías', legajo: '—' },
     };
   }
   const manual = fila.origen === 'asistencia_manual';

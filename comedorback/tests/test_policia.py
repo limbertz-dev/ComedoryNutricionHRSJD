@@ -53,7 +53,8 @@ def huella_policia(cliente, jefa):
     _vaciar()
     horarios.sembrar()
     reloj_prueba.fijar(DIA)
-    r = cliente.post("/lector/vinculos", headers=jefa, json={"identificador": "pol-1", "tipo": "policia"})
+    r = cliente.post("/lector/vinculos", headers=jefa, json={
+        "identificador": "pol-1", "tipo": "policia", "nombre": "  juan   PEREZ  ", "documento": "PL-1234"})
     assert r.status_code == 201, r.text
     yield r.json()
     _vaciar()
@@ -74,14 +75,20 @@ def _columna(informe, nombre):
     return [fila.celdas[i] for fila in informe.filas]
 
 
-def test_vinculo_de_policia_sin_persona(huella_policia):
+def test_vinculo_de_policia_sin_persona_y_con_su_nombre(huella_policia):
     assert (huella_policia["tipo"], huella_policia["usuario_id"]) == ("policia", None)
-    assert (huella_policia["nombre"], huella_policia["categoria"]) == ("Policía", "Policías")
+    # Los espacios sobrantes se limpian; el nombre se guarda como se escribió.
+    assert (huella_policia["nombre"], huella_policia["documento"], huella_policia["categoria"]) == (
+        "juan PEREZ", "PL-1234", "Policías")
 
 
 @pytest.mark.parametrize("cuerpo", [
-    {"identificador": "x", "tipo": "policia", "usuario_id": 5},
+    {"identificador": "x", "tipo": "policia", "usuario_id": 5, "nombre": "Juan Perez"},
+    {"identificador": "x", "tipo": "policia"},
+    {"identificador": "x", "tipo": "policia", "nombre": "  "},
+    {"identificador": "x", "tipo": "policia", "nombre": "Juan Perez", "documento": "<script>"},
     {"identificador": "x", "tipo": "personal"},
+    {"identificador": "x", "tipo": "personal", "usuario_id": 5, "nombre": "Juan Perez"},
 ])
 def test_tipo_y_persona_coherentes_422(cliente, jefa, cuerpo):
     assert cliente.post("/lector/vinculos", headers=jefa, json=cuerpo).status_code == 422
@@ -92,7 +99,7 @@ def test_cada_lectura_es_una_racion_con_via_libre(cliente, huella_policia):
     primera = _leer(cliente).json()
     segunda = _leer(cliente).json()
     assert primera["valido"] is True and segunda["valido"] is True, (primera, segunda)
-    assert (primera["nombre"], primera["comida"], primera["vinculado"]) == ("Policía", "Almuerzo", True)
+    assert (primera["nombre"], primera["comida"], primera["vinculado"]) == ("juan PEREZ", "Almuerzo", True)
     assert _conteo(RacionPolicia) == 2
     # No escribe lecturas ni raciones de personal.
     assert _conteo(LecturaBiometrica) == lecturas
@@ -175,7 +182,8 @@ def test_aparece_en_las_marcaciones_de_cocina_y_supervision(cliente, jefa, huell
     policias = [f for f in filas if f["origen"] == "racion_policia"]
     assert len(policias) == 1
     fila = policias[0]
-    assert (fila["valido"], fila["nombre"], fila["categoria"], fila["comida"]) == (True, "Policía", "Policías", "Almuerzo")
+    assert (fila["valido"], fila["nombre"], fila["categoria"], fila["comida"]) == (True, "juan PEREZ", "Policías", "Almuerzo")
+    assert fila["resultado_final"]["comensal"]["nombre"] == "juan PEREZ"
     assert fila["estado_final"] == "racion_servida"
     assert fila["resultado_final"]["via"] == "policia" and fila["resultado_final"]["asistencia_id"] is None
     assert fila["clave_evento"] == f"racion_policia:{fila['id']}"

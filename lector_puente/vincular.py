@@ -103,14 +103,27 @@ def vincular(sesion: Sesion) -> None:
         print(f"  No se vinculó ({codigo}): {detalle(datos)}")
 
 
+def datos_policia() -> dict | None:
+    """Nombre completo (obligatorio) y CI o placa (opcional) del policía."""
+    nombre = " ".join(input("  Nombre completo del policía: ").split())
+    if len(nombre) < 3:
+        print("  Hace falta el nombre completo. Cancelado.")
+        return None
+    documento = input("  CI o número de placa (opcional, Enter para omitir): ").strip()
+    return {"nombre": nombre, **({"documento": documento} if documento else {})}
+
+
 def vincular_policia(sesion: Sesion) -> None:
     """Para lectores que reconocen solos (terminal / teclado): el número que
     muestra el aparato queda como huella de policía, sin persona."""
     identificador = input("  Número que muestra el lector para la huella del policía: ").strip()
     if not identificador:
         return
-    codigo, datos = sesion.pedir("POST", "/lector/vinculos", {"identificador": identificador, "tipo": "policia"})
-    print(f"  Listo: huella {identificador} -> Policía." if codigo == 201
+    policia = datos_policia()
+    if policia is None:
+        return
+    codigo, datos = sesion.pedir("POST", "/lector/vinculos", {"identificador": identificador, "tipo": "policia", **policia})
+    print(f"  Listo: huella {identificador} -> {policia['nombre']} (policía)." if codigo == 201
           else f"  No se vinculó ({codigo}): {detalle(datos)}")
 
 

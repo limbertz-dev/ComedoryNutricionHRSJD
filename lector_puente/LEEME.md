@@ -54,7 +54,8 @@ Si al abrir aparece «Falta libzkfp.dll», el SDK del punto 2 no está instalado
 python enrolar.py --usuario jefa
 ```
 Opción 1 (personal): buscar a la persona por nombre, apoyar el **mismo dedo 3 veces**.
-Opción 2 (policía): solo los 3 apoyos. Un dedo ya enrolado se rechaza.
+Opción 2 (policía): escribir su nombre completo y, opcional, su CI o número de placa; después los 3 apoyos.
+Un dedo ya enrolado se rechaza.
 
 ### 2. Abrir el puente
 ```powershell

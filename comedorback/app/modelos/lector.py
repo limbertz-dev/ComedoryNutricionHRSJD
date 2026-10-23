@@ -61,6 +61,12 @@ class VinculoLector(Base):
     usuario_id: Mapped[int | None] = mapped_column(
         ID, comment="users.id de la base de turnos (v_comensales), sin FK. NULL en policias."
     )
+    nombre: Mapped[str | None] = mapped_column(
+        String(100), comment="Solo policias: nombre completo, escrito al registrar la huella."
+    )
+    documento: Mapped[str | None] = mapped_column(
+        String(30), comment="Solo policias, opcional: CI o numero de placa."
+    )
     activo: Mapped[bool] = mapped_column(TINYINT(1), default=1)
     plantilla: Mapped[str | None] = mapped_column(
         Text, deferred=True,
