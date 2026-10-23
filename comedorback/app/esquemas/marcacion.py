@@ -121,9 +121,9 @@ class PersonaChecklist(BaseModel):
     metodo: Literal["biometrico", "manual", "checklist"] | None = None
     asistencia_id: int | None = None
     fecha_hora: datetime | None = None
-    anulable_hasta: datetime | None = Field(
-        default=None,
-        description="Solo en las marcas propias del checklist que aún se pueden desmarcar.",
+    anulable: bool = Field(
+        default=False,
+        description="True en las marcas propias del checklist: se pueden desmarcar mientras la comida siga abierta.",
     )
 
 
@@ -133,7 +133,6 @@ class Checklist(BaseModel):
     comida_id: int | None = None
     comida: str | None = None
     fecha_comida: date | None = None
-    minutos_para_anular: int
     personas: list[PersonaChecklist]
 
 

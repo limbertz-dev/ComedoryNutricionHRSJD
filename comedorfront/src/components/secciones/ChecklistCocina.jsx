@@ -5,12 +5,9 @@ import {
   MS_CICLO_CHECKLIST,
   avisoDeMarca,
   contarChecklist,
-  desfaseConServidor,
   etiquetaDeMetodo,
   filtrarChecklist,
-  formatoCuentaRegresiva,
   horaDeEntrega,
-  segundosParaDeshacer,
   serviciosDeChecklist,
 } from '../../checklist.js';
 import AppSelect from '../ui/AppSelect.jsx';
@@ -33,17 +30,15 @@ function fechaLarga(iso) {
  * lector. Lista a quienes les corresponde la comida en curso y marca la
  * entrega; el servidor vuelve a aplicar todas las reglas en cada marca.
  */
-export default function ChecklistCocina({ datosIniciales = null }) {
+export default function ChecklistCocina({ datosIniciales = null, filtroInicial = 'pendientes' }) {
   const [datos, setDatos] = useState(datosIniciales);
   const [cargando, setCargando] = useState(datosIniciales === null);
   const [error, setError] = useState('');
-  const [filtro, setFiltro] = useState('pendientes');
+  const [filtro, setFiltro] = useState(filtroInicial);
   const [busqueda, setBusqueda] = useState('');
   const [servicio, setServicio] = useState('todos');
   const [enCurso, setEnCurso] = useState(() => new Set());
   const [aviso, setAviso] = useState(null);
-  const [ahora, setAhora] = useState(() => Date.now());
-  const desfase = useRef(0);
   const controlador = useRef(null);
 
   const cargar = useCallback(async () => {
@@ -53,7 +48,6 @@ export default function ChecklistCocina({ datosIniciales = null }) {
     try {
       const respuesta = await obtenerChecklist({ signal: propio.signal });
       if (propio.signal.aborted) return;
-      desfase.current = desfaseConServidor(respuesta.momento);
       setDatos(respuesta);
       setError('');
     } catch (causa) {
@@ -73,12 +67,6 @@ export default function ChecklistCocina({ datosIniciales = null }) {
   }, [cargar]);
 
   const personas = datos?.personas ?? [];
-  const hayDeshacer = personas.some((p) => p.anulableHasta);
-  useEffect(() => {
-    if (!hayDeshacer) return undefined;
-    const reloj = setInterval(() => setAhora(Date.now()), 1000);
-    return () => clearInterval(reloj);
-  }, [hayDeshacer]);
 
   const conteo = useMemo(() => contarChecklist(personas), [personas]);
   const servicios = useMemo(() => serviciosDeChecklist(personas), [personas]);
@@ -250,8 +238,6 @@ export default function ChecklistCocina({ datosIniciales = null }) {
           <ul className="checklist__lista" aria-label={`Personas con derecho a ${datos.comida}`}>
             {visibles.map((persona) => {
               const ocupada = enCurso.has(persona.id);
-              const restante = persona.anulableHasta
-                ? segundosParaDeshacer(persona.anulableHasta, desfase.current, ahora) : 0;
               const meta = [persona.categoria, persona.servicio, persona.turno].filter(Boolean).join(' · ');
               return (
                 <li key={persona.id} className={`checklist__fila${persona.servida ? ' checklist__fila--entregada' : ''}`}>
@@ -283,10 +269,10 @@ export default function ChecklistCocina({ datosIniciales = null }) {
                         <IconoCheck tamano={13} />
                         {etiquetaDeMetodo(persona.metodo)} · {horaDeEntrega(persona.fechaHora)}
                       </span>
-                      {restante > 0 ? (
+                      {persona.anulable ? (
                         <Boton variante="secundario" tamano="sm" disabled={ocupada} onClick={() => deshacer(persona)}
-                          tooltip="Solo si se marcó por error">
-                          Deshacer · {formatoCuentaRegresiva(restante)}
+                          tooltip="Solo si se marcó por error; vale hasta que termine esta comida">
+                          Deshacer
                         </Boton>
                       ) : null}
                     </div>

@@ -60,28 +60,6 @@ export function filtrarChecklist(personas = [], { estado = 'pendientes', busqued
   return [...filtradas.filter((p) => !p.servida), ...filtradas.filter((p) => p.servida)];
 }
 
-/**
- * Desfase entre el reloj del servidor y el de esta PC, en ms. El plazo para
- * deshacer se cuenta con la hora del servidor (en QA puede ser otra fecha).
- */
-export function desfaseConServidor(momentoServidor, recibidoEn = Date.now()) {
-  const servidor = fechaHoraDelServidor(momentoServidor);
-  return servidor ? recibidoEn - servidor.getTime() : 0;
-}
-
-/** Segundos que quedan para deshacer; 0 si ya venció o no se puede. */
-export function segundosParaDeshacer(anulableHasta, desfase, ahora = Date.now()) {
-  const limite = fechaHoraDelServidor(anulableHasta);
-  if (!limite) return 0;
-  return Math.max(0, Math.ceil((limite.getTime() - (ahora - desfase)) / 1000));
-}
-
-export function formatoCuentaRegresiva(segundos) {
-  const m = Math.floor(segundos / 60);
-  const s = segundos % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
 /** "12:31" de un datetime del servidor. */
 export function horaDeEntrega(fechaHora) {
   const momento = fechaHoraDelServidor(fechaHora);

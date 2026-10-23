@@ -10,9 +10,9 @@ ración de la comida en curso:
   · asistencias.metodo suma 'checklist'. Pasa por las mismas reglas que la
     huella (horario, duplicado, derecho: turno de 12 h y categorías
     permitidas) y guarda la cuenta en registrado_por_cuenta.
-  · anulaciones_checklist: la misma cocinera puede desmarcar su marca a los
-    pocos minutos si se equivocó; la asistencia se borra y su copia queda
-    aquí.
+  · anulaciones_checklist: la misma cocinera puede desmarcar su marca
+    mientras la comida siga abierta si se equivocó; la asistencia se borra y
+    su copia queda aquí.
 
 Solo toca bd_nutricion. El downgrade falla si ya hay asistencias con
 metodo='checklist' (MySQL no las puede convertir): hay que decidir antes qué
@@ -30,8 +30,8 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 COMENTARIO_TABLA = (
-    "Raciones del checklist que la misma cocinera desmarco a los pocos "
-    "minutos. Solo inserciones: la asistencia se borra y aqui queda su copia."
+    "Raciones del checklist que la misma cocinera desmarco con la comida "
+    "abierta. Solo inserciones: la asistencia se borra y aqui queda su copia."
 )
 
 
