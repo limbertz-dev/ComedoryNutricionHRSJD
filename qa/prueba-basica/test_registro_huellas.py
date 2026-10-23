@@ -106,3 +106,23 @@ def test_registros_solo_jefa_lectura_sin_comida_y_con_paginacion_validada(circui
             app.dependency_overrides.clear()
             assert cliente.get('/_qa/enrolamiento/registros').status_code == 401
         assert (c.CARPETA / 'huellas_simuladas.json').read_bytes() == antes
+
+
+def test_filtro_por_dia_usa_la_hora_de_bolivia(circuito):
+    from datetime import date
+    motor, _ = circuito
+    with c.app_sin_dotenv():
+        e.registrar(900101, 2, str(uuid4()))
+        e.registrar(900102, 2, str(uuid4()))
+        ruta = c.CARPETA / 'huellas_simuladas.json'
+        datos = json.loads(ruta.read_text(encoding='utf-8'))
+        # 02:30 UTC del 23 = 22:30 del 22 en Bolivia; 03:30 UTC del 22 = 23:30 del 21.
+        datos['registros']['900101']['registrada_en'] = '2026-10-23T02:30:00+00:00'
+        datos['registros']['900102']['registrada_en'] = '2026-10-22T03:30:00+00:00'
+        ruta.write_text(json.dumps(datos), encoding='utf-8')
+        assert [f['comensal']['usuario_id'] for f in
+                e.listar_registros(motor, fecha=date(2026, 10, 22))['datos']] == [900101]
+        assert [f['comensal']['usuario_id'] for f in
+                e.listar_registros(motor, fecha=date(2026, 10, 21))['datos']] == [900102]
+        assert e.listar_registros(motor, fecha=date(2026, 10, 23))['total'] == 0
+        assert e.listar_registros(motor)['total'] == 2

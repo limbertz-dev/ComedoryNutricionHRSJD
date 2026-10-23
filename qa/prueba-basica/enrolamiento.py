@@ -4,7 +4,7 @@ Persiste referencias sinteticas; no captura dedos, imagenes ni plantillas.
 No escribe al padron, a asistencias ni a la base de turnos.
 """
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import os
 import unicodedata
@@ -120,8 +120,10 @@ def resolver(referencia):
                  if r['referencia'] == referencia), None)
 
 
-def listar_registros(motor, busqueda='', limite=50, desplazamiento=0):
-    """Consulta el vinculo original; no expone referencias ni datos biometricos."""
+def listar_registros(motor, busqueda='', limite=50, desplazamiento=0, fecha=None):
+    """Consulta el vinculo original; no expone referencias ni datos biometricos.
+
+    `fecha` (date) deja solo las altas de ese dia en hora de Bolivia (UTC-4)."""
     from sqlalchemy import select, func
     from sqlalchemy.orm import Session
     from app.modelos.heredados import Comensal, Servicio, UsuarioServicio
@@ -137,6 +139,9 @@ def listar_registros(motor, busqueda='', limite=50, desplazamiento=0):
         except ValueError:
             raise c.Abortado('Una fecha del registro de huellas no es valida; se conserva la evidencia.') from None
         momentos[fila['usuario_id']] = momento
+    if fecha is not None:
+        bolivia = timezone(timedelta(hours=-4))
+        registros = [f for f in registros if momentos[f['usuario_id']].astimezone(bolivia).date() == fecha]
     registros.sort(key=lambda f: (momentos[f['usuario_id']], f['usuario_id']), reverse=True)
     personas, cuentas = {}, {}
     if registros:
@@ -221,10 +226,11 @@ def instalar(app, motor, servidor, huella):
     @consultas.get('/registros')
     def registros(busqueda: Annotated[str, Query(max_length=100)] = '',
                   limite: Annotated[int, Query(ge=1, le=100)] = 50,
-                  desplazamiento: Annotated[int, Query(ge=0)] = 0):
+                  desplazamiento: Annotated[int, Query(ge=0)] = 0,
+                  fecha: Annotated[date | None, Query(description='Solo las altas de ese día (Bolivia)')] = None):
         try:
             comprobar_corrida()
-            return listar_registros(motor, busqueda, limite, desplazamiento)
+            return listar_registros(motor, busqueda, limite, desplazamiento, fecha)
         except c.Abortado as error:
             raise HTTPException(409, detail=str(error)) from None
 
