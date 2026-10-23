@@ -55,6 +55,14 @@ class SolicitudVinculo(BaseModel):
     usuario_id: int | None = Field(
         default=None, gt=0, description="users.id de la persona. Obligatorio en personal; nunca en policia."
     )
+    nombre: str | None = Field(
+        default=None, min_length=3, max_length=100,
+        description="Solo policia, obligatorio: nombre completo.",
+    )
+    documento: str | None = Field(
+        default=None, min_length=1, max_length=30, pattern=r"^[A-Za-z0-9 ./-]+$",
+        description="Solo policia, opcional: CI o número de placa.",
+    )
     plantilla: str | None = Field(
         default=None,
         max_length=8192,
@@ -68,10 +76,20 @@ class SolicitudVinculo(BaseModel):
 
     @model_validator(mode="after")
     def _usuario_segun_tipo(self) -> "SolicitudVinculo":
-        if self.tipo == "personal" and self.usuario_id is None:
-            raise ValueError("Un vínculo de personal necesita usuario_id.")
-        if self.tipo == "policia" and self.usuario_id is not None:
-            raise ValueError("Un vínculo de policía no lleva usuario_id.")
+        if self.nombre is not None:
+            self.nombre = " ".join(self.nombre.split())
+        if self.documento is not None:
+            self.documento = self.documento.strip() or None
+        if self.tipo == "personal":
+            if self.usuario_id is None:
+                raise ValueError("Un vínculo de personal necesita usuario_id.")
+            if self.nombre is not None or self.documento is not None:
+                raise ValueError("El nombre y el documento solo se escriben para un policía.")
+        else:
+            if self.usuario_id is not None:
+                raise ValueError("Un vínculo de policía no lleva usuario_id.")
+            if not self.nombre or len(self.nombre) < 3:
+                raise ValueError("Escribe el nombre completo del policía.")
         return self
 
 
@@ -88,7 +106,8 @@ class Vinculo(BaseModel):
     identificador: str
     tipo: Literal["personal", "policia"]
     usuario_id: int | None
-    nombre: str | None = Field(description="Del padrón; null si la persona ya no figura.")
+    nombre: str | None = Field(description="Del padrón, o el escrito para un policía.")
+    documento: str | None = Field(default=None, description="Solo policías: CI o placa.")
     categoria: str | None
     activo: bool
     created_at: datetime

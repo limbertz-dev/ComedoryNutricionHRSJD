@@ -57,7 +57,7 @@ def vinculo_de(sesion: Session, identificador: str | None):
     if identificador is None:
         return None
     return sesion.execute(
-        select(VinculoLector.id, VinculoLector.tipo, VinculoLector.usuario_id).where(
+        select(VinculoLector.id, VinculoLector.tipo, VinculoLector.usuario_id, VinculoLector.nombre).where(
             VinculoLector.identificador == identificador, VinculoLector.activo == 1
         )
     ).one_or_none()
@@ -93,7 +93,9 @@ def registrar_lectura(
     if vinculo is not None and vinculo.tipo == "policia":
         # Vía libre, aparte del personal: ver app/logica/policia.py. La ración
         # y el envío se confirman juntos, en el COMMIT de abajo.
-        respuesta = policia.registrar(sesion, vinculo_id=vinculo.id, dispositivo=dispositivo)
+        respuesta = policia.registrar(
+            sesion, vinculo_id=vinculo.id, dispositivo=dispositivo, nombre=vinculo.nombre
+        )
         lectura_id = None
     else:
         usuario_id = vinculo.usuario_id if vinculo is not None else None
@@ -149,7 +151,8 @@ def _a_dict(sesion: Session, vinculo: VinculoLector) -> dict:
         "identificador": vinculo.identificador,
         "tipo": vinculo.tipo,
         "usuario_id": vinculo.usuario_id,
-        "nombre": policia.NOMBRE if policial else (ficha.nombre_completo if ficha else None),
+        "nombre": (vinculo.nombre or policia.NOMBRE) if policial else (ficha.nombre_completo if ficha else None),
+        "documento": vinculo.documento if policial else None,
         "categoria": "Policías" if policial else (ficha.categoria if ficha else None),
         "activo": bool(vinculo.activo),
         "created_at": vinculo.created_at,
@@ -167,6 +170,7 @@ def listar_vinculos(sesion: Session, *, solo_activos: bool) -> list[dict]:
 def vincular(
     sesion: Session, *, identificador: str, usuario_id: int | None, cuenta_id: int,
     plantilla: str | None = None, tipo: str = "personal",
+    nombre: str | None = None, documento: str | None = None,
 ) -> dict:
     """Crea el vínculo, o reactiva uno dado de baja con la persona nueva. Uno
     de policía no apunta a nadie del padrón (`usuario_id` None)."""
@@ -185,6 +189,8 @@ def vincular(
         sesion.add(vinculo)
     vinculo.tipo = tipo
     vinculo.usuario_id = usuario_id if tipo == "personal" else None
+    vinculo.nombre = nombre if tipo == "policia" else None
+    vinculo.documento = documento if tipo == "policia" else None
     vinculo.plantilla = plantilla
     vinculo.activo = 1
     vinculo.creado_por_cuenta = cuenta_id

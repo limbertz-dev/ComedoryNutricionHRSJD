@@ -79,6 +79,11 @@ def main(argv=None) -> int:
             if opcion not in ("1", "2"):
                 continue
             usuario_id = None
+            policia = {}
+            if opcion == "2":
+                policia = vincular.datos_policia()
+                if policia is None:
+                    continue
             if opcion == "1":
                 usuario_id = vincular.buscar_persona(sesion)
                 if usuario_id is None:
@@ -91,6 +96,7 @@ def main(argv=None) -> int:
                       "tipo": "personal" if opcion == "1" else "policia"}
             if usuario_id is not None:
                 cuerpo["usuario_id"] = usuario_id
+            cuerpo.update(policia)
             codigo, datos = sesion.pedir("POST", "/lector/vinculos", cuerpo)
             if codigo == 201:
                 print(f"  Listo: huella enrolada para {datos['nombre']}. El puente la toma en menos de un minuto.")

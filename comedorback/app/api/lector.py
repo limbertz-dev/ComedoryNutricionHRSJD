@@ -120,6 +120,7 @@ def vincular(sesion: SesionDep, solicitud: SolicitudVinculo, usuario: UsuarioAct
             sesion, identificador=solicitud.identificador,
             usuario_id=solicitud.usuario_id, cuenta_id=cuenta_id,
             plantilla=solicitud.plantilla, tipo=solicitud.tipo,
+            nombre=solicitud.nombre, documento=solicitud.documento,
         ))
     except LookupError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None

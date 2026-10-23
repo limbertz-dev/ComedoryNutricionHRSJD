@@ -632,6 +632,7 @@ export function RacionesPolicia({ filas }) {
             <thead>
               <tr>
                 <th scope="col">Hora</th>
+                <th scope="col">Policía</th>
                 <th scope="col">Comida</th>
                 <th scope="col">Resultado</th>
                 <th scope="col">Lector</th>
@@ -641,6 +642,7 @@ export function RacionesPolicia({ filas }) {
               {filas.map((m) => (
                 <tr key={m.clave}>
                   <td>{m.hora}</td>
+                  <td>{m.persona?.nombre || 'Policía'}</td>
                   <td>{m.comida ?? '—'}</td>
                   <td><Etiqueta tono="exito">Ración registrada</Etiqueta></td>
                   <td>{m.dispositivo ?? '—'}</td>

@@ -400,7 +400,9 @@ export async function obtenerRegistrosHuellas({ busqueda = '', limite = 50, desp
       || !Number.isSafeInteger(pagina.total) || pagina.total < 0
       || pagina.limite !== limite || pagina.desplazamiento !== desplazamiento
       || pagina.datos.length > limite || pagina.datos.length > Math.max(0, pagina.total - desplazamiento)
-      || pagina.datos.some(f => !id(f?.comensal?.usuario_id) || !id(f?.cuenta?.id)
+      || pagina.datos.some(f => (f?.tipo === 'policia'
+        ? f.comensal?.usuario_id != null || !(f.cuenta?.id == null || id(f.cuenta.id))
+        : !id(f?.comensal?.usuario_id) || !id(f?.cuenta?.id))
         || typeof f.comensal.disponible !== 'boolean' || typeof f.cuenta.disponible !== 'boolean'
         || !['nombre', 'legajo', 'categoria', 'servicio'].every(c => texto(f.comensal[c]))
         || !texto(f.cuenta.usuario) || !texto(f.cuenta.nombre)
@@ -437,6 +439,45 @@ export async function capturarHuellaQa(usuarioId, clave, { signal } = {}) {
     }
     throw error;
   }
+}
+
+/**
+ * Alta simulada de la huella de un policía (QA): no está en el padrón, así
+ * que se escribe su nombre y, opcional, su CI o placa. No registra comida.
+ */
+export async function registrarPoliciaQa({ nombre, documento = '' }, clave, { signal } = {}) {
+  const limpio = typeof nombre === 'string' ? nombre.split(/\s+/).filter(Boolean).join(' ') : '';
+  const doc = typeof documento === 'string' ? documento.trim() : '';
+  if (limpio.length < 3 || limpio.length > 100) throw new Error('Escribe el nombre completo del policía.');
+  if (doc.length > 30 || !/^[A-Za-z0-9 ./-]*$/.test(doc)) throw new Error('El CI o la placa solo lleva letras, números, espacios, puntos, guiones o barras.');
+  if (!esClaveIdempotencia(clave)) throw new Error('Clave de idempotencia inválida.');
+  try {
+    const dato = await solicitarApi('/_qa/enrolamiento/policias', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': clave },
+      body: JSON.stringify({ nombre: limpio, documento: doc || null }), signal,
+    });
+    if (dato?.modo !== 'simulado' || !Number.isSafeInteger(dato.vinculo_id) || dato.vinculo_id <= 0
+      || dato.nombre !== limpio || typeof dato.ya_registrada !== 'boolean') {
+      throw new Error('No se pudo confirmar el registro del policía. Verifica con la misma solicitud.');
+    }
+    return dato;
+  } catch (error) {
+    if (error instanceof ErrorApi && typeof error.datos?.detail === 'string') error.message = error.datos.detail;
+    throw error;
+  }
+}
+
+/** Lectura simulada de la huella de un policía, por la lógica real del lector. Solo QA. */
+export async function leerPoliciaQa(vinculoId, clave) {
+  if (!Number.isSafeInteger(vinculoId) || vinculoId <= 0) throw new Error('Primero registra la huella del policía.');
+  if (!esClaveIdempotencia(clave)) throw new Error('Clave de idempotencia inválida.');
+  const dato = await solicitarApi(`/_qa/enrolamiento/policias/${vinculoId}/lecturas`, {
+    method: 'POST', headers: { 'Idempotency-Key': clave },
+  });
+  if (dato?.modo !== 'simulado' || typeof dato.valido !== 'boolean') {
+    throw new Error('No se pudo confirmar la lectura. Verifica con la misma solicitud.');
+  }
+  return dato;
 }
 
 /** Lee la referencia registrada y deja que el servidor decida derecho y duplicados. Solo QA. */

@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import Boton from '../ui/Boton.jsx';
 import { IconoBuscar, IconoCheck, IconoHuella } from '../ui/Iconos.jsx';
-import { capturarHuellaQa, leerHuellaQa, nuevaClaveIdempotencia, obtenerPersonasEnrolamiento } from '../../api.js';
+import {
+  capturarHuellaQa, leerHuellaQa, leerPoliciaQa, nuevaClaveIdempotencia, obtenerPersonasEnrolamiento,
+  registrarPoliciaQa,
+} from '../../api.js';
 import { filtrarPadron } from './RegistroManual.jsx';
 import './RegistrarHuella.css';
 
-/** El titular se elige antes de iniciar la captura; una captura incierta conserva su identidad. */
+/**
+ * El titular se elige antes de iniciar la captura; una captura incierta conserva su identidad.
+ * Un policía no está en el padrón: se marca «Policía» y se escribe su nombre (y, opcional, CI o placa).
+ */
 export default function RegistrarHuella({
   onCerrar,
   consultar = obtenerPersonasEnrolamiento,
   capturar = capturarHuellaQa,
   leer = leerHuellaQa,
+  registrarPolicia = registrarPoliciaQa,
+  leerPolicia = leerPoliciaQa,
   onLectura = () => {},
   personasIniciales = null,
   elegidoInicial = '',
@@ -23,6 +31,10 @@ export default function RegistrarHuella({
   const [categoria, setCategoria] = useState('');
   const [servicio, setServicio] = useState('');
   const [elegido, setElegido] = useState(String(elegidoInicial));
+  /* 'personal' (del padrón) o 'policia' (se escribe su nombre). */
+  const [tipo, setTipo] = useState('personal');
+  const [nombrePolicia, setNombrePolicia] = useState('');
+  const [documentoPolicia, setDocumentoPolicia] = useState('');
   const [error, setError] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [incierto, setIncierto] = useState(false);
@@ -63,6 +75,16 @@ export default function RegistrarHuella({
     .map(p => p.servicio ?? 'Sin servicio'))].sort();
   const persona = (personas ?? []).find(p => String(p.id) === elegido) ?? null;
   const bloqueado = enviando || incierto || resultado !== null;
+  const esPolicia = tipo === 'policia';
+  const policiaValido = nombrePolicia.trim().replace(/\s+/g, ' ').length >= 3;
+  const puedeCapturar = esPolicia ? policiaValido : Boolean(persona);
+
+  function elegirTipo(valor) {
+    if (bloqueado) return;
+    setTipo(valor);
+    solicitud.current = null;
+    setError('');
+  }
 
   function seleccionar(valor) {
     if (bloqueado) return;
@@ -72,13 +94,17 @@ export default function RegistrarHuella({
   }
 
   async function registrar() {
-    if (enCurso.current || !persona || resultado) return;
-    solicitud.current ??= { usuarioId: persona.id, clave: nuevaClaveIdempotencia() };
+    if (enCurso.current || !puedeCapturar || resultado) return;
+    solicitud.current ??= esPolicia
+      ? { policia: { nombre: nombrePolicia, documento: documentoPolicia }, clave: nuevaClaveIdempotencia() }
+      : { usuarioId: persona.id, clave: nuevaClaveIdempotencia() };
     enCurso.current = true;
     setEnviando(true);
     setError('');
     try {
-      const datos = await capturar(solicitud.current.usuarioId, solicitud.current.clave);
+      const datos = solicitud.current.policia
+        ? { ...(await registrarPolicia(solicitud.current.policia, solicitud.current.clave)), tipo: 'policia' }
+        : await capturar(solicitud.current.usuarioId, solicitud.current.clave);
       if (montado.current) { setResultado(datos); setIncierto(false); }
     } catch (fallo) {
       if (montado.current) {
@@ -94,14 +120,16 @@ export default function RegistrarHuella({
   }
 
   async function probarLectura() {
-    if (enCurso.current || !resultado?.referencia) return;
+    if (enCurso.current || !(resultado?.referencia || resultado?.tipo === 'policia')) return;
     solicitudLectura.current ??= nuevaClaveIdempotencia();
     enCurso.current = true;
     setLeyendo(true);
     setError('');
     let registrada = null;
     try {
-      const datos = await leer(resultado.referencia, solicitudLectura.current);
+      const datos = resultado.tipo === 'policia'
+        ? await leerPolicia(resultado.vinculo_id, solicitudLectura.current)
+        : await leer(resultado.referencia, solicitudLectura.current);
       if (montado.current) {
         setLectura(datos);
         setLecturaIncierta(false);
@@ -139,15 +167,21 @@ export default function RegistrarHuella({
       {resultado ? (
         <div className="registro-huella__exito" role="status">
           <IconoCheck tamano={64} />
-          <h3>{persona?.nombre}</h3>
-          <p>Legajo {persona?.legajo}</p>
-          <p>{resultado.ya_registrada ? 'Esta persona ya tenía una huella de prueba registrada.' : 'La huella de prueba quedó vinculada a esta persona.'}</p>
+          <h3>{resultado.tipo === 'policia' ? resultado.nombre : persona?.nombre}</h3>
+          <p>{resultado.tipo === 'policia'
+            ? ['Policía', resultado.documento ? `CI o placa ${resultado.documento}` : null].filter(Boolean).join(' · ')
+            : `Legajo ${persona?.legajo}`}</p>
+          <p>{resultado.tipo === 'policia'
+            ? 'La huella de prueba quedó registrada como policía: cada lectura en horario de comida es una ración en la columna Policías.'
+            : resultado.ya_registrada ? 'Esta persona ya tenía una huella de prueba registrada.' : 'La huella de prueba quedó vinculada a esta persona.'}</p>
           {!lectura && !leyendo && !lecturaIncierta ? <p>El vínculo se conserva al volver a entrar. El alta no registra ninguna comida.</p> : null}
           {volverAlSimulador ? <Boton onClick={onCerrar}>Continuar con el caso</Boton> : <Boton onClick={probarLectura} disabled={leyendo}>
             {leyendo ? 'Leyendo…' : lecturaIncierta ? 'Verificar lectura' : lectura ? 'Volver a leer' : 'Leer huella de prueba'}
           </Boton>}
           {lectura ? <div className={`registro-huella__lectura${lectura.valido ? '' : ' registro-huella__lectura--rechazada'}`} role="status">
-            <strong>{lectura.valido ? 'Huella reconocida · Entrega registrada' : 'Huella reconocida · Entrega rechazada'}</strong>
+            <strong>{lectura.valido
+              ? (resultado.tipo === 'policia' ? 'Policía registrado · Ración de policía' : 'Huella reconocida · Entrega registrada')
+              : 'Huella reconocida · Entrega rechazada'}</strong>
             <p>{lectura.detalle}</p>
           </div> : null}
           {lecturaIncierta ? <p role="status">No se pudo confirmar la entrega. Verifica esta misma lectura antes de iniciar otra.</p> : null}
@@ -155,6 +189,28 @@ export default function RegistrarHuella({
       ) : (
         <>
           <div className="registro-huella__seleccion">
+            {usuarioRequerido === null ? (
+              <div className="registro-huella__tipo" role="radiogroup" aria-label="¿A quién se registra?">
+                {[['personal', 'Personal del padrón'], ['policia', 'Policía']].map(([valor, etiqueta]) => (
+                  <button key={valor} type="button" role="radio" aria-checked={tipo === valor} disabled={bloqueado}
+                    className={`registro-huella__tipo-opcion${tipo === valor ? ' registro-huella__tipo-opcion--activa' : ''}`}
+                    onClick={() => elegirTipo(valor)}>{etiqueta}</button>
+                ))}
+              </div>
+            ) : null}
+            {esPolicia ? (
+              <div className="registro-huella__policia">
+                <span className="registro-huella__paso">1. Datos del policía</span>
+                <p className="registro-huella__ayuda">No está en el padrón: queda en la categoría Policías, con vía libre.</p>
+                <label>Nombre completo<input value={nombrePolicia} maxLength={100} disabled={bloqueado}
+                  placeholder="Ej.: Juan Pérez Mamani" autoComplete="off"
+                  onChange={e => { setNombrePolicia(e.target.value); solicitud.current = null; }} /></label>
+                <label>CI o número de placa <small>(opcional)</small><input value={documentoPolicia} maxLength={30}
+                  disabled={bloqueado} placeholder="Ej.: 4567890 o PL-1234" autoComplete="off"
+                  onChange={e => { setDocumentoPolicia(e.target.value); solicitud.current = null; }} /></label>
+              </div>
+            ) : (
+            <>
             <label className="registro-huella__paso" htmlFor="huella-persona">1. Selecciona a la persona</label>
             {personas === null ? <p role="status">{error ? 'No se pudo cargar el padrón.' : 'Cargando padrón…'}</p> : (
               <>
@@ -193,6 +249,8 @@ export default function RegistrarHuella({
                 ) : <p className="registro-huella__ayuda">Elige a la persona antes de capturar su huella.</p>}
               </>
             )}
+            </>
+            )}
           </div>
           <div className="registro-huella__captura" aria-busy={enviando}>
             <span className="registro-huella__paso">2. Registra su huella</span>
@@ -200,7 +258,7 @@ export default function RegistrarHuella({
             <h3>{enviando ? 'Registrando huella…' : incierto ? 'Verifica el registro' : 'Preparado para la captura'}</h3>
             <p>Mientras no haya un lector conectado, puedes registrar una huella de prueba.</p>
             {incierto ? <p role="status">Se conserva la persona seleccionada. Verifica con la misma solicitud antes de cambiarla.</p> : null}
-            <Boton icono={<IconoHuella tamano={20} />} onClick={registrar} disabled={!persona || enviando}>
+            <Boton icono={<IconoHuella tamano={20} />} onClick={registrar} disabled={!puedeCapturar || enviando}>
               {enviando ? 'Registrando…' : incierto ? 'Verificar registro' : 'Simular captura'}
             </Boton>
           </div>

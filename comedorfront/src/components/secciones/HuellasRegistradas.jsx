@@ -89,16 +89,24 @@ export default function HuellasRegistradas({ version = 0, consultar = obtenerReg
           <table className="huellas-registro__tabla" aria-label="Huellas registradas">
             <thead><tr><th scope="col">Fecha del alta</th><th scope="col">Comensal vinculado</th>
               <th scope="col">Categoría y servicio</th><th scope="col">Registró</th><th scope="col">Estado</th></tr></thead>
-            <tbody>{filas.map(fila => <tr key={fila.comensal.usuario_id}>
-              <td className="huellas-registro__fecha"><time dateTime={fila.registrada_en}>{FECHA.format(new Date(fila.registrada_en))}</time></td>
-              <td><strong>{fila.comensal.nombre || `Comensal ${fila.comensal.usuario_id}`}</strong>
-                <span>{fila.comensal.legajo || 'Sin legajo'} · ID {fila.comensal.usuario_id}</span>
-                {!fila.comensal.disponible ? <span>Ficha no disponible en el padrón actual</span> : null}</td>
-              <td><strong>{fila.comensal.categoria || 'Sin categoría'}</strong><span>{fila.comensal.servicio || 'Sin servicio'}</span></td>
-              <td><strong>{fila.cuenta.nombre || fila.cuenta.usuario || `Cuenta ${fila.cuenta.id}`}</strong>
-                <span>{fila.cuenta.usuario || 'Cuenta no disponible'}</span></td>
-              <td><Etiqueta tono="acento">Vinculada</Etiqueta></td>
-            </tr>)}</tbody>
+            <tbody>{filas.map(fila => {
+              const policia = fila.tipo === 'policia';
+              return <tr key={`${fila.tipo ?? 'personal'}:${fila.comensal.usuario_id ?? fila.registrada_en}:${fila.comensal.nombre}`}>
+                <td className="huellas-registro__fecha"><time dateTime={fila.registrada_en}>{FECHA.format(new Date(fila.registrada_en))}</time></td>
+                <td><strong>{fila.comensal.nombre || `Comensal ${fila.comensal.usuario_id}`}</strong>
+                  <span>{policia
+                    ? (fila.comensal.legajo ? `CI o placa ${fila.comensal.legajo}` : 'Sin CI ni placa')
+                    : `${fila.comensal.legajo || 'Sin legajo'} · ID ${fila.comensal.usuario_id}`}</span>
+                  {!policia && !fila.comensal.disponible ? <span>Ficha no disponible en el padrón actual</span> : null}</td>
+                <td><strong>{fila.comensal.categoria || 'Sin categoría'}</strong>
+                  <span>{policia ? 'Fuera del padrón · vía libre' : fila.comensal.servicio || 'Sin servicio'}</span></td>
+                <td><strong>{fila.cuenta.nombre || fila.cuenta.usuario || (fila.cuenta.id ? `Cuenta ${fila.cuenta.id}` : 'Laboratorio QA')}</strong>
+                  <span>{fila.cuenta.usuario || (fila.cuenta.id ? 'Cuenta no disponible' : 'Alta de prueba')}</span></td>
+                <td>{policia
+                  ? <Etiqueta tono={fila.activo === false ? 'neutro' : 'acento'}>{fila.activo === false ? 'Policía · baja' : 'Policía'}</Etiqueta>
+                  : <Etiqueta tono="acento">Vinculada</Etiqueta>}</td>
+              </tr>;
+            })}</tbody>
           </table>
         </div>
         <nav className="huellas-registro__paginas" aria-label="Páginas del registro de huellas">
