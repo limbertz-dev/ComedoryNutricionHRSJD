@@ -3,6 +3,7 @@ import Boton from '../ui/Boton.jsx';
 import Etiqueta from '../ui/Etiqueta.jsx';
 import { IconoAlerta, IconoBuscar, IconoCheck, IconoHuella } from '../ui/Iconos.jsx';
 import { avisoDeIdentificacion, crearIdentificador, horaCortaServidor } from '../../identificacion.js';
+import { identificarComoPolicia, nuevaClaveIdempotencia, obtenerPoliciasActivos } from '../../api.js';
 import { filtrarPadron, personaVisible } from './RegistroManual.jsx';
 import './IdentificarLectura.css';
 
@@ -36,6 +37,9 @@ export default function IdentificarLectura({
   onResultado = () => {},
   onCambiarPersona = () => {},
   identificar,
+  consultarPolicias = obtenerPoliciasActivos,
+  identificarPolicia = identificarComoPolicia,
+  policiasIniciales = null,
   identificador: identificadorExterno = null,
   elegidoInicial = '',
   busquedaInicial = '',
@@ -45,6 +49,11 @@ export default function IdentificarLectura({
   const [elegido, setElegido] = useState(String(elegidoInicial));
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState(avisoInicial);
+  /* Policías con huella activa: no están en el padrón, se eligen aparte. */
+  const [policias, setPolicias] = useState(policiasIniciales ?? []);
+  /* Clave de la identificación como policía en curso: se conserva hasta una
+     respuesta definitiva, para que un reintento no dé dos raciones. */
+  const intentoPolicia = useRef(null);
 
   /* Un solo identificador mientras la pantalla esté montada: guarda los
      intentos sin resolver (con su clave y su persona) y bloquea el doble
@@ -73,13 +82,31 @@ export default function IdentificarLectura({
     setElegido('');
   }, [abierta]);
 
+  /* Al abrir una huella se consulta la lista: un policía recién registrado ya aparece. */
+  useEffect(() => {
+    if (abierta === null || policiasIniciales !== null) return undefined;
+    const controlador = new AbortController();
+    consultarPolicias({ signal: controlador.signal })
+      .then((lista) => { if (!controlador.signal.aborted) setPolicias(lista); })
+      .catch(() => {});
+    return () => controlador.abort();
+  }, [abierta, consultarPolicias, policiasIniciales]);
+
   const lecturas = pendientes?.lecturas ?? [];
   const sinResolver = identificador.pendientes();
   const lecturaAbierta = abierta === null ? null : lecturas.find((lectura) => lectura.id === abierta) ?? null;
   const intento = abierta === null ? null : identificador.pendiente(abierta);
   /* Con un intento sin resolver, la persona es la del intento (su copia, no
      el padrón): verificar es repetir esa misma decisión. */
-  const persona = intento ? intento.persona : personaVisible(personal, busqueda, elegido);
+  const termino = busqueda.trim().toLowerCase();
+  const opcionesPolicias = policias.filter((p) => !termino
+    || `${p.nombre} ${p.documento ?? ''} policía policias`.toLowerCase().includes(termino));
+  const policiaElegido = elegido.startsWith('policia:')
+    ? opcionesPolicias.find((p) => `policia:${p.id}` === elegido) ?? null : null;
+  const persona = intento ? intento.persona
+    : policiaElegido ? { id: null, tipo: 'policia', vinculoId: policiaElegido.id, nombre: policiaElegido.nombre,
+      categoria: 'Policías', legajo: policiaElegido.documento }
+      : personaVisible(personal, busqueda, elegido);
   const opciones = filtrarPadron(personal, busqueda);
   const puedeEnviar = !enviando && persona !== null && (intento !== null || lecturaAbierta !== null);
   const porVerificar = sinResolver.filter((pendiente) => pendiente.lecturaId !== abierta);
@@ -104,8 +131,34 @@ export default function IdentificarLectura({
     onAbrir(null);
   }
 
+  async function confirmarPolicia() {
+    const clave = intentoPolicia.current?.lecturaId === abierta && intentoPolicia.current?.vinculoId === persona.vinculoId
+      ? intentoPolicia.current.clave : nuevaClaveIdempotencia();
+    intentoPolicia.current = { lecturaId: abierta, vinculoId: persona.vinculoId, clave };
+    setEnviando(true);
+    const resultado = await identificarPolicia(abierta, persona.vinculoId, { clave });
+    if (!montado.current) return;
+    setEnviando(false);
+    if (resultado.estado === 'incierto') {
+      setAviso({ tipo: 'aviso', titulo: 'Entrega por verificar', detalle: resultado.detalle, repetir: true });
+      return;
+    }
+    intentoPolicia.current = null;
+    if (resultado.estado === 'registrada') {
+      setAviso({ tipo: 'exito', titulo: `Policía registrado · ${resultado.nombre}`,
+        detalle: `Ración de policía${resultado.comida ? ` · ${resultado.comida}` : ''}. Cuenta en la columna Policías.` });
+      setBusqueda('');
+      setElegido('');
+      onAbrir(null);
+      onResultado(resultado);
+    } else {
+      setAviso({ tipo: 'error', titulo: 'No se registró la entrega', detalle: resultado.detalle });
+    }
+  }
+
   async function confirmar() {
     if (!puedeEnviar) return;
+    if (persona.tipo === 'policia') { await confirmarPolicia(); return; }
     setEnviando(true);
     const resultado = intento
       ? await identificador.verificar(abierta)
@@ -264,7 +317,7 @@ export default function IdentificarLectura({
             <p className="identificar__estado" role="status">El padrón no tiene comensales para elegir.</p>
           ) : (
             <div className="identificar__campos">
-              <span className="identificar__paso">2. Buscar y elegir comensal del padrón</span>
+              <span className="identificar__paso">2. Buscar y elegir comensal del padrón o policía</span>
               <div className="identificar__controles">
                 <div className="identificar__buscador">
                   <span className="identificar__buscador-icono" aria-hidden="true">
@@ -278,7 +331,7 @@ export default function IdentificarLectura({
                       setBusqueda(e.target.value);
                       if (elegido && !personaVisible(personal, e.target.value, elegido)) setElegido('');
                     }}
-                    placeholder="Buscar por nombre o legajo…"
+                    placeholder="Buscar por nombre, legajo o policía…"
                     aria-label="Buscar a la persona en el padrón"
                     disabled={enviando}
                   />
@@ -292,13 +345,22 @@ export default function IdentificarLectura({
                   disabled={enviando}
                 >
                   <option value="">
-                    {opciones.length === 0 ? 'Ninguna persona coincide' : 'Seleccione a la persona…'}
+                    {opciones.length + opcionesPolicias.length === 0 ? 'Ninguna persona coincide' : 'Seleccione a la persona…'}
                   </option>
                   {opciones.map((p) => (
                     <option key={p.id} value={String(p.id)}>
                       {p.nombre} — {p.categoria} (Legajo {p.legajo})
                     </option>
                   ))}
+                  {opcionesPolicias.length > 0 ? (
+                    <optgroup label="Policías">
+                      {opcionesPolicias.map((p) => (
+                        <option key={`policia:${p.id}`} value={`policia:${p.id}`}>
+                          {p.nombre} — Policía{p.documento ? ` (CI o placa ${p.documento})` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
                 </select>
               </div>
             </div>
@@ -311,7 +373,9 @@ export default function IdentificarLectura({
               </span>
               <strong>{persona.nombre ?? `Comensal ${persona.id}`}</strong>
               <span className="identificar__identidad-meta">
-                {[persona.categoria, persona.legajo ? `Legajo ${persona.legajo}` : null].filter(Boolean).join(' · ')}
+                {[persona.categoria, persona.legajo
+                  ? (persona.tipo === 'policia' ? `CI o placa ${persona.legajo}` : `Legajo ${persona.legajo}`) : null]
+                  .filter(Boolean).join(' · ')}
               </span>
             </div>
           ) : lecturaAbierta && !cargandoPadron && !errorPadron && personal.length > 0 ? (

@@ -12,6 +12,8 @@ from app.core import reloj
 from app.core.autorizacion import UsuarioActual, UsuarioIdentificador
 from app.core.db import SesionDep
 from app.esquemas.historial import ComensalDelDia, ComidaListada, HistorialDiario
+from app.esquemas.marcacion import PoliciaActivo
+from app.logica import policia as policia_logica
 from app.esquemas.pantalla import (
     ComidasDelDia,
     EstadoPantalla,
@@ -184,3 +186,14 @@ def dia_personal(
         comidas=[ComidaListada(**asdict(c)) for c in comidas],
         datos=fichas,
     )
+
+
+@router.get(
+    "/policias",
+    response_model=list[PoliciaActivo],
+    summary="Policías con huella activa",
+)
+def policias(sesion: SesionDep) -> list[PoliciaActivo]:
+    """Para que cocina elija a un policía cuando el lector no reconoce su
+    huella. Solo nombre y CI/placa; nunca plantillas."""
+    return [PoliciaActivo(**p) for p in policia_logica.listar_activos(sesion)]

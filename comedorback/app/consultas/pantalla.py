@@ -520,7 +520,11 @@ def ultimas_marcaciones(
         .select_from(RacionPolicia)
         .outerjoin(VinculoLector, VinculoLector.id == RacionPolicia.vinculo_id)
         .outerjoin(comida_policia, comida_policia.id == RacionPolicia.comida_id)
-        .where(func.date(RacionPolicia.fecha_hora) == dia)
+        .where(
+            func.date(RacionPolicia.fecha_hora) == dia,
+            # El identificado por cocina sale como su lectura (huella no reconocida).
+            RacionPolicia.lectura_id.is_(None),
+        )
     )
     if comida_id is not None:
         lecturas = lecturas.where(comida_resuelta_id == comida_id)
@@ -594,6 +598,12 @@ def _intervenciones_por_lectura(
     por_lectura: dict[int, list[tuple[int, str, datetime]]] = {}
     for lectura_id, cuenta, resultado, momento in filas:
         por_lectura.setdefault(lectura_id, []).append((cuenta, resultado, momento))
+    # Una huella que cocina identificó como policía: un intento registrado más.
+    for lectura_id, cuenta, momento in sesion.execute(
+        select(RacionPolicia.lectura_id, RacionPolicia.registrado_por_cuenta, RacionPolicia.fecha_hora)
+        .where(RacionPolicia.lectura_id.in_(ids))
+    ).all():
+        por_lectura.setdefault(lectura_id, []).append((cuenta, "registrada", momento))
     return por_lectura
 
 
@@ -658,6 +668,17 @@ def _enriquecer(
         )
     ahora = reloj.ahora()
     ventanas: VentanasDelDia | None = None
+    lecturas_ids = [m.id for m in filas if m.origen == ORIGEN_LECTURA and m.asistencia_id is None]
+    policias_por_lectura = {
+        f.lectura_id: f for f in sesion.execute(
+            select(RacionPolicia.lectura_id, RacionPolicia.fecha_comida, RacionPolicia.fecha_hora,
+                   Comida.nombre.label("comida"),
+                   func.coalesce(VinculoLector.nombre, policia.NOMBRE).label("nombre"))
+            .outerjoin(VinculoLector, VinculoLector.id == RacionPolicia.vinculo_id)
+            .outerjoin(Comida, Comida.id == RacionPolicia.comida_id)
+            .where(RacionPolicia.lectura_id.in_(lecturas_ids or [0]))
+        ).all()
+    }
 
     for m in filas:
         if m.origen == ORIGEN_POLICIA:
@@ -672,7 +693,8 @@ def _enriquecer(
                 "comida": m.comida, "fecha_comida": m.racion_fecha_comida, "momento": m.racion_fecha_hora,
             }
             continue
-        con_racion = m.asistencia_id is not None
+        racion_policia = policias_por_lectura.get(m.id) if m.origen == ORIGEN_LECTURA else None
+        con_racion = m.asistencia_id is not None or racion_policia is not None
         m.estado_final = "racion_servida" if con_racion else "sin_racion"
         es_lectura = m.origen == ORIGEN_LECTURA
         if es_lectura:
@@ -694,7 +716,14 @@ def _enriquecer(
             m.comida_origen = "persistida_en_asistencia"
             m.motivo_no_identificable = "no_aplica"
 
-        if con_racion:
+        if racion_policia is not None:
+            m.resultado_final = {
+                "via": "identificacion_policia", "asistencia_id": None,
+                "comensal": {"usuario_id": None, "nombre": racion_policia.nombre},
+                "comida": racion_policia.comida, "fecha_comida": racion_policia.fecha_comida,
+                "momento": racion_policia.fecha_hora,
+            }
+        elif con_racion:
             if not es_lectura:
                 via = "registro_manual"
             elif m.lectura_resultado == "aceptada":
@@ -771,7 +800,10 @@ def lecturas_por_identificar(sesion: Session, cuenta_id: int | None) -> PorIdent
         return PorIdentificar(servicio=None, total=0, truncado=False, lecturas=[])
     servicio = actual.servicio
 
-    sin_racion = ~exists().where(Asistencia.lectura_id == LecturaBiometrica.id)
+    sin_racion = and_(
+        ~exists().where(Asistencia.lectura_id == LecturaBiometrica.id),
+        ~exists().where(RacionPolicia.lectura_id == LecturaBiometrica.id),
+    )
     filas = sesion.execute(
         select(
             LecturaBiometrica.id,

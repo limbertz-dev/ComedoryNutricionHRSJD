@@ -18,8 +18,13 @@ from app.esquemas.intervenciones import (
     RespuestaIdentificacion,
     SolicitudIdentificacion,
 )
-from app.esquemas.marcacion import RespuestaMarcacion, SolicitudMarcacion
-from app.logica import intervencion, marcacion
+from app.esquemas.marcacion import (
+    RespuestaIdentificacionPolicia,
+    RespuestaMarcacion,
+    SolicitudIdentificacionPolicia,
+    SolicitudMarcacion,
+)
+from app.logica import intervencion, marcacion, policia
 
 router = APIRouter(prefix="/asistencias", tags=["asistencias"])
 
@@ -137,3 +142,41 @@ def identificar_lectura(
     except intervencion.ErrorIntervencion as error:
         return JSONResponse(status_code=error.status_code, content=error.cuerpo())
     return RespuestaIdentificacion(**vars(resultado))
+
+
+@router.post(
+    "/lecturas/{lectura_id}/identificar-policia",
+    response_model=RespuestaIdentificacionPolicia,
+    summary="Identificar una huella no reconocida como un policía",
+    responses={404: {"description": "Lectura o policía inexistente"}, 409: {"description": "Conflicto con la lectura"}},
+)
+def identificar_policia(
+    sesion: SesionDep,
+    lectura_id: Annotated[int, Path(gt=0, description="lecturas_biometricas.id")],
+    solicitud: SolicitudIdentificacionPolicia,
+    usuario: UsuarioIdentificador,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key", description="UUID v4 por intento."),
+    ] = None,
+):
+    """Solo cocinera. El lector no reconoció el dedo de un policía: se elige su
+    huella registrada y la ración va a Policías, ligada a esta lectura. Mismas
+    garantías que la identificación del personal (bloqueo, mismo servicio, una
+    ración por lectura, idempotencia); vía libre: sin turno ni duplicado."""
+    clave = intervencion.normalizar_clave(idempotency_key)
+    if clave is None:
+        raise ErrorAuth(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "clave_idempotencia_invalida",
+            "Falta la cabecera Idempotency-Key o no es un UUID v4.",
+        )
+    cuenta_id = usuario.id
+    try:
+        resultado = policia.identificar(
+            sesion, cuenta_id=cuenta_id, lectura_id=lectura_id,
+            vinculo_id=solicitud.vinculo_id, clave=clave,
+        )
+    except policia.ErrorIdentificacionPolicia as error:
+        return JSONResponse(status_code=error.status, content={"detail": error.detalle, "motivo": error.motivo})
+    return RespuestaIdentificacionPolicia(**resultado)

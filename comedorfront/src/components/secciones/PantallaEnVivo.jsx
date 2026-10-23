@@ -102,7 +102,7 @@ export function etiquetaDeOrigen(origen) {
 
 /** La huella no reconocida terminó en una entrega identificada por cocina. */
 export function identificadaPorCocina(fila) {
-  return fila?.resultadoFinal?.via === 'identificacion_manual';
+  return ['identificacion_manual', 'identificacion_policia'].includes(fila?.resultadoFinal?.via);
 }
 
 /**
@@ -128,6 +128,18 @@ export function esHuellaNoReconocida(fila) {
  * lector la reconoció: la decisión original sigue siendo un rechazo.
  */
 export function eventoDeFila(fila) {
+  if (fila?.resultadoFinal?.via === 'identificacion_policia') {
+    return {
+      id: fila.clave,
+      origen: fila.origen ?? null,
+      valido: true,
+      sinIdentificar: false,
+      titulo: 'Policía registrado por cocina',
+      detalle: 'El lector no reconoció la huella; cocina identificó al policía — cuenta en la columna Policías',
+      hora: fila.hora,
+      persona: { id: null, nombre: fila.resultadoFinal.comensal.nombre ?? 'Policía', categoria: 'Policías', legajo: '—' },
+    };
+  }
   if (identificadaPorCocina(fila)) {
     const comensal = fila.resultadoFinal.comensal;
     return {
