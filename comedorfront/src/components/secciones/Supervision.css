@@ -739,3 +739,11 @@
   color: var(--c-texto-2);
   font-weight: 600;
 }
+
+/* ---------- Día que se supervisa (arriba de todo) ---------- */
+.supervision__dia {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--e-3);
+}
