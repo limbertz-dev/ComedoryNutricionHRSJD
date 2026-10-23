@@ -161,3 +161,69 @@ test('Control Biométrico muestra el nombre del policía', () => {
   assert.equal(evento.persona.nombre, 'Juan Perez');
   assert.equal(evento.titulo, 'Policía registrado');
 });
+
+// --- cocina identifica a un policía (huella no reconocida) ------------------------
+
+import IdentificarLectura from '../src/components/secciones/IdentificarLectura.jsx';
+import { identificarComoPolicia, obtenerPoliciasActivos } from '../src/api.js';
+
+const lecturaPendiente = {
+  id: 55, clave: 'lectura_biometrica:55', hora: '12:10:00', comida: 'Almuerzo', dispositivo: 'cocina-01',
+  identificableHasta: '2026-10-19T15:00:00',
+};
+
+test('al identificar, los policías aparecen en su propio grupo de la lista', () => {
+  const html = renderToStaticMarkup(h(IdentificarLectura, {
+    pendientes: { servicio: { comida: 'Almuerzo', fin: '2026-10-19T15:00:00' }, total: 1, lecturas: [lecturaPendiente] },
+    abierta: 55,
+    personal: [{ id: 1, nombre: 'Ana Gomez', categoria: 'Médico', legajo: 'L-1' }],
+    policiasIniciales: [{ id: 9, nombre: 'Juan Perez', documento: 'PL-1234' }],
+  }));
+  assert.match(html, /2\. Buscar y elegir comensal del padrón o policía/);
+  assert.match(html, /<optgroup label="Policías"><option value="policia:9">Juan Perez — Policía \(CI o placa PL-1234\)<\/option><\/optgroup>/);
+  assert.match(html, /Ana Gomez — Médico/);
+});
+
+test('la identificación como policía distingue entrega, conflicto e incierto', async () => {
+  globalThis.fetch = async (url, opciones) => {
+    assert.equal(new URL(url).pathname, '/asistencias/lecturas/55/identificar-policia');
+    assert.deepEqual(JSON.parse(opciones.body), { vinculo_id: 9 });
+    return json({ valido: true, lectura_id: 55, racion_id: 3, vinculo_id: 9, nombre: 'Juan Perez',
+      comida: 'Almuerzo', fecha_comida: '2026-10-19', reintento: false });
+  };
+  const ok = await identificarComoPolicia(55, 9, { clave: CLAVE });
+  assert.deepEqual(ok, { estado: 'registrada', nombre: 'Juan Perez', comida: 'Almuerzo', reintento: false });
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ detail: 'Esa huella ya se identificó y tiene su ración.', motivo: 'lectura_ya_resuelta' }), { status: 409 });
+  const conflicto = await identificarComoPolicia(55, 9, { clave: CLAVE });
+  assert.equal(conflicto.estado, 'conflicto');
+  assert.equal(conflicto.motivo, 'lectura_ya_resuelta');
+
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  assert.equal((await identificarComoPolicia(55, 9, { clave: CLAVE })).estado, 'incierto');
+});
+
+test('la lista de policías de cocina se valida', async () => {
+  globalThis.fetch = async () => json([{ id: 9, nombre: 'Juan Perez', documento: null }]);
+  assert.deepEqual(await obtenerPoliciasActivos(), [{ id: 9, nombre: 'Juan Perez', documento: null }]);
+  globalThis.fetch = async () => json([{ id: 'x', nombre: 'Juan' }]);
+  await assert.rejects(obtenerPoliciasActivos(), /policías inválida/);
+});
+
+test('la huella identificada como policía se ve como entrega y va al apartado Policías', async () => {
+  const fila = {
+    ...filaApi, id: 55, origen: 'lectura_biometrica', clave_evento: 'lectura_biometrica:55',
+    nombre: 'Huella no reconocida', categoria: 'Sin identificar', resultado: 'rechazada', motivo: 'no_identificado',
+    valido: false,
+    resultado_final: { via: 'identificacion_policia', asistencia_id: null,
+      comensal: { usuario_id: null, nombre: 'Juan Perez' }, comida: 'Almuerzo', fecha_comida: '2026-10-19',
+      momento: '2026-10-19T12:12:00' },
+  };
+  globalThis.fetch = async () => json([fila]);
+  const [adaptada] = await obtenerUltimasMarcaciones({ limite: 20 });
+  const evento = eventoDeFila(adaptada);
+  assert.equal(evento.valido, true);
+  assert.equal(evento.titulo, 'Policía registrado por cocina');
+  assert.equal(evento.persona.nombre, 'Juan Perez');
+  assert.equal(esPolicia(adaptada), true);
+});

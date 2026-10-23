@@ -63,7 +63,7 @@ class ComensalRacion(BaseModel):
 class ResultadoFinal(BaseModel):
     """La ración que quedó, si quedó una. Separado de `decision_original`."""
 
-    via: Literal["lector", "identificacion_manual", "registro_manual", "policia"]
+    via: Literal["lector", "identificacion_manual", "registro_manual", "policia", "identificacion_policia"]
     asistencia_id: int | None = Field(
         default=None, description="null en una ración de policía: va a raciones_policia, no a asistencias."
     )
