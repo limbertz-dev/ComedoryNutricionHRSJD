@@ -40,7 +40,7 @@ async function salud() {
       const res = await fetch(`${API}/salud`, { signal: AbortSignal.timeout(2000) });
       if (!res.ok) return false;
       const d = await res.json();
-      for (const [campo, valor] of Object.entries({ estado: 'ok', entorno: 'desarrollo', base_datos: 'bd_nutricion_escenario_sim', base_turnos: 'bd_turnos_escenario_demo', revision_alembic: 'd5a7c9e1f3b5' })) assert.equal(d[campo], valor);
+      for (const [campo, valor] of Object.entries({ estado: 'ok', entorno: 'desarrollo', base_datos: 'bd_nutricion_escenario_sim', base_turnos: 'bd_turnos_escenario_demo', revision_alembic: 'b3e5f7a9c1d4' })) assert.equal(d[campo], valor);
       return true;
     } catch (error) { if (error instanceof assert.AssertionError) throw error; return false; }
   }, 'La API QA no respondió con una salud válida en 25 segundos.');
@@ -71,6 +71,18 @@ async function peticion(page, ruta, metodo = 'GET', cuerpo) {
   }, { api: API, ruta, metodo, cuerpo });
 }
 
+async function irAControlBiometrico(page) {
+  await page.getByRole('region', { name: 'Checklist de comida', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Menú de sesión', exact: true }).click();
+  await page.getByRole('button', { name: 'Ir a Control Biométrico', exact: true }).click();
+  await page.getByText('Marcaciones del turno', { exact: true }).first().waitFor();
+}
+
+async function elegirEnLista(page, selector, valor) {
+  await page.locator(selector).click();
+  await page.locator(`${selector} ~ .app-select-menu [data-value="${valor}"]`).click();
+}
+
 async function sesion(browser, cuenta, clave) {
   const contexto = await browser.newContext({ viewport: { width: 1366, height: 768 }, locale: 'es-BO' });
   const page = await contexto.newPage();
@@ -86,12 +98,14 @@ async function sesion(browser, cuenta, clave) {
   assert.equal(yo.datos.username, cuenta);
   assert.equal(yo.datos.rol, cuenta === 'jefa' ? 'jefa' : 'cocinera');
   assert.equal(yo.datos.debe_cambiar, false);
+  // La cocinera abre en el checklist; estos flujos operan Control Biométrico.
+  if (yo.datos.rol === 'cocinera') await irAControlBiometrico(page);
   return { page, usuario: yo.datos, cerrar: () => contexto.close() };
 }
 
 async function registrar(page, uid) {
   await page.getByRole('button', { name: 'Nuevo registro de huella', exact: true }).click();
-  await page.locator('#huella-persona').selectOption(String(uid));
+  await elegirEnLista(page, '#huella-persona', String(uid));
   const captura = page.waitForResponse(res => res.url().endsWith('/_qa/enrolamiento/capturas') && res.request().method() === 'POST');
   await page.getByRole('button', { name: 'Simular captura', exact: true }).click();
   const res = await captura;
