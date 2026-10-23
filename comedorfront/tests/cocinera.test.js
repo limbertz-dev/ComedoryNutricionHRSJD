@@ -8,6 +8,7 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Panel } from '../src/App.jsx';
 import { ProveedorSesion } from '../src/hooks/useSesion.js';
+import { guardarSeccionActiva } from '../src/navegacion.js';
 import PanelSesionCocinera, {
   CajaSesionCocinera,
   admitePantallaCompleta,
@@ -29,6 +30,34 @@ test('la cocinera abre en el checklist de comida, a pantalla completa', () => {
   // Sin el aviso de padrón cargado de las secciones de jefatura.
   assert.doesNotMatch(html, /comensales? cargados?/);
   assert.match(html, /aria-label="Menú de sesión"/);
+});
+
+test('la cocinera conserva Biométrico o Checklist al volver a cargar el panel', () => {
+  const localOriginal = globalThis.localStorage;
+  const guardado = new Map();
+  globalThis.localStorage = {
+    getItem: (clave) => guardado.get(clave) ?? null,
+    setItem: (clave, valor) => guardado.set(clave, valor),
+  };
+  try {
+    for (const id of ['vivo', 'checklist']) {
+      guardarSeccionActiva(id);
+      // Cada montaje reconstruye el estado, como una recarga de la página.
+      for (let carga = 0; carga < 2; carga += 1) {
+        const html = renderToStaticMarkup(conSesion(h(Panel, { rol: 'cocinera' })));
+        if (id === 'vivo') {
+          assert.match(html, /Huellas por identificar/);
+          assert.doesNotMatch(html, /aria-label="Checklist de comida"/);
+        } else {
+          assert.match(html, /aria-label="Checklist de comida"/);
+          assert.doesNotMatch(html, /Huellas por identificar/);
+        }
+      }
+    }
+  } finally {
+    if (localOriginal === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = localOriginal;
+  }
 });
 
 test('el panel flotante cambia entre checklist y Control Biométrico', () => {

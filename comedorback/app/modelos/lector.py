@@ -127,6 +127,8 @@ class RacionPolicia(Base):
     __table_args__ = opciones(
         COMENTARIO_TABLA_POLICIA,
         Index("idx_raciones_policia_fecha_comida", "fecha_comida", "comida_id"),
+        # Con huella (lector) o con nombre (checklist de cocina): nunca anónima.
+        CheckConstraint("vinculo_id IS NOT NULL OR nombre IS NOT NULL", name="huella_o_nombre"),
     )
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)
@@ -139,9 +141,12 @@ class RacionPolicia(Base):
     )
     fecha_hora: Mapped[datetime] = mapped_column(INSTANTE)
     dispositivo: Mapped[str] = mapped_column(String(50), comment="El lector que la registro.")
-    vinculo_id: Mapped[int] = mapped_column(
+    vinculo_id: Mapped[int | None] = mapped_column(
         ID, ForeignKey("vinculos_lector.id", ondelete="RESTRICT"),
-        comment="La huella de policia que se leyo. No identifica a una persona del padron.",
+        comment="La huella de policia que se leyo. NULL si cocina lo registro por nombre en el checklist.",
+    )
+    nombre: Mapped[str | None] = mapped_column(
+        String(100), comment="Solo checklist: nombre del policia escrito por cocina (sin huella)."
     )
     lectura_id: Mapped[int | None] = mapped_column(
         ID, ForeignKey("lecturas_biometricas.id", ondelete="RESTRICT"), unique=True,

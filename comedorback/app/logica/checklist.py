@@ -9,21 +9,30 @@ validación que la huella: la pantalla nunca decide si alguien come.
 Desmarcar es la única excepción a «una ración no se borra»: solo la misma
 cuenta que marcó y mientras esa comida siga abierta; al cerrar la comida, la
 corrección pasa a la jefa. La copia queda en `anulaciones_checklist`.
+
+Los policías no están en el padrón: la cocinera escribe su nombre y la ración
+va a `raciones_policia` sin huella, con las mismas reglas que la huella de
+policía (app/logica/policia.py): vía libre, solo con una comida en curso.
 """
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session
 
 from app.consultas.derecho import _consulta_base
 from app.core import reloj
+from app.logica import policia
 from app.logica.marcacion import Resultado, registrar_marcacion, resolver_comida_en_curso
-from app.modelos.comedor import AnulacionChecklist, Asistencia
+from app.modelos.comedor import AnulacionChecklist, Asistencia, CategoriaReporte
 from app.modelos.heredados import ComidaPorTurno, Comensal, Servicio
+from app.modelos.lector import RacionPolicia, VinculoLector
 
 DISPOSITIVO_CHECKLIST = "checklist-cocina"
+LARGO_MINIMO_NOMBRE = 3
+LARGO_MAXIMO_NOMBRE = 100
 
 
 @dataclass(frozen=True)
@@ -41,6 +50,15 @@ class PersonaChecklist:
 
 
 @dataclass(frozen=True)
+class PoliciaChecklist:
+    racion_id: int
+    nombre: str
+    fecha_hora: datetime
+    origen: str  # 'checklist' | 'huella'
+    anulable: bool = False
+
+
+@dataclass(frozen=True)
 class Checklist:
     momento: datetime
     fuera_de_horario: bool
@@ -48,6 +66,7 @@ class Checklist:
     comida: str | None = None
     fecha_comida: date | None = None
     personas: list[PersonaChecklist] = field(default_factory=list)
+    policias: list[PoliciaChecklist] = field(default_factory=list)
 
 
 class ErrorChecklist(Exception):
@@ -136,7 +155,122 @@ def listar(sesion: Session, cuenta_id: int) -> Checklist:
         comida=comida.comida,
         fecha_comida=comida.fecha_comida,
         personas=personas,
+        policias=_policias_de(sesion, comida, cuenta_id),
     )
+
+
+def _policias_de(sesion: Session, comida, cuenta_id: int) -> list[PoliciaChecklist]:
+    """Las raciones de policía de la comida: del checklist y de la huella."""
+    vinculo = aliased(VinculoLector)
+    filas = sesion.execute(
+        select(
+            RacionPolicia.id,
+            func.coalesce(RacionPolicia.nombre, vinculo.nombre, policia.NOMBRE).label("nombre"),
+            RacionPolicia.fecha_hora,
+            RacionPolicia.dispositivo,
+            RacionPolicia.registrado_por_cuenta,
+        )
+        .outerjoin(vinculo, vinculo.id == RacionPolicia.vinculo_id)
+        .where(
+            RacionPolicia.comida_id == comida.comida_id,
+            RacionPolicia.fecha_comida == comida.fecha_comida,
+        )
+        .order_by(RacionPolicia.fecha_hora, RacionPolicia.id)
+    ).all()
+    return [
+        PoliciaChecklist(
+            racion_id=f.id,
+            nombre=f.nombre,
+            fecha_hora=f.fecha_hora,
+            origen="checklist" if f.dispositivo == DISPOSITIVO_CHECKLIST else "huella",
+            anulable=f.dispositivo == DISPOSITIVO_CHECKLIST and f.registrado_por_cuenta == cuenta_id,
+        )
+        for f in filas
+    ]
+
+
+def normalizar_nombre(nombre: str) -> str:
+    """Sin espacios repetidos; ErrorChecklist 422 si queda muy corto o largo."""
+    limpio = " ".join((nombre or "").split())
+    if not LARGO_MINIMO_NOMBRE <= len(limpio) <= LARGO_MAXIMO_NOMBRE:
+        raise ErrorChecklist(
+            422,
+            "nombre_invalido",
+            f"Escriba el nombre del policía ({LARGO_MINIMO_NOMBRE} a {LARGO_MAXIMO_NOMBRE} letras).",
+        )
+    return limpio
+
+
+def marcar_policia(sesion: Session, cuenta_id: int, nombre: str) -> dict:
+    """Ración de policía sin huella: vía libre, solo con una comida en curso.
+
+    Un rechazo (fuera de horario, columna Policías inactiva) es 200 con
+    `valido=false`, como en el lector.
+    """
+    nombre = normalizar_nombre(nombre)
+    ahora = reloj.ahora()
+    comida = resolver_comida_en_curso(sesion, ahora)
+    if comida is None:
+        return {"valido": False, "motivo": "fuera_horario", "nombre": nombre,
+                "detalle": "No hay un tiempo de comida vigente a esta hora",
+                "racion_id": None, "comida": None, "fecha_comida": None}
+    columna = sesion.execute(
+        select(CategoriaReporte.id).where(
+            CategoriaReporte.codigo == policia.CODIGO_POLICIAS, CategoriaReporte.activo == 1
+        )
+    ).scalar_one_or_none()
+    if columna is None:
+        return {"valido": False, "motivo": "sin_columna_policias", "nombre": nombre,
+                "detalle": "La columna Policías no está activa en el catálogo de reportes.",
+                "racion_id": None, "comida": comida.comida, "fecha_comida": comida.fecha_comida}
+    racion = RacionPolicia(
+        fecha_comida=comida.fecha_comida, comida_id=comida.comida_id,
+        categoria_reporte_id=columna, fecha_hora=ahora, dispositivo=DISPOSITIVO_CHECKLIST,
+        vinculo_id=None, nombre=nombre, registrado_por_cuenta=cuenta_id,
+    )
+    sesion.add(racion)
+    sesion.commit()
+    return {"valido": True, "motivo": None, "nombre": nombre,
+            "detalle": "Ración de policía registrada", "racion_id": racion.id,
+            "comida": comida.comida, "fecha_comida": comida.fecha_comida}
+
+
+def anular_policia(sesion: Session, cuenta_id: int, racion_id: int) -> AnulacionChecklist:
+    """Deshace una ración de policía propia del checklist, con la comida abierta."""
+    ahora = reloj.ahora()
+    racion = sesion.execute(
+        select(RacionPolicia).where(RacionPolicia.id == racion_id).with_for_update()
+    ).scalar_one_or_none()
+    if racion is None:
+        raise ErrorChecklist(404, "no_existe", "Esa ración no existe o ya se anuló.")
+    if racion.dispositivo != DISPOSITIVO_CHECKLIST:
+        raise ErrorChecklist(
+            409, "no_es_checklist", "Solo se desmarcan raciones marcadas en el checklist."
+        )
+    if racion.registrado_por_cuenta != cuenta_id:
+        raise ErrorChecklist(403, "otra_cuenta", "Solo puede desmarcar quien marcó la ración.")
+    comida = resolver_comida_en_curso(sesion, ahora)
+    if (
+        comida is None
+        or comida.comida_id != racion.comida_id
+        or comida.fecha_comida != racion.fecha_comida
+    ):
+        raise ErrorChecklist(
+            409, "comida_cerrada", "Esa comida ya cerró: pida la corrección a la jefa."
+        )
+    anulacion = AnulacionChecklist(
+        racion_policia_id=racion.id,
+        nombre=racion.nombre,
+        fecha_comida=racion.fecha_comida,
+        comida_id=racion.comida_id,
+        marcada_en=racion.fecha_hora,
+        cuenta_id=cuenta_id,
+        anulada_en=ahora,
+    )
+    sesion.add(anulacion)
+    sesion.delete(racion)
+    sesion.commit()
+    return anulacion
 
 
 def marcar(sesion: Session, cuenta_id: int, usuario_id: int) -> Resultado:

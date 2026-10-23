@@ -21,6 +21,9 @@ from app.esquemas.intervenciones import (
 )
 from app.esquemas.marcacion import (
     RespuestaAnulacion,
+    RespuestaAnulacionPolicia,
+    RespuestaPoliciaChecklist,
+    SolicitudPoliciaChecklist,
     RespuestaIdentificacionPolicia,
     RespuestaMarcacion,
     SolicitudChecklist,
@@ -225,5 +228,57 @@ def desmarcar_checklist(
     return RespuestaAnulacion(
         asistencia_id=anulacion.asistencia_id,
         usuario_id=anulacion.usuario_id,
+        anulada_en=anulacion.anulada_en,
+    )
+
+
+@router.post(
+    "/checklist/policias",
+    response_model=RespuestaPoliciaChecklist,
+    summary="Registrar en el checklist a un policía por su nombre",
+    responses={422: {"description": "Nombre vacío o demasiado largo"}},
+)
+def marcar_policia_checklist(
+    sesion: SesionDep,
+    solicitud: SolicitudPoliciaChecklist,
+    usuario: UsuarioChecklist,
+):
+    """Solo cocinera. El policía no está en el padrón: se escribe su nombre y
+    la ración va a Policías con las reglas de la huella de policía (vía libre,
+    solo con una comida en curso). Un rechazo es 200 con `valido=false`."""
+    cuenta_id = usuario.id
+    try:
+        return RespuestaPoliciaChecklist(**checklist.marcar_policia(sesion, cuenta_id, solicitud.nombre))
+    except checklist.ErrorChecklist as error:
+        sesion.rollback()
+        return JSONResponse(
+            status_code=error.status, content={"detail": error.detalle, "motivo": error.motivo}
+        )
+
+
+@router.delete(
+    "/checklist/policias/{racion_id}",
+    response_model=RespuestaAnulacionPolicia,
+    summary="Desmarcar un policía del checklist",
+    responses={403: {"description": "La marcó otra cuenta"}, 404: {"description": "No existe"}, 409: {"description": "No se puede desmarcar"}},
+)
+def desmarcar_policia_checklist(
+    sesion: SesionDep,
+    racion_id: Annotated[int, Path(gt=0, description="raciones_policia.id")],
+    usuario: UsuarioChecklist,
+):
+    """Solo cocinera, solo su propia marca del checklist y con la comida
+    todavía abierta. La copia queda en anulaciones_checklist."""
+    cuenta_id = usuario.id
+    try:
+        anulacion = checklist.anular_policia(sesion, cuenta_id, racion_id)
+    except checklist.ErrorChecklist as error:
+        sesion.rollback()
+        return JSONResponse(
+            status_code=error.status, content={"detail": error.detalle, "motivo": error.motivo}
+        )
+    return RespuestaAnulacionPolicia(
+        racion_id=anulacion.racion_policia_id,
+        nombre=anulacion.nombre,
         anulada_en=anulacion.anulada_en,
     )
