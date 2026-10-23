@@ -201,10 +201,13 @@ test('Supervisión es SOLO LECTURA: ningún control registra, autoriza ni modifi
   ]);
   for (const texto of textos) {
     const esPestana = /^(Todas|Desayuno|Almuerzo)/.test(texto);
-    assert.ok(esPestana || permitidos.has(texto), `botón inesperado en Supervisión: «${texto}»`);
+    // El selector del día que se supervisa: solo cambia lo que se consulta.
+    const esSelectorDia = /^Fecha seleccionada/.test(texto);
+    assert.ok(esPestana || esSelectorDia || permitidos.has(texto), `botón inesperado en Supervisión: «${texto}»`);
   }
 
   /* Conserva la consulta: pestañas, filtros, búsqueda, actualización e intervenciones. */
+  assert.match(html, /Día que se supervisa/);
   assert.match(html, /Filtrar por comida/);
   assert.match(html, /Filtrar por resultado/);
   assert.match(html, /placeholder="Buscar por nombre…"/);
