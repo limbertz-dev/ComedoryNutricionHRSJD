@@ -10,9 +10,10 @@ Desmarcar es la única excepción a «una ración no se borra»: solo la misma
 cuenta que marcó y mientras esa comida siga abierta; al cerrar la comida, la
 corrección pasa a la jefa. La copia queda en `anulaciones_checklist`.
 
-Los policías no están en el padrón: la cocinera escribe su nombre y la ración
-va a `raciones_policia` sin huella, con las mismas reglas que la huella de
-policía (app/logica/policia.py): vía libre, solo con una comida en curso.
+Los policías no están en el padrón y no tienen identidad: son un contador. La
+cocinera confirma «registrar policía» y la ración va a `raciones_policia` sin
+nombre ni huella, con las reglas de la huella de policía
+(app/logica/policia.py): vía libre, solo con una comida en curso.
 """
 
 from dataclasses import dataclass, field
@@ -31,8 +32,6 @@ from app.modelos.heredados import ComidaPorTurno, Comensal, Servicio
 from app.modelos.lector import RacionPolicia, VinculoLector
 
 DISPOSITIVO_CHECKLIST = "checklist-cocina"
-LARGO_MINIMO_NOMBRE = 3
-LARGO_MAXIMO_NOMBRE = 100
 
 
 @dataclass(frozen=True)
@@ -189,29 +188,14 @@ def _policias_de(sesion: Session, comida, cuenta_id: int) -> list[PoliciaCheckli
     ]
 
 
-def normalizar_nombre(nombre: str) -> str:
-    """Sin espacios repetidos; ErrorChecklist 422 si queda muy corto o largo."""
-    limpio = " ".join((nombre or "").split())
-    if not LARGO_MINIMO_NOMBRE <= len(limpio) <= LARGO_MAXIMO_NOMBRE:
-        raise ErrorChecklist(
-            422,
-            "nombre_invalido",
-            f"Escriba el nombre del policía ({LARGO_MINIMO_NOMBRE} a {LARGO_MAXIMO_NOMBRE} letras).",
-        )
-    return limpio
-
-
-def marcar_policia(sesion: Session, cuenta_id: int, nombre: str) -> dict:
-    """Ración de policía sin huella: vía libre, solo con una comida en curso.
-
-    Un rechazo (fuera de horario, columna Policías inactiva) es 200 con
-    `valido=false`, como en el lector.
-    """
-    nombre = normalizar_nombre(nombre)
+def marcar_policia(sesion: Session, cuenta_id: int) -> dict:
+    """Una ración de policía, sin identidad: vía libre, solo con una comida en
+    curso. Un rechazo (fuera de horario, columna Policías inactiva) es 200 con
+    `valido=false`, como en el lector."""
     ahora = reloj.ahora()
     comida = resolver_comida_en_curso(sesion, ahora)
     if comida is None:
-        return {"valido": False, "motivo": "fuera_horario", "nombre": nombre,
+        return {"valido": False, "motivo": "fuera_horario", "nombre": policia.NOMBRE,
                 "detalle": "No hay un tiempo de comida vigente a esta hora",
                 "racion_id": None, "comida": None, "fecha_comida": None}
     columna = sesion.execute(
@@ -220,17 +204,17 @@ def marcar_policia(sesion: Session, cuenta_id: int, nombre: str) -> dict:
         )
     ).scalar_one_or_none()
     if columna is None:
-        return {"valido": False, "motivo": "sin_columna_policias", "nombre": nombre,
+        return {"valido": False, "motivo": "sin_columna_policias", "nombre": policia.NOMBRE,
                 "detalle": "La columna Policías no está activa en el catálogo de reportes.",
                 "racion_id": None, "comida": comida.comida, "fecha_comida": comida.fecha_comida}
     racion = RacionPolicia(
         fecha_comida=comida.fecha_comida, comida_id=comida.comida_id,
         categoria_reporte_id=columna, fecha_hora=ahora, dispositivo=DISPOSITIVO_CHECKLIST,
-        vinculo_id=None, nombre=nombre, registrado_por_cuenta=cuenta_id,
+        vinculo_id=None, nombre=None, registrado_por_cuenta=cuenta_id,
     )
     sesion.add(racion)
     sesion.commit()
-    return {"valido": True, "motivo": None, "nombre": nombre,
+    return {"valido": True, "motivo": None, "nombre": policia.NOMBRE,
             "detalle": "Ración de policía registrada", "racion_id": racion.id,
             "comida": comida.comida, "fecha_comida": comida.fecha_comida}
 

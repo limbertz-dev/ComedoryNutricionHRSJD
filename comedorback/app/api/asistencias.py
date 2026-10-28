@@ -23,7 +23,6 @@ from app.esquemas.marcacion import (
     RespuestaAnulacion,
     RespuestaAnulacionPolicia,
     RespuestaPoliciaChecklist,
-    SolicitudPoliciaChecklist,
     RespuestaIdentificacionPolicia,
     RespuestaMarcacion,
     SolicitudChecklist,
@@ -235,25 +234,13 @@ def desmarcar_checklist(
 @router.post(
     "/checklist/policias",
     response_model=RespuestaPoliciaChecklist,
-    summary="Registrar en el checklist a un policía por su nombre",
-    responses={422: {"description": "Nombre vacío o demasiado largo"}},
+    summary="Registrar la ración de un policía (sin identidad)",
 )
-def marcar_policia_checklist(
-    sesion: SesionDep,
-    solicitud: SolicitudPoliciaChecklist,
-    usuario: UsuarioChecklist,
-):
-    """Solo cocinera. El policía no está en el padrón: se escribe su nombre y
-    la ración va a Policías con las reglas de la huella de policía (vía libre,
-    solo con una comida en curso). Un rechazo es 200 con `valido=false`."""
-    cuenta_id = usuario.id
-    try:
-        return RespuestaPoliciaChecklist(**checklist.marcar_policia(sesion, cuenta_id, solicitud.nombre))
-    except checklist.ErrorChecklist as error:
-        sesion.rollback()
-        return JSONResponse(
-            status_code=error.status, content={"detail": error.detalle, "motivo": error.motivo}
-        )
+def marcar_policia_checklist(sesion: SesionDep, usuario: UsuarioChecklist):
+    """Solo cocinera, desde el checklist o Control Biométrico, tras confirmar.
+    El policía no tiene identidad: es una ración más en la columna Policías,
+    vía libre y solo con una comida en curso. Un rechazo es 200 con `valido=false`."""
+    return RespuestaPoliciaChecklist(**checklist.marcar_policia(sesion, usuario.id))
 
 
 @router.delete(

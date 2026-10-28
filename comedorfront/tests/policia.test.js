@@ -88,7 +88,7 @@ test('el apartado de policías vacío lo dice', () => {
   assert.equal(esPolicia(personal), false);
 });
 
-test('las tarjetas de comida y el resumen suman los policías aparte del cupo', () => {
+test('las tarjetas de comida y el resumen suman los policías al total de raciones', () => {
   const dia = {
     fecha: '2026-10-19', rechazosSinComida: 0,
     comidas: [{
@@ -102,7 +102,7 @@ test('las tarjetas de comida y el resumen suman los policías aparte del cupo', 
   }));
   assert.match(html, /Policías: <\/span>2/);
   assert.match(html, /Aceptadas<\/dt><dd>0<\/dd><small>de 3 previstas/);
-  assert.match(html, /Policías<\/dt><dd>2<\/dd><small>Aparte del cupo del personal/);
+  assert.match(html, /Policías<\/dt><dd>2<\/dd><small>Total con policías: 2 raciones/);
 });
 
 // --- registro de policías (QA) --------------------------------------------------

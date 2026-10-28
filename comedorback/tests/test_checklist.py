@@ -283,26 +283,28 @@ def en_almuerzo(con_horarios):
     _vaciar_policias()
 
 
+def _registrar(cliente, cocinera):
+    return cliente.post("/asistencias/checklist/policias", headers=cocinera)
+
+
 @pytest.mark.usefixtures("en_almuerzo")
-def test_policia_por_nombre_da_racion_en_policias(cliente, cuentas):
+def test_policia_es_un_contador_sin_identidad(cliente, cuentas):
     uid, cocinera = cuentas["cocinera"]
     _, jefa = cuentas["jefa"]
     antes = cliente.get(f"/pantalla/comidas-del-dia?fecha={DIA_POLICIA.date()}", headers=jefa).json()
-    r = cliente.post("/asistencias/checklist/policias", json={"nombre": "  juan   PEREZ "}, headers=cocinera)
+    r = _registrar(cliente, cocinera)
     assert r.status_code == 200, r.text
     cuerpo = r.json()
-    assert cuerpo["valido"] is True and cuerpo["nombre"] == "juan PEREZ"
+    assert cuerpo["valido"] is True and cuerpo["nombre"] == "Policía"
     with SesionLocal() as sesion:
         racion = sesion.get(RacionPolicia, cuerpo["racion_id"])
-        assert racion.vinculo_id is None
-        assert racion.nombre == "juan PEREZ"
+        assert racion.vinculo_id is None and racion.nombre is None
         assert racion.registrado_por_cuenta == uid
-    # Vía libre: el mismo nombre otra vez es otra ración, como la huella.
-    assert cliente.post("/asistencias/checklist/policias", json={"nombre": "juan PEREZ"},
-                        headers=cocinera).json()["valido"] is True
+    # Vía libre: cada confirmación es otra ración, como la huella.
+    assert _registrar(cliente, cocinera).json()["valido"] is True
 
     lista = cliente.get("/pantalla/checklist", headers=cocinera).json()
-    assert [p["nombre"] for p in lista["policias"]] == ["juan PEREZ", "juan PEREZ"]
+    assert [p["nombre"] for p in lista["policias"]] == ["Policía", "Policía"]
     assert all(p["origen"] == "checklist" and p["anulable"] for p in lista["policias"])
 
     despues = cliente.get(f"/pantalla/comidas-del-dia?fecha={DIA_POLICIA.date()}", headers=jefa).json()
@@ -313,16 +315,14 @@ def test_policia_por_nombre_da_racion_en_policias(cliente, cuentas):
 
     filas = cliente.get("/pantalla/ultimas-marcaciones",
                         params={"fecha": DIA_POLICIA.date().isoformat()}, headers=jefa).json()
-    assert any(f["origen"] == "racion_policia" and f["nombre"] == "juan PEREZ" for f in filas)
+    assert sum(f["origen"] == "racion_policia" and f["nombre"] == "Policía" for f in filas) == 2
 
 
 @pytest.mark.usefixtures("en_almuerzo")
-def test_policia_nombre_invalido_y_fuera_de_horario(cliente, cuentas):
+def test_policia_fuera_de_horario(cliente, cuentas):
     _, cocinera = cuentas["cocinera"]
-    r = cliente.post("/asistencias/checklist/policias", json={"nombre": "  a "}, headers=cocinera)
-    assert r.status_code == 422 and r.json()["motivo"] == "nombre_invalido"
     reloj_prueba.fijar(datetime.combine(DIA_POLICIA.date(), time(3, 30)))
-    r = cliente.post("/asistencias/checklist/policias", json={"nombre": "Juan Pérez"}, headers=cocinera)
+    r = _registrar(cliente, cocinera)
     assert r.status_code == 200 and r.json()["valido"] is False
     assert r.json()["motivo"] == "fuera_horario"
     with SesionLocal() as sesion:
@@ -332,7 +332,7 @@ def test_policia_nombre_invalido_y_fuera_de_horario(cliente, cuentas):
 @pytest.mark.usefixtures("en_almuerzo")
 @pytest.mark.parametrize("rol", ["jefa", "sistemas"])
 def test_solo_cocinera_registra_policias(cliente, cuentas, rol):
-    r = cliente.post("/asistencias/checklist/policias", json={"nombre": "Juan Pérez"}, headers=cuentas[rol][1])
+    r = cliente.post("/asistencias/checklist/policias", headers=cuentas[rol][1])
     assert r.status_code == 403
     assert cliente.delete("/asistencias/checklist/policias/1", headers=cuentas[rol][1]).status_code == 403
 
@@ -341,8 +341,7 @@ def test_solo_cocinera_registra_policias(cliente, cuentas, rol):
 def test_deshacer_policia_mismas_reglas(cliente, cuentas):
     uid, cocinera = cuentas["cocinera"]
     _, cocinera_b = cuentas["cocinera_b"]
-    racion_id = cliente.post("/asistencias/checklist/policias", json={"nombre": "Juan Pérez"},
-                             headers=cocinera).json()["racion_id"]
+    racion_id = _registrar(cliente, cocinera).json()["racion_id"]
     r = cliente.delete(f"/asistencias/checklist/policias/{racion_id}", headers=cocinera_b)
     assert r.status_code == 403 and r.json()["motivo"] == "otra_cuenta"
 
@@ -352,12 +351,11 @@ def test_deshacer_policia_mismas_reglas(cliente, cuentas):
         assert sesion.get(RacionPolicia, racion_id) is None
         anulacion = sesion.execute(select(AnulacionChecklist)).scalar_one()
         assert anulacion.racion_policia_id == racion_id
-        assert anulacion.nombre == "Juan Pérez"
+        assert anulacion.nombre is None
         assert anulacion.asistencia_id is None and anulacion.usuario_id is None
         assert anulacion.cuenta_id == uid
 
-    otra = cliente.post("/asistencias/checklist/policias", json={"nombre": "Ana Rojas"},
-                        headers=cocinera).json()["racion_id"]
+    otra = _registrar(cliente, cocinera).json()["racion_id"]
     reloj_prueba.fijar(datetime.combine(DIA_POLICIA.date(), time(3, 30)) + timedelta(days=1))
     r = cliente.delete(f"/asistencias/checklist/policias/{otra}", headers=cocinera)
     assert r.status_code == 409 and r.json()["motivo"] == "comida_cerrada"

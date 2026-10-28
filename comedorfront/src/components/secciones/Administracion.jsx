@@ -514,7 +514,7 @@ function AvisoAccion({ aviso, onCerrar }) {
 }
 
 /** Fondo + caja de diálogo. Se cierra con Escape o con un clic en el fondo. */
-function Dialogo({ etiqueta, onCerrar, children }) {
+export function Dialogo({ etiqueta, onCerrar, children }) {
   const caja = useRef(null);
 
   /* Al abrir, el foco pasa al diálogo; al cerrar, vuelve a donde estaba. */

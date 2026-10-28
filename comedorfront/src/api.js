@@ -1574,19 +1574,12 @@ export async function obtenerChecklist({ signal } = {}) {
 }
 
 /**
- * POST /asistencias/checklist/policias (solo cocinera): el policía no está en
- * el padrón, se escribe su nombre. Vía libre, solo con una comida en curso; un
- * rechazo llega como { valido: false, motivo }. Un nombre inválido es 422.
+ * POST /asistencias/checklist/policias (solo cocinera, desde el checklist o
+ * Control Biométrico): una ración de policía, sin identidad. Vía libre, solo
+ * con una comida en curso; un rechazo llega como { valido: false, motivo }.
  */
-export async function registrarPoliciaEnChecklist(nombre, { signal } = {}) {
-  const limpio = typeof nombre === 'string' ? nombre.trim().replace(/\s+/g, ' ') : '';
-  if (limpio.length < 3) throw new Error('Escriba el nombre del policía.');
-  const dato = await solicitarApi('/asistencias/checklist/policias', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nombre: limpio }),
-    signal,
-  });
+export async function registrarPoliciaEnChecklist({ signal } = {}) {
+  const dato = await solicitarApi('/asistencias/checklist/policias', { method: 'POST', signal });
   if (typeof dato?.valido !== 'boolean') throw new Error('La API devolvió una respuesta inválida.');
   return dato;
 }

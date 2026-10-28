@@ -127,8 +127,6 @@ class RacionPolicia(Base):
     __table_args__ = opciones(
         COMENTARIO_TABLA_POLICIA,
         Index("idx_raciones_policia_fecha_comida", "fecha_comida", "comida_id"),
-        # Con huella (lector) o con nombre (checklist de cocina): nunca anónima.
-        CheckConstraint("vinculo_id IS NOT NULL OR nombre IS NOT NULL", name="huella_o_nombre"),
     )
 
     id: Mapped[int] = mapped_column(ID, primary_key=True)

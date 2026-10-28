@@ -8,6 +8,7 @@ import { LIMITE_MARCACIONES_COCINA, programarCicloCocina } from '../../cocinaEnV
 import { crearIdentificador, revisionesCambiadas } from '../../identificacion.js';
 import IdentificarLectura from './IdentificarLectura.jsx';
 import RegistrarHuella from './RegistrarHuella.jsx';
+import RegistrarPolicia from './RegistrarPolicia.jsx';
 import { ENROLAMIENTO_QA_ACTIVO } from '../../config.js';
 import useConsultaApi from '../../hooks/useConsultaApi.js';
 import Boton from '../ui/Boton.jsx';
@@ -271,6 +272,7 @@ export default function PantallaEnVivo({
 }) {
   const [registrandoHuella, setRegistrandoHuella] = useState(registroHuellaInicial);
   const [casoHuella, setCasoHuella] = useState(null);
+  const [avisoPolicia, setAvisoPolicia] = useState(null);
   const nuevoRef = useRef(null);
 
   function cerrarRegistroHuella() {
@@ -596,6 +598,22 @@ export default function PantallaEnVivo({
               <Etiqueta tono="neutro">
                 {pantalla ? `${pantalla.totales_del_dia.raciones_servidas} raciones del día` : 'Consultando estado'}
               </Etiqueta>
+              {puedeIdentificar ? (
+                <span className="escenario__policia">
+                  {avisoPolicia ? (
+                    <span className={`escenario__policia-aviso escenario__policia-aviso--${avisoPolicia.tipo}`} role="status">
+                      {avisoPolicia.texto}
+                    </span>
+                  ) : null}
+                  {/* Mismo botón que en el checklist: el policía no tiene identidad. */}
+                  <RegistrarPolicia onRegistrado={(respuesta) => {
+                    setAvisoPolicia(respuesta.valido
+                      ? { tipo: 'exito', texto: 'Ración de policía registrada' }
+                      : { tipo: 'error', texto: respuesta.detalle || 'No se registró la ración del policía' });
+                    ciclo.current?.solicitar();
+                  }} />
+                </span>
+              ) : null}
             </header>
 
             <div className="escenario__cuerpo">
