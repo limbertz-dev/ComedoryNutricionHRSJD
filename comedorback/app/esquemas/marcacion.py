@@ -128,12 +128,16 @@ class PersonaChecklist(BaseModel):
 
 
 class PoliciaChecklist(BaseModel):
-    """Una ración de policía de la comida en curso."""
+    """Un policía por número (servido o pendiente) o una ración de policía sin
+    número de la comida en curso (por huella o por nombre, siempre servida)."""
 
-    racion_id: int
-    nombre: str
-    fecha_hora: datetime
-    origen: Literal["checklist", "huella"]
+    nombre: str = Field(description="«Policía 3», o el nombre de la huella/ración vieja")
+    servida: bool
+    policia_id: int | None = Field(default=None, description="policias.id; NULL en raciones sin número")
+    numero: int | None = None
+    racion_id: int | None = None
+    fecha_hora: datetime | None = None
+    origen: Literal["checklist", "huella"] | None = None
     anulable: bool = False
 
 
@@ -152,12 +156,13 @@ class SolicitudChecklist(BaseModel):
 
 
 class SolicitudPoliciaChecklist(BaseModel):
-    nombre: str = Field(max_length=200, description="Nombre del policía, escrito por cocina.")
+    policia_id: int = Field(gt=0, description="policias.id del policía que recibe la ración.")
 
 
 class RespuestaPoliciaChecklist(BaseModel):
     valido: bool
-    motivo: str | None = Field(default=None, description="fuera_horario | sin_columna_policias")
+    motivo: str | None = Field(default=None, description="fuera_horario | duplicado | sin_columna_policias")
+    policia_id: int
     nombre: str
     detalle: str
     racion_id: int | None = None
@@ -175,3 +180,16 @@ class RespuestaAnulacion(BaseModel):
     asistencia_id: int
     usuario_id: int
     anulada_en: datetime
+
+
+class PoliciaNumerado(BaseModel):
+    """Un policía por número, para la jefatura."""
+
+    id: int
+    numero: int
+    nombre: str = Field(description="«Policía 3»")
+    activo: bool
+
+
+class SolicitudEstadoPolicia(BaseModel):
+    activo: bool = Field(description="false = dar de baja (sus raciones se conservan)")

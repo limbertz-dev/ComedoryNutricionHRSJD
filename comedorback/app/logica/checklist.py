@@ -10,15 +10,17 @@ Desmarcar es la única excepción a «una ración no se borra»: solo la misma
 cuenta que marcó y mientras esa comida siga abierta; al cerrar la comida, la
 corrección pasa a la jefa. La copia queda en `anulaciones_checklist`.
 
-Los policías no están en el padrón: la cocinera escribe su nombre y la ración
-va a `raciones_policia` sin huella, con las mismas reglas que la huella de
-policía (app/logica/policia.py): vía libre, solo con una comida en curso.
+Los policías no están en el padrón: la jefatura da de alta Policía 1, 2, ...
+(tabla `policias`) y la cocinera los marca como al personal. La ración va a
+`raciones_policia` sin huella, solo con una comida en curso y una por policía
+en cada comida; Deshacer lo devuelve a pendientes.
 """
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session
 
@@ -28,11 +30,9 @@ from app.logica import policia
 from app.logica.marcacion import Resultado, registrar_marcacion, resolver_comida_en_curso
 from app.modelos.comedor import AnulacionChecklist, Asistencia, CategoriaReporte
 from app.modelos.heredados import ComidaPorTurno, Comensal, Servicio
-from app.modelos.lector import RacionPolicia, VinculoLector
+from app.modelos.lector import Policia, RacionPolicia, VinculoLector
 
 DISPOSITIVO_CHECKLIST = "checklist-cocina"
-LARGO_MINIMO_NOMBRE = 3
-LARGO_MAXIMO_NOMBRE = 100
 
 
 @dataclass(frozen=True)
@@ -51,10 +51,16 @@ class PersonaChecklist:
 
 @dataclass(frozen=True)
 class PoliciaChecklist:
-    racion_id: int
+    """Un policía por número (servido o pendiente) o una ración de policía sin
+    número de la comida (por huella o por nombre, siempre servida)."""
+
     nombre: str
-    fecha_hora: datetime
-    origen: str  # 'checklist' | 'huella'
+    servida: bool
+    policia_id: int | None = None
+    numero: int | None = None
+    racion_id: int | None = None
+    fecha_hora: datetime | None = None
+    origen: str | None = None  # 'checklist' | 'huella'
     anulable: bool = False
 
 
@@ -160,11 +166,13 @@ def listar(sesion: Session, cuenta_id: int) -> Checklist:
 
 
 def _policias_de(sesion: Session, comida, cuenta_id: int) -> list[PoliciaChecklist]:
-    """Las raciones de policía de la comida: del checklist y de la huella."""
+    """Los policías activos por número, servidos o pendientes, y las demás
+    raciones de policía de la comida (huella o nombre)."""
     vinculo = aliased(VinculoLector)
-    filas = sesion.execute(
+    raciones = sesion.execute(
         select(
             RacionPolicia.id,
+            RacionPolicia.policia_id,
             func.coalesce(RacionPolicia.nombre, vinculo.nombre, policia.NOMBRE).label("nombre"),
             RacionPolicia.fecha_hora,
             RacionPolicia.dispositivo,
@@ -177,62 +185,79 @@ def _policias_de(sesion: Session, comida, cuenta_id: int) -> list[PoliciaCheckli
         )
         .order_by(RacionPolicia.fecha_hora, RacionPolicia.id)
     ).all()
-    return [
-        PoliciaChecklist(
-            racion_id=f.id,
-            nombre=f.nombre,
-            fecha_hora=f.fecha_hora,
+
+    def servida(f, **extra) -> PoliciaChecklist:
+        return PoliciaChecklist(
+            nombre=f.nombre, servida=True, racion_id=f.id, fecha_hora=f.fecha_hora,
             origen="checklist" if f.dispositivo == DISPOSITIVO_CHECKLIST else "huella",
             anulable=f.dispositivo == DISPOSITIVO_CHECKLIST and f.registrado_por_cuenta == cuenta_id,
+            **extra,
         )
-        for f in filas
-    ]
+
+    por_policia = {f.policia_id: f for f in raciones if f.policia_id is not None}
+    numerados = sesion.execute(
+        select(Policia)
+        .where((Policia.activo == 1) | Policia.id.in_(list(por_policia) or [0]))
+        .order_by(Policia.numero)
+    ).scalars()
+    lista = []
+    for p in numerados:
+        f = por_policia.get(p.id)
+        if f is None:
+            lista.append(PoliciaChecklist(nombre=policia.etiqueta(p.numero), servida=False,
+                                          policia_id=p.id, numero=p.numero))
+        else:
+            lista.append(servida(f, policia_id=p.id, numero=p.numero))
+    return lista + [servida(f) for f in raciones if f.policia_id is None]
 
 
-def normalizar_nombre(nombre: str) -> str:
-    """Sin espacios repetidos; ErrorChecklist 422 si queda muy corto o largo."""
-    limpio = " ".join((nombre or "").split())
-    if not LARGO_MINIMO_NOMBRE <= len(limpio) <= LARGO_MAXIMO_NOMBRE:
-        raise ErrorChecklist(
-            422,
-            "nombre_invalido",
-            f"Escriba el nombre del policía ({LARGO_MINIMO_NOMBRE} a {LARGO_MAXIMO_NOMBRE} letras).",
-        )
-    return limpio
-
-
-def marcar_policia(sesion: Session, cuenta_id: int, nombre: str) -> dict:
-    """Ración de policía sin huella: vía libre, solo con una comida en curso.
-
-    Un rechazo (fuera de horario, columna Policías inactiva) es 200 con
-    `valido=false`, como en el lector.
-    """
-    nombre = normalizar_nombre(nombre)
+def marcar_policia(sesion: Session, cuenta_id: int, policia_id: int) -> dict:
+    """Ración del policía por número: solo con una comida en curso y una por
+    comida. Un rechazo (fuera de horario, ya recibió, columna Policías
+    inactiva) es 200 con `valido=false`, como en el lector."""
+    numerado = sesion.get(Policia, policia_id)
+    if numerado is None or not numerado.activo:
+        raise ErrorChecklist(404, "policia_inexistente", "Ese policía no existe o fue dado de baja.")
+    nombre = policia.etiqueta(numerado.numero)
+    base = {"policia_id": policia_id, "nombre": nombre, "racion_id": None}
     ahora = reloj.ahora()
     comida = resolver_comida_en_curso(sesion, ahora)
     if comida is None:
-        return {"valido": False, "motivo": "fuera_horario", "nombre": nombre,
+        return {**base, "valido": False, "motivo": "fuera_horario",
                 "detalle": "No hay un tiempo de comida vigente a esta hora",
-                "racion_id": None, "comida": None, "fecha_comida": None}
+                "comida": None, "fecha_comida": None}
+    en_comida = {**base, "comida": comida.comida, "fecha_comida": comida.fecha_comida}
     columna = sesion.execute(
         select(CategoriaReporte.id).where(
             CategoriaReporte.codigo == policia.CODIGO_POLICIAS, CategoriaReporte.activo == 1
         )
     ).scalar_one_or_none()
     if columna is None:
-        return {"valido": False, "motivo": "sin_columna_policias", "nombre": nombre,
-                "detalle": "La columna Policías no está activa en el catálogo de reportes.",
-                "racion_id": None, "comida": comida.comida, "fecha_comida": comida.fecha_comida}
+        return {**en_comida, "valido": False, "motivo": "sin_columna_policias",
+                "detalle": "La columna Policías no está activa en el catálogo de reportes."}
+    duplicado = {**en_comida, "valido": False, "motivo": "duplicado",
+                 "detalle": f"{nombre} ya recibió esta comida."}
+    if sesion.execute(
+        select(RacionPolicia.id).where(
+            RacionPolicia.policia_id == policia_id,
+            RacionPolicia.fecha_comida == comida.fecha_comida,
+            RacionPolicia.comida_id == comida.comida_id,
+        )
+    ).first():
+        return duplicado
     racion = RacionPolicia(
         fecha_comida=comida.fecha_comida, comida_id=comida.comida_id,
         categoria_reporte_id=columna, fecha_hora=ahora, dispositivo=DISPOSITIVO_CHECKLIST,
-        vinculo_id=None, nombre=nombre, registrado_por_cuenta=cuenta_id,
+        vinculo_id=None, nombre=nombre, policia_id=policia_id, registrado_por_cuenta=cuenta_id,
     )
     sesion.add(racion)
-    sesion.commit()
-    return {"valido": True, "motivo": None, "nombre": nombre,
-            "detalle": "Ración de policía registrada", "racion_id": racion.id,
-            "comida": comida.comida, "fecha_comida": comida.fecha_comida}
+    try:
+        sesion.commit()
+    except IntegrityError:  # otra cocinera lo marcó a la vez
+        sesion.rollback()
+        return duplicado
+    return {**en_comida, "valido": True, "motivo": None,
+            "detalle": "Ración de policía registrada", "racion_id": racion.id}
 
 
 def anular_policia(sesion: Session, cuenta_id: int, racion_id: int) -> AnulacionChecklist:
