@@ -2,7 +2,7 @@
 
 Son tablas de `bd_nutricion`, no de la base de turnos: las cuentas del
 comedor (jefa, cocinera, sistemas) no son los `users` del otro ingeniero y no
-se les escribe nada allá. Si algún día el ingreso se valida contra el SIH o
+se les escribe nada allá. Si algún día el ingreso se valida contra otro sistema del hospital o
 contra `users`, lo que cambia es `verificar_credenciales()` en
 app/logica/autenticacion.py; estas tablas siguen guardando el rol y la
 bitácora.

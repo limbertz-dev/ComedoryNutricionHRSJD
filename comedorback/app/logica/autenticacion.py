@@ -47,7 +47,7 @@ def verificar_credenciales(
     """¿Esta clave es la de este usuario? Devuelve la cuenta, o None.
 
     Es el ÚNICO lugar que sabe DÓNDE se validan las claves. Hoy contra la
-    tabla propia `usuarios_sistema`. Si mañana la validación pasa al SIH o a
+    tabla propia `usuarios_sistema`. Si mañana la validación pasa a otro sistema del hospital o a
     los `users` de la base de turnos, se reemplaza el cuerpo de esta función
     (la cuenta local sigue aportando el rol) y el bloqueo, los tokens y los
     endpoints no se enteran.

@@ -1,6 +1,5 @@
 """Configuración del backend. Todo valor sensible o de entorno vive en .env."""
 
-import logging
 import re
 from functools import lru_cache
 from typing import Literal
@@ -8,8 +7,6 @@ from urllib.parse import quote_plus
 
 from pydantic import SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-registro = logging.getLogger(__name__)
 
 # Los entornos posibles. ENTORNO solo da el valor por omisión con que se arma
 # la app del proceso: el entorno que rige cada petición es el de la app que
@@ -37,15 +34,6 @@ class Configuracion(BaseSettings):
     # SecretStr: str(config) y repr(config) muestran '**********'. El valor
     # real solo sale con get_secret_value(), al armar la URL de conexión.
     db_password: SecretStr = SecretStr("")
-
-    # --- SIH del hospital (SQL Server): OPCIONAL ---
-    # Sin estas variables la API arranca igual y registra una sola vez
-    # "SIH no configurado". Nada las usa todavía: ver app/core/sih.py.
-    sih_host: str | None = None
-    sih_port: int | None = None
-    sih_database: str | None = None
-    sih_user: str | None = None
-    sih_password: SecretStr | None = None
 
     # Arquitectura de dos bases en el mismo servidor MySQL:
     #
@@ -106,26 +94,6 @@ class Configuracion(BaseSettings):
             )
         return turnos
 
-    @field_validator(
-        "sih_host", "sih_port", "sih_database", "sih_user", "sih_password",
-        mode="before",
-    )
-    @classmethod
-    def _sih_vacio_es_ausente(cls, valor: object) -> object:
-        """`SIH_PORT=` vacío, tal como viene en .env.example, cuenta como no
-        configurado en vez de tumbar el arranque por no ser un entero."""
-        if isinstance(valor, str) and not valor.strip():
-            return None
-        return valor
-
-    @property
-    def sih_configurado(self) -> bool:
-        """Hay datos suficientes para intentar conectar al SIH. El puerto no
-        cuenta: sin él, el conector usará el 1433 de SQL Server."""
-        return all(
-            (self.sih_host, self.sih_database, self.sih_user, self.sih_password)
-        )
-
     @property
     def url_base_datos(self) -> str:
         """Cadena de conexión de SQLAlchemy. La clave va escapada porque
@@ -177,11 +145,8 @@ def _leer_lectores(texto: str) -> dict[str, str]:
 
 @lru_cache
 def obtener_configuracion() -> Configuracion:
-    # lru_cache: se carga una vez por proceso, y el aviso sale una sola vez.
-    configuracion = Configuracion()
-    if not configuracion.sih_configurado:
-        registro.info("SIH no configurado: la API arranca sin conexión al SIH.")
-    return configuracion
+    # lru_cache: se carga una vez por proceso.
+    return Configuracion()
 
 
 config = obtener_configuracion()

@@ -158,7 +158,7 @@ real del servidor del hospital.
 Cuentas **propias** del comedor en `usuarios_sistema` (no son los `users` de la
 base de turnos, y no se les escribe nada allá). Dónde se validan las claves
 está aislado en `verificar_credenciales()` (`app/logica/autenticacion.py`): si
-mañana se valida contra el SIH o contra `users`, se cambia esa función y nada
+mañana se valida contra otro sistema del hospital o contra `users`, se cambia esa función y nada
 más.
 
 | Rol | Puede |
