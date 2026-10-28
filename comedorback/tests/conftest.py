@@ -14,7 +14,7 @@ Otro nombre de base: TEST_DB_NAME=otra_test (tiene que terminar en _test).
 
 import os
 import re
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 
 # Antes de importar la app: la configuración se lee una sola vez al importar.
@@ -37,6 +37,7 @@ from app.core.config import config  # noqa: E402
 from app.core.db import SesionLocal  # noqa: E402
 from app.main import app  # noqa: E402
 from app.modelos.usuarios import UsuarioSistema  # noqa: E402
+from app.semillas import horarios  # noqa: E402
 import reloj_prueba  # noqa: E402
 from lector_prueba import LectorDePrueba  # noqa: E402
 
@@ -54,6 +55,17 @@ def _anotar(conexion, cursor, sentencia, parametros, contexto, multiples):
 
 def config_alembic() -> Config:
     return Config(str(RAIZ / "alembic.ini"))
+
+
+# Las pruebas marcan a horas fijas escritas para estas franjas (las de la
+# primera semilla); el horario del hospital en la semilla puede cambiar sin
+# reescribirlas.
+horarios.HORARIOS = [
+    ("desayuno", time(5, 30), time(10, 0)),
+    ("almuerzo", time(11, 0), time(15, 0)),
+    ("te", time(15, 0), time(17, 0)),
+    ("cena", time(17, 0), time(23, 59, 59)),
+]
 
 
 @pytest.fixture(scope="session", autouse=True)
