@@ -373,6 +373,49 @@
   color: var(--c-acento-oscuro);
 }
 
+.checklist__policia-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--e-3) var(--e-4);
+  padding: var(--e-4) var(--e-5);
+  background: var(--c-superficie);
+  border: 1px solid var(--c-borde-tarjeta-activo);
+  border-radius: var(--r-lg);
+  box-shadow: var(--s-1);
+}
+
+.checklist__policia-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--c-texto-2);
+  font-size: var(--t-sm);
+}
+
+.checklist__policia-texto strong {
+  color: var(--c-texto);
+  font-size: var(--t-base);
+}
+
+.checklist__policia-campo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-1);
+  color: var(--c-texto-2);
+  font-size: var(--t-xs);
+  font-weight: 700;
+}
+
+.checklist__policia-input {
+  padding: 0 var(--e-3);
+}
+
+.checklist__policia-acciones {
+  display: flex;
+  gap: var(--e-2);
+}
+
 .checklist__policias {
   display: flex;
   flex-direction: column;
@@ -389,8 +432,14 @@
   font-weight: 800;
 }
 
-.checklist__fila--policia .checklist__marca:disabled {
+.checklist__fila--policia .checklist__marca {
   cursor: default;
+}
+
+@media (max-width: 760px) {
+  .checklist__policia-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 760px) {

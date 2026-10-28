@@ -17,7 +17,6 @@ from app.api import (
     monitoreo,
     pantalla,
     personal,
-    policias,
     reglas,
     reportes,
 )
@@ -129,7 +128,6 @@ def crear_app(entorno: str = config.entorno) -> FastAPI:
         (monitoreo, "monitoreo"),
         (intervenciones, "intervenciones"),
         (lector.vinculos, "lector_vinculos"),
-        (policias, "policias"),
     ]
     for modulo, recurso in routers:
         regla = ACCESO[recurso]

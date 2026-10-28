@@ -198,9 +198,6 @@ test('Supervisión es SOLO LECTURA: ningún control registra, autoriza ni modifi
   const permitidos = new Set([
     'Todas', 'Aceptadas', 'Rechazadas', 'Manuales', 'Actualizar',
     'Entregas registradas', 'Intentos rechazados',
-    // Alta y baja de policías por número: administra el padrón de policías,
-    // no registra ni modifica raciones.
-    'Agregar policía', 'Dar de baja', 'Reactivar',
   ]);
   for (const texto of textos) {
     const esPestana = /^(Todas|Desayuno|Almuerzo)/.test(texto);
