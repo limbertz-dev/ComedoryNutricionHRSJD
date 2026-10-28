@@ -114,7 +114,21 @@
   transition: width var(--trans-lenta);
 }
 
-/* ---------- Barra de filtros ---------- */
+/* ---------- Barra de filtros ----------
+   Fija arriba al bajar por la lista: el buscador y el aviso de la última
+   entrega siguen a la vista aunque se marque a alguien del final. */
+.checklist__barra {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-3);
+  margin: 0 -4px;
+  padding: var(--e-2) 4px var(--e-3);
+  background: var(--c-fondo);
+}
+
 .checklist__chip-cuenta {
   display: inline-block;
   min-width: 1.6em;
