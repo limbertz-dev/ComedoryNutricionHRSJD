@@ -252,7 +252,7 @@ def mostrar_huella(etiqueta, huella):
 
 # La revisión de Alembic de la app que el laboratorio exige en la base QA.
 # Al agregar una migración, se cambia SOLO aquí (y se migra la base QA).
-REVISION_APP = "e3b5d7f9a1c2"
+REVISION_APP = "f4c6e8a0b2d4"
 
 
 def preflight(conexion, revisiones=(REVISION_APP,)):
