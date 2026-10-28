@@ -54,6 +54,7 @@ export default function ChecklistCocina({
   const [nombrePolicia, setNombrePolicia] = useState('');
   const [registrandoPolicia, setRegistrandoPolicia] = useState(false);
   const controlador = useRef(null);
+  const buscadorRef = useRef(null);
 
   const cargar = useCallback(async () => {
     controlador.current?.abort();
@@ -104,6 +105,11 @@ export default function ChecklistCocina({
     try {
       const respuesta = await marcarEnChecklist(persona.id);
       setAviso(avisoDeMarca(respuesta, persona.nombre));
+      // Entregó a quien buscó: el buscador queda vacío y listo para el siguiente de la fila.
+      if (respuesta?.valido && busqueda) {
+        setBusqueda('');
+        buscadorRef.current?.focus();
+      }
     } catch (causa) {
       setAviso({ tipo: 'error', texto: `No se pudo confirmar la entrega: ${causa.message} Revise la lista antes de repetir.` });
     } finally {
@@ -220,103 +226,106 @@ export default function ChecklistCocina({
           </div>
         </div>
 
-        <div className="supervision__filtros checklist__filtros">
-          <div className="supervision__chips-filtro" role="tablist" aria-label="Filtrar por entrega">
-            {FILTROS_CHECKLIST.map(([valor, etiqueta]) => (
-              <button
-                key={valor}
-                type="button"
-                role="tab"
-                aria-selected={filtro === valor}
-                className={`supervision__chip${filtro === valor ? ' supervision__chip--activo' : ''}`}
-                onClick={() => setFiltro(valor)}
-              >
-                {etiqueta}
-                <span className="checklist__chip-cuenta">
-                  {valor === 'pendientes' ? conteo.pendientes : valor === 'entregadas' ? conteo.entregadas : conteo.total}
-                </span>
-              </button>
-            ))}
-          </div>
+        <div className="checklist__barra">
+          <div className="supervision__filtros checklist__filtros">
+            <div className="supervision__chips-filtro" role="tablist" aria-label="Filtrar por entrega">
+              {FILTROS_CHECKLIST.map(([valor, etiqueta]) => (
+                <button
+                  key={valor}
+                  type="button"
+                  role="tab"
+                  aria-selected={filtro === valor}
+                  className={`supervision__chip${filtro === valor ? ' supervision__chip--activo' : ''}`}
+                  onClick={() => setFiltro(valor)}
+                >
+                  {etiqueta}
+                  <span className="checklist__chip-cuenta">
+                    {valor === 'pendientes' ? conteo.pendientes : valor === 'entregadas' ? conteo.entregadas : conteo.total}
+                  </span>
+                </button>
+              ))}
+            </div>
 
-          <div className="supervision__buscador">
-            <span className="supervision__buscador-icono" aria-hidden="true">
-              <IconoBuscar tamano={16} />
-            </span>
-            <input
-              type="text"
-              className="supervision__buscador-input"
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar por nombre…"
-              aria-label="Buscar por nombre"
-            />
-            {busqueda ? (
-              <button type="button" className="supervision__buscador-limpiar" onClick={() => setBusqueda('')}
-                aria-label="Limpiar búsqueda">
-                ×
-              </button>
+            <div className="supervision__buscador">
+              <span className="supervision__buscador-icono" aria-hidden="true">
+                <IconoBuscar tamano={16} />
+              </span>
+              <input
+                ref={buscadorRef}
+                type="text"
+                className="supervision__buscador-input"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar por nombre…"
+                aria-label="Buscar por nombre"
+              />
+              {busqueda ? (
+                <button type="button" className="supervision__buscador-limpiar" onClick={() => setBusqueda('')}
+                  aria-label="Limpiar búsqueda">
+                  ×
+                </button>
+              ) : null}
+            </div>
+
+            {servicios.length > 1 ? (
+              <AppSelect
+                id="checklist-servicio"
+                className="checklist__servicio"
+                value={servicio}
+                onChange={setServicio}
+                options={[
+                  { value: 'todos', label: 'Todos los servicios' },
+                  ...servicios.map((s) => ({ value: s, label: s })),
+                ]}
+              />
             ) : null}
+
+            <Boton variante="secundario" tamano="sm" icono={<IconoRecargar tamano={16} />} onClick={cargar}>
+              Actualizar
+            </Boton>
+            <Boton tamano="sm" icono={<IconoEscudo tamano={16} />} aria-expanded={nuevoPolicia}
+              onClick={() => setNuevoPolicia((valor) => !valor)}>
+              Nuevo policía
+            </Boton>
           </div>
 
-          {servicios.length > 1 ? (
-            <AppSelect
-              id="checklist-servicio"
-              className="checklist__servicio"
-              value={servicio}
-              onChange={setServicio}
-              options={[
-                { value: 'todos', label: 'Todos los servicios' },
-                ...servicios.map((s) => ({ value: s, label: s })),
-              ]}
-            />
+          {nuevoPolicia ? (
+            <form className="checklist__policia-form" onSubmit={registrarPolicia} aria-label="Nuevo policía">
+              <div className="checklist__policia-texto">
+                <strong>Nuevo policía</strong>
+                <span>No está en la lista del personal: escriba su nombre. Recibe su ración con vía libre, en la columna Policías.</span>
+              </div>
+              <label className="checklist__policia-campo">
+                <span>Nombre completo</span>
+                <input
+                  className="supervision__buscador-input checklist__policia-input"
+                  value={nombrePolicia}
+                  maxLength={100}
+                  autoComplete="off"
+                  placeholder="Ej.: Juan Pérez Mamani"
+                  disabled={registrandoPolicia}
+                  onChange={(e) => setNombrePolicia(e.target.value)}
+                />
+              </label>
+              <div className="checklist__policia-acciones">
+                <Boton variante="secundario" tamano="sm" disabled={registrandoPolicia}
+                  onClick={() => { setNuevoPolicia(false); setNombrePolicia(''); }}>
+                  Cancelar
+                </Boton>
+                <Boton type="submit" tamano="sm" disabled={registrandoPolicia || nombrePolicia.trim().length < 3}>
+                  {registrandoPolicia ? 'Registrando…' : 'Entregar ración'}
+                </Boton>
+              </div>
+            </form>
           ) : null}
 
-          <Boton variante="secundario" tamano="sm" icono={<IconoRecargar tamano={16} />} onClick={cargar}>
-            Actualizar
-          </Boton>
-          <Boton tamano="sm" icono={<IconoEscudo tamano={16} />} aria-expanded={nuevoPolicia}
-            onClick={() => setNuevoPolicia((valor) => !valor)}>
-            Nuevo policía
-          </Boton>
+          {error ? <p className="checklist__aviso checklist__aviso--error" role="alert">{error}</p> : null}
+          {aviso ? (
+            <p className={`checklist__aviso checklist__aviso--${aviso.tipo}`} role="status">
+              {aviso.texto}
+            </p>
+          ) : null}
         </div>
-
-        {nuevoPolicia ? (
-          <form className="checklist__policia-form" onSubmit={registrarPolicia} aria-label="Nuevo policía">
-            <div className="checklist__policia-texto">
-              <strong>Nuevo policía</strong>
-              <span>No está en la lista del personal: escriba su nombre. Recibe su ración con vía libre, en la columna Policías.</span>
-            </div>
-            <label className="checklist__policia-campo">
-              <span>Nombre completo</span>
-              <input
-                className="supervision__buscador-input checklist__policia-input"
-                value={nombrePolicia}
-                maxLength={100}
-                autoComplete="off"
-                placeholder="Ej.: Juan Pérez Mamani"
-                disabled={registrandoPolicia}
-                onChange={(e) => setNombrePolicia(e.target.value)}
-              />
-            </label>
-            <div className="checklist__policia-acciones">
-              <Boton variante="secundario" tamano="sm" disabled={registrandoPolicia}
-                onClick={() => { setNuevoPolicia(false); setNombrePolicia(''); }}>
-                Cancelar
-              </Boton>
-              <Boton type="submit" tamano="sm" disabled={registrandoPolicia || nombrePolicia.trim().length < 3}>
-                {registrandoPolicia ? 'Registrando…' : 'Entregar ración'}
-              </Boton>
-            </div>
-          </form>
-        ) : null}
-
-        {error ? <p className="checklist__aviso checklist__aviso--error" role="alert">{error}</p> : null}
-        {aviso ? (
-          <p className={`checklist__aviso checklist__aviso--${aviso.tipo}`} role="status">
-            {aviso.texto}
-          </p>
-        ) : null}
 
         {visibles.length === 0 ? (
           <p className="supervision__vacio" role="status">
