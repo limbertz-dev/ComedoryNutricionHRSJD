@@ -12,8 +12,13 @@ identificadas por cocina, lecturas fuera de horario y comensales sin turno.
 Sin `--aplicar` solo muestra el plan. Lo insertado queda anotado en
 `simulacion_dia.json`; `--limpiar --aplicar` borra exactamente esas filas.
 
+`--solo-padron` crea el padrón con turno y no registra nada: sirve para
+probar el checklist de cocina con la lista llena. Las marcas que se hagan
+después en el checklist (y sus anulaciones) también las borra `--limpiar`.
+
     python -B qa/prueba-basica/simular_dia.py
     python -B qa/prueba-basica/simular_dia.py --aplicar
+    python -B qa/prueba-basica/simular_dia.py --solo-padron --comensales 180 --aplicar
     python -B qa/prueba-basica/simular_dia.py --limpiar --aplicar
 """
 import argparse
@@ -48,10 +53,10 @@ PERFILES = [
 # Franja en la que llega la gente (dentro del horario de cada comida) y
 # probabilidad de que un comensal con turno coma ese tiempo.
 COMIDAS = {
-    1: {'nombre': 'Desayuno', 'desde': '06:15', 'hasta': '09:30', 'asistencia': .60},
-    2: {'nombre': 'Almuerzo', 'desde': '11:30', 'hasta': '14:30', 'asistencia': .85},
-    3: {'nombre': 'Té', 'desde': '15:15', 'hasta': '16:45', 'asistencia': .40},
-    4: {'nombre': 'Cena', 'desde': '18:30', 'hasta': '21:30', 'asistencia': .45},
+    1: {'nombre': 'Desayuno', 'desde': '07:35', 'hasta': '09:25', 'asistencia': .60},
+    2: {'nombre': 'Almuerzo', 'desde': '11:35', 'hasta': '14:25', 'asistencia': .85},
+    3: {'nombre': 'Té', 'desde': '15:35', 'hasta': '17:25', 'asistencia': .40},
+    4: {'nombre': 'Cena', 'desde': '17:35', 'hasta': '19:10', 'asistencia': .45},
 }
 # Por comida: huellas no reconocidas (las resuelve la cocinera de turno) y duplicados.
 NO_RECONOCIDAS = {1: 1, 2: 3, 3: 1, 4: 1}
@@ -253,12 +258,12 @@ def registrar_dia(motor, eventos, cuentas, manifiesto):
     guardar(manifiesto)
 
 
-def simular(motor, fecha, cantidad, semilla, aplicar):
+def simular(motor, fecha, cantidad, semilla, aplicar, solo_padron=False):
     if MANIFIESTO.exists():
         raise c.Abortado('Ya hay un día simulado (simulacion_dia.json); limpiarlo antes de otro.')
     azar = random.Random(f'{semilla}-{fecha}')
     personas = padron(cantidad, azar)
-    eventos = plan_del_dia(fecha, personas, azar)
+    eventos = [] if solo_padron else plan_del_dia(fecha, personas, azar)
     with motor.connect() as conn:
         comprobar_libre(conn, cantidad, fecha)
         cuentas = dict(conn.execute(text(
@@ -268,7 +273,10 @@ def simular(motor, fecha, cantidad, semilla, aplicar):
         raise c.Abortado('Faltan las cuentas cocinera1, cocinera2 y cocinera3 activas.')
     print(f'{"Simulando" if aplicar else "Simularía"} el {fecha:%d/%m/%Y}: {cantidad} comensales con turno '
           f'de cuatro comidas y {SIN_TURNO} sin turno (usuario_id {PRIMER_USUARIO}–{PRIMER_USUARIO + len(personas) - 1}).')
-    resumen_plan(eventos)
+    if solo_padron:
+        print('  solo padrón: no se registra ninguna lectura ni ración')
+    else:
+        resumen_plan(eventos)
     if not aplicar:
         print('Simulacro: no se escribió nada. Repetir con --aplicar.')
         return
@@ -276,11 +284,14 @@ def simular(motor, fecha, cantidad, semilla, aplicar):
     manifiesto = {'marca': MARCA, 'base': c.SIM, 'demo': c.DEMO, 'fecha': fecha.isoformat(),
                   'usuarios': [PRIMER_USUARIO, PRIMER_USUARIO + len(personas) - 1], 'turno': TURNO,
                   'semilla': semilla, 'creado': datetime.now().isoformat(timespec='seconds'),
-                  'lecturas': [], 'asistencias': [], 'resultados': []}
+                  'solo_padron': solo_padron, 'lecturas': [], 'asistencias': [], 'resultados': []}
     # El manifiesto va antes del commit: si el commit fallara, la limpieza no encuentra filas.
     guardar(manifiesto)
     with motor.begin() as conn:
         insertar_padron(conn, fecha, personas)
+    if solo_padron:
+        print(f'Padrón listo: {cantidad} con turno de cuatro comidas el {fecha:%d/%m/%Y}.')
+        return
     registrar_dia(motor, eventos, cuentas, manifiesto)
 
     resultados = manifiesto['resultados']
@@ -306,6 +317,7 @@ def limpiar(motor, aplicar):
     rango = {'a': primero, 'b': ultimo, 'd': DISPOSITIVO, 't': TURNO}
     pasos = [
         ('intervenciones_lectura', 'lectura_id IN :ids'),
+        ('anulaciones_checklist', 'usuario_id BETWEEN :a AND :b'),
         ('asistencias', 'usuario_id BETWEEN :a AND :b'),
         ('lecturas_biometricas', 'dispositivo=:d'),
         (f'{c.DEMO}`.`turnos_asignados', 'usuario_id BETWEEN :a AND :b AND turno_id=:t'),
@@ -320,7 +332,10 @@ def limpiar(motor, aplicar):
                                     rango).scalars())
         asistencias = set(conn.execute(text('SELECT id FROM asistencias WHERE usuario_id BETWEEN :a AND :b FOR UPDATE'),
                                        rango).scalars())
-        if lecturas - set(datos['lecturas']) or asistencias - set(datos['asistencias']):
+        # Las marcas del checklist sobre el padrón simulado no pasan por el manifiesto.
+        del_checklist = set(conn.execute(text(
+            "SELECT id FROM asistencias WHERE usuario_id BETWEEN :a AND :b AND metodo='checklist'"), rango).scalars())
+        if lecturas - set(datos['lecturas']) or asistencias - set(datos['asistencias']) - del_checklist:
             raise c.Abortado('Hay filas en el rango que no figuran en el manifiesto; revisar antes de borrar.')
         rango['ids'] = sorted(lecturas) or [0]
 
@@ -345,6 +360,7 @@ def permisos(limpieza):
         *((c.DEMO, t, verbo) for t in ('turnos', 'turno_comida', 'users', 'personas',
                                         'usuario_servicios', 'turnos_asignados')),
         *((c.SIM, t, verbo) for t in ('lecturas_biometricas', 'asistencias', 'intervenciones_lectura')),
+        *(((c.SIM, 'anulaciones_checklist', 'DELETE'),) if limpieza else ()),
     )
 
 
@@ -353,6 +369,8 @@ def main():
     parser.add_argument('--fecha', type=fecha_argumento, help='AAAA-MM-DD; por defecto, la del laboratorio')
     parser.add_argument('--comensales', type=int, default=80, help='padrón con turno (10 a 900)')
     parser.add_argument('--semilla', default='qa', help='la misma semilla repite el mismo día')
+    parser.add_argument('--solo-padron', action='store_true',
+                        help='crear el padrón con turno sin registrar nada (prueba del checklist)')
     parser.add_argument('--limpiar', action='store_true', help='borrar el día simulado')
     parser.add_argument('--aplicar', action='store_true', help='escribir de verdad')
     args = parser.parse_args()
@@ -366,7 +384,8 @@ def main():
             if args.aplicar:
                 MANIFIESTO.unlink()
         else:
-            simular(motor, args.fecha or fecha_del_laboratorio(), args.comensales, args.semilla, args.aplicar)
+            simular(motor, args.fecha or fecha_del_laboratorio(), args.comensales, args.semilla, args.aplicar,
+                    args.solo_padron)
         if args.aplicar:
             print('Hecho. No hace falta reiniciar la API.')
 

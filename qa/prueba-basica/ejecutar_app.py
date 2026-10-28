@@ -19,6 +19,10 @@ def permisos_modo(modo, laboratorio=False):
             (c.SIM, 'usuarios_sistema', 'UPDATE'),
             *((c.SIM, t, 'INSERT') for t in (
                 'intentos_login', 'intervenciones_lectura', 'asistencias')),
+            # Deshacer del checklist: borra la ración propia y deja la copia.
+            (c.SIM, 'anulaciones_checklist', 'INSERT'),
+            (c.SIM, 'asistencias', 'DELETE'),
+            (c.SIM, 'raciones_policia', 'DELETE'),
             *(((c.SIM, 'lecturas_biometricas', 'INSERT'),) if laboratorio else ()),
             # Policías del laboratorio: alta de su huella y su ración por el lector.
             *(((c.SIM, t, 'INSERT') for t in ('vinculos_lector', 'raciones_policia', 'solicitudes_lector'))
