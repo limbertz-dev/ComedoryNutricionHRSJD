@@ -66,3 +66,6 @@ docker/mysql/turnos-real/*
 
 # Certificados y claves del servidor: nunca al repositorio.
 docker/front/certs/
+
+# Capturas de demostraciones (material para videos): no van al repositorio.
+docs/capturas-*/
