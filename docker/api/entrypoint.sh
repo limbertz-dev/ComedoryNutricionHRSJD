@@ -17,4 +17,4 @@ else:
 PY
 alembic upgrade head
 python -m app.semillas
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --root-path "${API_ROOT_PATH:-}"

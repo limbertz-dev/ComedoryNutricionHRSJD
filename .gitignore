@@ -63,3 +63,6 @@ desktop.ini
 docker/mysql/turnos-real/*
 !docker/mysql/turnos-real/LEEME.txt
 !docker/mysql/demo/turnos_demo_sintetico.sql
+
+# Certificados y claves del servidor: nunca al repositorio.
+docker/front/certs/

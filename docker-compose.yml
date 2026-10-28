@@ -4,9 +4,10 @@
 #   docker compose up -d --build
 #
 #   App:      http://localhost:8080
-#   API:      http://localhost:8000/docs
+#   API:      http://localhost:8080/api/docs (por nginx)
 #   Grafana:  http://localhost:3000   (admin / GRAFANA_ADMIN_PASSWORD)
-#   MySQL:    localhost:3307          (el 3306 suele estar ocupado por Laragon)
+#   MySQL:    127.0.0.1:3307          (solo mantenimiento local)
+#   HTTPS:    añadir -f docker-compose.yml -f docker-compose.https.yml
 #
 # Base de turnos: si docker/mysql/turnos-real/ tiene el volcado del hospital
 # (NUNCA va al repositorio) se carga ese; si no, el escenario SINTÉTICO de demo.
@@ -40,7 +41,7 @@ services:
       - ./docker/mysql/demo:/turnos-demo:ro
       - ./docker/mysql/turnos-real:/turnos-real:ro
     ports:
-      - "${MYSQL_PUERTO:-3307}:3306"
+      - "127.0.0.1:${MYSQL_PUERTO:-3307}:3306"
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 5s
@@ -68,8 +69,9 @@ services:
       AUTH_JWT_SECRETO: ${AUTH_JWT_SECRETO:?Falta AUTH_JWT_SECRETO en .env}
       ORIGENES_PERMITIDOS: ${ORIGENES_PERMITIDOS:-http://localhost:8080,http://127.0.0.1:8080}
       LECTORES: ${LECTORES:-}
-    ports:
-      - "${API_PUERTO:-8000}:8000"
+      API_ROOT_PATH: /api
+      # Solo nginx publica la API; sobrescribe las cabeceras recibidas.
+      FORWARDED_ALLOW_IPS: "*"
 
   # Una sola vez, después de migrar: permisos de solo lectura de Grafana, tabla
   # por tabla (las tablas recién existen cuando la API terminó de migrar).
@@ -97,8 +99,8 @@ services:
       context: .
       dockerfile: docker/front/Dockerfile
       args:
-        # La dirección de la API vista desde el NAVEGADOR de quien usa la app.
-        VITE_API_URL: ${API_URL_PUBLICA:-http://localhost:8000}
+        # Mismo origen: nginx recibe /api y reenvía a la API interna.
+        VITE_API_URL: ${API_URL_PUBLICA:-/api}
     restart: unless-stopped
     depends_on:
       - api
@@ -126,7 +128,7 @@ services:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "${GRAFANA_PUERTO:-3000}:3000"
+      - "127.0.0.1:${GRAFANA_PUERTO:-3000}:3000"
 
 volumes:
   db-datos:

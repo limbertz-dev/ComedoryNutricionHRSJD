@@ -4,7 +4,7 @@ Mientras no exista la pantalla, la jefatura enrola la huella en el lector,
 anota el número que muestra el aparato y lo vincula aquí con la persona.
 Entra con una cuenta de jefa o sistemas (la contraseña se pide oculta).
 
-    python vincular.py --api http://127.0.0.1:8000 --usuario jefa
+    python vincular.py --api http://127.0.0.1:8080/api --usuario jefa
 """
 
 import argparse
@@ -138,7 +138,7 @@ def dar_de_baja(sesion: Sesion) -> None:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--api", default="http://127.0.0.1:8000")
+    parser.add_argument("--api", default="http://127.0.0.1:8080/api")
     parser.add_argument("--usuario", required=True, help="cuenta de jefa o sistemas")
     args = parser.parse_args(argv)
     sesion = Sesion(args.api)

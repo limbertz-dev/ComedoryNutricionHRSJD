@@ -1,8 +1,9 @@
 # Copiar a puente.ini (no se sube al repositorio) y completar.
 
 [api]
-# Dirección de la API del comedor vista desde la PC de cocina.
-url = http://127.0.0.1:8000
+# Dirección de la API del comedor vista desde la PC de cocina. Con Docker la
+# API va por nginx en /api: http://<servidor>:8080/api (o https://<servidor>/api).
+url = http://127.0.0.1:8080/api
 # La misma clave que figura para este lector en LECTORES del .env de la API
 # (LECTORES=cocina-01=<esta clave>). 32+ caracteres.
 clave =

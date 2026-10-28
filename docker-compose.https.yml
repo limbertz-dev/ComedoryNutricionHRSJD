@@ -1,0 +1,18 @@
+# Docker Compose >= 2.24.4. El certificado debe cubrir el nombre usado.
+# docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
+services:
+  front:
+    ports: !override
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/front/nginx.https.conf:/etc/nginx/conf.d/default.conf:ro
+    secrets:
+      - comedor_tls_cert
+      - comedor_tls_key
+
+secrets:
+  comedor_tls_cert:
+    file: ${TLS_CERTIFICADO:?Falta TLS_CERTIFICADO en .env}
+  comedor_tls_key:
+    file: ${TLS_CLAVE_PRIVADA:?Falta TLS_CLAVE_PRIVADA en .env}
