@@ -1,18 +1,20 @@
 """Carga los horarios de comida iniciales.
 
 NO va en una migración, a diferencia de las columnas del formulario. Estos
-horarios son una decisión del hospital, no un dato fijo: los valores de abajo
-son PROVISIONALES, tomados del prototipo, y hay que confirmarlos con la jefa
-de nutrición antes de usar el sistema en serio.
+horarios son una decisión del hospital, no un dato fijo: después se cambian
+desde «Reglas del sistema», con vigencia.
 
-Una franja queda deliberadamente sin cubrir:
+Los valores de abajo son el horario observado en el comedor (27/10/2026),
+en hora de Tarija, con 30 minutos de margen a cada lado para que nadie
+quede fuera por llegar unos minutos antes o después:
 
-    10:00 - 11:00   sería Sobrealimentación
+    Desayuno   08:00 - 09:00   →  07:30 - 09:30
+    Almuerzo   12:00 - 14:00   →  11:30 - 14:30
+    Té         16:00 - 17:00   →  15:30 - 17:30
+    Cena       18:00 - 18:45   →  17:30 - 19:15
 
-Ese tiempo de comida todavía no existe en la tabla `comidas`, que es del
-módulo heredado y necesita autorización para tocarse. Mientras no esté, una
-marcación en esas horas se rechaza por `fuera_horario`, que es la respuesta
-honesta: el sistema no puede saber a qué fila del informe sumar esa ración.
+Fuera de esas franjas no hay comida en curso: la marcación se rechaza por
+`fuera_horario` y el checklist de cocina no muestra lista.
 
 La semilla es un punto de partida, nunca una corrección de lo configurado:
 
@@ -39,10 +41,10 @@ from app.modelos.heredados import Comida
 VIGENTE_DESDE = date(2026, 1, 1)
 
 HORARIOS = [
-    ("desayuno", time(5, 30), time(10, 0)),
-    ("almuerzo", time(11, 0), time(15, 0)),
-    ("te", time(15, 0), time(17, 0)),
-    ("cena", time(17, 0), time(23, 59, 59)),
+    ("desayuno", time(7, 30), time(9, 30)),
+    ("almuerzo", time(11, 30), time(14, 30)),
+    ("te", time(15, 30), time(17, 30)),
+    ("cena", time(17, 30), time(19, 15)),
 ]
 
 
