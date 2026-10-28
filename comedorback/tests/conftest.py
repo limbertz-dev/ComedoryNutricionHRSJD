@@ -101,8 +101,6 @@ def tablas_auth_limpias():
         sesion.execute(text("DELETE FROM solicitudes_lector"))
         sesion.execute(text("DELETE FROM vinculos_lector"))
         sesion.execute(text("DELETE FROM raciones_policia"))
-        # Los policías por número apuntan (RESTRICT) a la cuenta que los creó.
-        sesion.execute(text("DELETE FROM policias"))
         # Las anulaciones del checklist apuntan (RESTRICT) a la cuenta.
         sesion.execute(text("DELETE FROM anulaciones_checklist"))
         # R2 deja solo la versión base (2000-01-01): los tests que asumen

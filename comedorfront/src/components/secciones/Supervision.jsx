@@ -8,7 +8,6 @@ import {
 } from '../../api.js';
 import { diaLegible } from '../../dias.js';
 import IntervencionesCocina from './IntervencionesCocina.jsx';
-import PoliciasNumerados from './PoliciasNumerados.jsx';
 import HuellasRegistradas from './HuellasRegistradas.jsx';
 import SelectorCalendario from './SelectorCalendario.jsx';
 import './Supervision.css';
@@ -198,7 +197,6 @@ export default function Supervision({
   actualizadoInicial = null,
   errorRefrescoInicial = '',
   intervencionesIniciales = undefined,
-  policiasIniciales = null,
   huellasIniciales = undefined,
 }) {
   const [cargando, setCargando] = useState(cargandoInicial);
@@ -587,7 +585,6 @@ export default function Supervision({
       </section>
 
       <RacionesPolicia filas={policias} />
-      <PoliciasNumerados inicial={policiasIniciales} />
 
       {/* Consulta de lo que hizo cocina con las huellas no reconocidas: solo
           jefa, sin botones de aprobación. Acotada a la pestaña activa y
