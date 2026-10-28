@@ -23,9 +23,7 @@ def permisos_modo(modo, laboratorio=False):
             (c.SIM, 'anulaciones_checklist', 'INSERT'),
             (c.SIM, 'asistencias', 'DELETE'),
             (c.SIM, 'raciones_policia', 'DELETE'),
-            # Policías por número: alta, baja y su ración desde el checklist.
-            (c.SIM, 'policias', 'INSERT'),
-            (c.SIM, 'policias', 'UPDATE'),
+            # «Registrar policía» de cocina: una ración sin identidad.
             (c.SIM, 'raciones_policia', 'INSERT'),
             *(((c.SIM, 'lecturas_biometricas', 'INSERT'),) if laboratorio else ()),
             # Policías del laboratorio: alta de su huella y su ración por el lector.
