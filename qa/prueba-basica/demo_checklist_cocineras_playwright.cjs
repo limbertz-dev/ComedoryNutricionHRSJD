@@ -45,7 +45,8 @@ async function entrar(browser, cuenta) {
   const page = await contexto.newPage();
   page.setDefaultTimeout(20_000);
   await page.goto(APP);
-  await page.locator('#login-usuario').fill(cuenta);
+  // QA_CUENTA_<CUENTA> permite ensayar con otra cuenta del mismo rol.
+  await page.locator('#login-usuario').fill(process.env[`QA_CUENTA_${cuenta.toUpperCase()}`] || cuenta);
   await page.locator('#login-contrasena').fill(credencial(cuenta));
   await page.locator('button[type="submit"]').click();
   return { page, cerrar: () => contexto.close() };
@@ -85,7 +86,8 @@ async function seccion(page, etiqueta) {
     // 1. Jefa: policías por número
     anotar('\n1) jefa da de alta los policías');
     let s = await entrar(browser, 'jefa');
-    await s.page.getByText('Día que se supervisa').waitFor();
+    await seccion(s.page, 'Supervisión');
+    await s.page.getByRole('region', { name: 'Policías del comedor' }).waitFor();
     const panel = s.page.getByRole('region', { name: 'Policías del comedor' });
     await panel.scrollIntoViewIfNeeded();
     const existentes = (await peticion(s.page, '/policias')).datos.filter((p) => p.activo).length;
@@ -147,7 +149,8 @@ async function seccion(page, etiqueta) {
     anotar('\n4) jefa revisa todas sus pestañas');
     await lab('/horario', { momento: `${FECHA}T15:00:00`, modo: 'fijo', comida_id: 2 });
     s = await entrar(browser, 'jefa');
-    await s.page.getByText('Día que se supervisa').waitFor();
+    await seccion(s.page, 'Supervisión');
+    await s.page.getByRole('region', { name: 'Policías del comedor' }).waitFor();
     await s.page.getByRole('tab', { name: /Almuerzo/ }).first().click();
     await s.page.waitForLoadState('networkidle');
     await captura(s.page, 'jefa-supervision-almuerzo');
