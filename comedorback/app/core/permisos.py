@@ -88,6 +88,9 @@ ACCESO: dict[str, Regla] = {
     # aparato (/lector/salud, /lector/lecturas) no usan sesión humana: entran
     # con la clave del lector (app/api/lector.py).
     "lector_vinculos": Regla(completo=JEFATURA),
+    # Policías por número: los da de alta y de baja la jefatura. La cocinera
+    # los marca desde el checklist (/pantalla/checklist), no los administra.
+    "policias": Regla(completo=JEFATURA),
     # Intervenciones de cocina (GET /intervenciones-cocina): solo la jefa.
     # Sistemas y cocinera reciben 403. El POST que las crea vive bajo
     # /asistencias y lo restringe `usuario_identificador`.

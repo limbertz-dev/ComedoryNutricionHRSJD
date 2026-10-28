@@ -14,8 +14,8 @@ solo cuenta en la columna Policías (app/logica/policia.py).
 
 from datetime import date, datetime
 
-from sqlalchemy import CHAR, JSON, CheckConstraint, Date, DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, func
-from sqlalchemy.dialects.mysql import TINYINT
+from sqlalchemy import CHAR, JSON, CheckConstraint, Date, DateTime, Enum as SAEnum, ForeignKey, Index, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.mysql import SMALLINT, TINYINT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -114,6 +114,34 @@ class SolicitudLector(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+COMENTARIO_TABLA_POLICIAS = (
+    "Policias que comen en el comedor, por numero (Policia 1, 2, ...): no estan en "
+    "la base de turnos. Los da de alta la jefatura. Baja logica: se desactiva, no se borra."
+)
+
+
+class Policia(Base):
+    """Un policía por número, sin nombre: lo que ve la cocinera en el checklist."""
+
+    __tablename__ = "policias"
+    __table_args__ = opciones(COMENTARIO_TABLA_POLICIAS)
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True)
+    numero: Mapped[int] = mapped_column(
+        SMALLINT(unsigned=True), unique=True, comment="Policia 1, 2, ...: el siguiente libre al crearlo."
+    )
+    activo: Mapped[bool] = mapped_column(TINYINT(1), default=1)
+    creado_por_cuenta: Mapped[int | None] = mapped_column(
+        ID,
+        ForeignKey("usuarios_sistema.id", ondelete="RESTRICT"),
+        comment="Cuenta de jefatura que lo dio de alta.",
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 COMENTARIO_TABLA_POLICIA = (
     "Raciones de policias, registradas por el lector sin identidad: no estan en "
     "la base de turnos. Solo cuentan como racion en la columna Policias."
@@ -127,6 +155,8 @@ class RacionPolicia(Base):
     __table_args__ = opciones(
         COMENTARIO_TABLA_POLICIA,
         Index("idx_raciones_policia_fecha_comida", "fecha_comida", "comida_id"),
+        # Un policía por número recibe una ración por comida y día.
+        UniqueConstraint("policia_id", "fecha_comida", "comida_id", name="uq_raciones_policia_policia_comida"),
         # Con huella (lector) o con nombre (checklist de cocina): nunca anónima.
         CheckConstraint("vinculo_id IS NOT NULL OR nombre IS NOT NULL", name="huella_o_nombre"),
     )
@@ -147,6 +177,10 @@ class RacionPolicia(Base):
     )
     nombre: Mapped[str | None] = mapped_column(
         String(100), comment="Solo checklist: nombre del policia escrito por cocina (sin huella)."
+    )
+    policia_id: Mapped[int | None] = mapped_column(
+        ID, ForeignKey("policias.id", ondelete="RESTRICT"),
+        comment="El policia por numero marcado en el checklist. NULL en las raciones por huella o por nombre.",
     )
     lectura_id: Mapped[int | None] = mapped_column(
         ID, ForeignKey("lecturas_biometricas.id", ondelete="RESTRICT"), unique=True,

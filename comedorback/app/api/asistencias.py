@@ -235,20 +235,19 @@ def desmarcar_checklist(
 @router.post(
     "/checklist/policias",
     response_model=RespuestaPoliciaChecklist,
-    summary="Registrar en el checklist a un policía por su nombre",
-    responses={422: {"description": "Nombre vacío o demasiado largo"}},
+    summary="Marcar en el checklist a un policía por número",
+    responses={404: {"description": "No existe o fue dado de baja"}},
 )
 def marcar_policia_checklist(
     sesion: SesionDep,
     solicitud: SolicitudPoliciaChecklist,
     usuario: UsuarioChecklist,
 ):
-    """Solo cocinera. El policía no está en el padrón: se escribe su nombre y
-    la ración va a Policías con las reglas de la huella de policía (vía libre,
-    solo con una comida en curso). Un rechazo es 200 con `valido=false`."""
+    """Solo cocinera. La ración va a la columna Policías, solo con una comida en
+    curso y una por policía en cada comida. Un rechazo es 200 con `valido=false`."""
     cuenta_id = usuario.id
     try:
-        return RespuestaPoliciaChecklist(**checklist.marcar_policia(sesion, cuenta_id, solicitud.nombre))
+        return RespuestaPoliciaChecklist(**checklist.marcar_policia(sesion, cuenta_id, solicitud.policia_id))
     except checklist.ErrorChecklist as error:
         sesion.rollback()
         return JSONResponse(

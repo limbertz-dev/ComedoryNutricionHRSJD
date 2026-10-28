@@ -4,8 +4,8 @@ import {
   desmarcarEnChecklist,
   desmarcarPoliciaEnChecklist,
   marcarEnChecklist,
+  marcarPoliciaEnChecklist,
   obtenerChecklist,
-  registrarPoliciaEnChecklist,
 } from '../../api.js';
 import {
   FILTROS_CHECKLIST,
@@ -40,7 +40,6 @@ function fechaLarga(iso) {
 export default function ChecklistCocina({
   datosIniciales = null,
   filtroInicial = 'pendientes',
-  nuevoPoliciaInicial = false,
 }) {
   const [datos, setDatos] = useState(datosIniciales);
   const [cargando, setCargando] = useState(datosIniciales === null);
@@ -50,9 +49,6 @@ export default function ChecklistCocina({
   const [servicio, setServicio] = useState('todos');
   const [enCurso, setEnCurso] = useState(() => new Set());
   const [aviso, setAviso] = useState(null);
-  const [nuevoPolicia, setNuevoPolicia] = useState(nuevoPoliciaInicial);
-  const [nombrePolicia, setNombrePolicia] = useState('');
-  const [registrandoPolicia, setRegistrandoPolicia] = useState(false);
   const controlador = useRef(null);
   const buscadorRef = useRef(null);
 
@@ -133,43 +129,41 @@ export default function ChecklistCocina({
     }
   }
 
-  async function registrarPolicia(evento) {
-    evento.preventDefault();
-    if (registrandoPolicia) return;
-    setRegistrandoPolicia(true);
+  async function entregarPolicia(policia) {
+    if (enCurso.has(policia.clave)) return;
+    ocupar(policia.clave, true);
     try {
-      const respuesta = await registrarPoliciaEnChecklist(nombrePolicia);
-      if (respuesta.valido) {
-        setAviso({ tipo: 'exito', texto: `Ración de policía registrada a ${respuesta.nombre}.` });
-        setNombrePolicia('');
-        setNuevoPolicia(false);
-      } else {
-        setAviso({ tipo: 'error', texto: respuesta.detalle || 'No se registró la ración del policía.' });
-      }
+      const respuesta = await marcarPoliciaEnChecklist(policia.policiaId);
+      setAviso(respuesta.valido
+        ? { tipo: 'exito', texto: `Ración entregada a ${policia.nombre}.` }
+        : { tipo: 'error', texto: respuesta.detalle || 'No se registró la ración del policía.' });
     } catch (causa) {
       const detalle = causa instanceof ErrorApi ? (causa.datos?.detail ?? causa.message) : causa.message;
       setAviso({ tipo: 'error', texto: detalle });
     } finally {
-      setRegistrandoPolicia(false);
+      ocupar(policia.clave, false);
       await cargar();
     }
   }
 
   async function deshacerPolicia(policia) {
-    const clave = `policia:${policia.id}`;
-    if (enCurso.has(clave)) return;
-    ocupar(clave, true);
+    if (enCurso.has(policia.clave) || !policia.racionId) return;
+    ocupar(policia.clave, true);
     try {
-      await desmarcarPoliciaEnChecklist(policia.id);
-      setAviso({ tipo: 'info', texto: `Se deshizo la ración del policía ${policia.nombre}.` });
+      await desmarcarPoliciaEnChecklist(policia.racionId);
+      setAviso({ tipo: 'info', texto: `Se deshizo la entrega a ${policia.nombre}.` });
     } catch (causa) {
       const detalle = causa instanceof ErrorApi ? (causa.datos?.detail ?? causa.message) : causa.message;
       setAviso({ tipo: 'error', texto: detalle });
     } finally {
-      ocupar(clave, false);
+      ocupar(policia.clave, false);
       await cargar();
     }
   }
+
+  const policiasServidas = policias.filter((p) => p.servida).length;
+  // Con búsqueda o filtro de servicio se busca personal: los policías se ocultan.
+  const verPolicias = policias.length > 0 && !busqueda && servicio === 'todos';
 
   const porcentaje = conteo.total ? Math.round((conteo.entregadas / conteo.total) * 100) : 0;
 
@@ -217,7 +211,7 @@ export default function ChecklistCocina({
             </div>
             <div className="checklist__cifra checklist__cifra--policias">
               <dt>Policías</dt>
-              <dd>{policias.length}</dd>
+              <dd>{policiasServidas}</dd>
             </div>
           </dl>
           <div className="checklist__progreso" role="progressbar" aria-valuemin={0} aria-valuemax={100}
@@ -283,41 +277,7 @@ export default function ChecklistCocina({
             <Boton variante="secundario" tamano="sm" icono={<IconoRecargar tamano={16} />} onClick={cargar}>
               Actualizar
             </Boton>
-            <Boton tamano="sm" icono={<IconoEscudo tamano={16} />} aria-expanded={nuevoPolicia}
-              onClick={() => setNuevoPolicia((valor) => !valor)}>
-              Nuevo policía
-            </Boton>
           </div>
-
-          {nuevoPolicia ? (
-            <form className="checklist__policia-form" onSubmit={registrarPolicia} aria-label="Nuevo policía">
-              <div className="checklist__policia-texto">
-                <strong>Nuevo policía</strong>
-                <span>No está en la lista del personal: escriba su nombre. Recibe su ración con vía libre, en la columna Policías.</span>
-              </div>
-              <label className="checklist__policia-campo">
-                <span>Nombre completo</span>
-                <input
-                  className="supervision__buscador-input checklist__policia-input"
-                  value={nombrePolicia}
-                  maxLength={100}
-                  autoComplete="off"
-                  placeholder="Ej.: Juan Pérez Mamani"
-                  disabled={registrandoPolicia}
-                  onChange={(e) => setNombrePolicia(e.target.value)}
-                />
-              </label>
-              <div className="checklist__policia-acciones">
-                <Boton variante="secundario" tamano="sm" disabled={registrandoPolicia}
-                  onClick={() => { setNuevoPolicia(false); setNombrePolicia(''); }}>
-                  Cancelar
-                </Boton>
-                <Boton type="submit" tamano="sm" disabled={registrandoPolicia || nombrePolicia.trim().length < 3}>
-                  {registrandoPolicia ? 'Registrando…' : 'Entregar ración'}
-                </Boton>
-              </div>
-            </form>
-          ) : null}
 
           {error ? <p className="checklist__aviso checklist__aviso--error" role="alert">{error}</p> : null}
           {aviso ? (
@@ -326,6 +286,63 @@ export default function ChecklistCocina({
             </p>
           ) : null}
         </div>
+
+        {verPolicias ? (
+          <section className="checklist__policias" aria-label={`Policías en ${datos.comida}`}>
+            <h3 className="checklist__policias-titulo">
+              <IconoEscudo tamano={18} />
+              Policías
+              <span className="checklist__chip-cuenta">{policiasServidas} de {policias.length}</span>
+            </h3>
+            <ul className="checklist__lista">
+              {policias.map((policia) => {
+                const ocupada = enCurso.has(policia.clave);
+                return (
+                  <li key={policia.clave}
+                    className={`checklist__fila checklist__fila--policia${policia.servida ? ' checklist__fila--entregada' : ''}`}>
+                    <button
+                      type="button"
+                      className="checklist__marca"
+                      role="checkbox"
+                      aria-checked={policia.servida}
+                      aria-label={policia.servida ? `${policia.nombre}: ración entregada` : `Entregar ración a ${policia.nombre}`}
+                      disabled={policia.servida || ocupada || !policia.policiaId}
+                      onClick={() => entregarPolicia(policia)}
+                    >
+                      <span className="checklist__casilla" aria-hidden="true">
+                        {policia.servida ? <IconoCheck tamano={18} /> : <IconoEscudo tamano={18} />}
+                      </span>
+                      <span className="checklist__persona">
+                        <span className="checklist__nombre">{policia.nombre}</span>
+                        <span className="checklist__meta">Policía · columna Policías</span>
+                      </span>
+                      {policia.servida ? null : (
+                        <span className="checklist__cta" aria-hidden="true">
+                          {ocupada ? 'Registrando…' : 'Entregar'}
+                        </span>
+                      )}
+                    </button>
+                    {policia.servida ? (
+                      <div className="checklist__estado">
+                        <span className="checklist__sello">
+                          <IconoCheck tamano={13} />
+                          {policia.origen === 'checklist' ? 'Checklist' : 'Huella'} · {horaDeEntrega(policia.fechaHora)}
+                        </span>
+                        {policia.anulable ? (
+                          <Boton variante="secundario" tamano="sm" disabled={ocupada}
+                            onClick={() => deshacerPolicia(policia)}
+                            tooltip="Solo si se marcó por error; vale hasta que termine esta comida">
+                            Deshacer
+                          </Boton>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
 
         {visibles.length === 0 ? (
           <p className="supervision__vacio" role="status">
@@ -382,42 +399,6 @@ export default function ChecklistCocina({
             })}
           </ul>
         )}
-
-        {policias.length ? (
-          <section className="checklist__policias" aria-label={`Policías en ${datos.comida}`}>
-            <h3 className="checklist__policias-titulo">
-              <IconoEscudo tamano={18} />
-              Policías en esta comida
-              <span className="checklist__chip-cuenta">{policias.length}</span>
-            </h3>
-            <ul className="checklist__lista">
-              {policias.map((policia) => (
-                <li key={policia.id} className="checklist__fila checklist__fila--entregada checklist__fila--policia">
-                  <div className="checklist__marca">
-                    <span className="checklist__casilla" aria-hidden="true"><IconoEscudo tamano={18} /></span>
-                    <span className="checklist__persona">
-                      <span className="checklist__nombre">{policia.nombre}</span>
-                      <span className="checklist__meta">Policía · vía libre</span>
-                    </span>
-                  </div>
-                  <div className="checklist__estado">
-                    <span className="checklist__sello">
-                      <IconoCheck tamano={13} />
-                      {policia.origen === 'checklist' ? 'Checklist' : 'Huella'} · {horaDeEntrega(policia.fechaHora)}
-                    </span>
-                    {policia.anulable ? (
-                      <Boton variante="secundario" tamano="sm" disabled={enCurso.has(`policia:${policia.id}`)}
-                        onClick={() => deshacerPolicia(policia)}
-                        tooltip="Solo si se registró por error; vale hasta que termine esta comida">
-                        Deshacer
-                      </Boton>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
       </>
     );
   }
