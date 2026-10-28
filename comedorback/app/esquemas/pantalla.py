@@ -121,6 +121,13 @@ class Marcacion(BaseModel):
     motivo: str | None = None
     valido: bool = Field(description="True si resultado == 'aceptada'")
     dispositivo: str
+    metodo: Literal["biometrico", "manual", "checklist", "policia"] | None = Field(
+        default=None,
+        description=(
+            "Cómo se registró: lector, registro manual de la jefatura, checklist de "
+            "cocina o ración de policía. En `asistencia_manual` distingue manual de checklist."
+        ),
+    )
     origen: Literal["lectura_biometrica", "asistencia_manual", "racion_policia"] = Field(
         description=(
             "Tabla de la que sale la fila, según la rama de la consulta; nunca "

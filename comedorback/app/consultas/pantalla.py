@@ -103,6 +103,7 @@ class Marcacion:
     racion_nombre: str | None = None
     racion_fecha_comida: date | None = None
     racion_fecha_hora: datetime | None = None
+    metodo: str | None = None
     # Lo que calcula `_enriquecer`, según el rol.
     comida_origen: str | None = None
     decision_original: dict | None = None
@@ -448,6 +449,7 @@ def ultimas_marcaciones(
                 else_=literal(False),
             ).label("valido"),
             LecturaBiometrica.dispositivo,
+            literal("biometrico").label("metodo"),
             LecturaBiometrica.resultado.label("lectura_resultado"),
             LecturaBiometrica.motivo.label("lectura_motivo"),
             Asistencia.id.label("asistencia_id"),
@@ -481,6 +483,8 @@ def ultimas_marcaciones(
                 (Asistencia.metodo == "checklist", literal("checklist-cocina")),
                 else_=literal("registro-manual"),
             ).label("dispositivo"),
+            # Quién la registró sin lectura: la jefatura (manual) o cocina (checklist).
+            Asistencia.metodo.label("metodo"),
             literal(None).label("lectura_resultado"),
             literal(None).label("lectura_motivo"),
             Asistencia.id.label("asistencia_id"),
@@ -513,6 +517,7 @@ def ultimas_marcaciones(
             literal(None).label("motivo"),
             literal(True).label("valido"),
             RacionPolicia.dispositivo,
+            literal("policia").label("metodo"),
             literal(None).label("lectura_resultado"),
             literal(None).label("lectura_motivo"),
             literal(None).label("asistencia_id"),

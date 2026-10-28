@@ -450,3 +450,11 @@ test('las hojas de estilo rediseñadas respetan prefers-reduced-motion', () => {
   /* El latido del punto «en curso» es lo único que se anima solo. */
   assert.match(leer('../src/components/secciones/Supervision.css'), /punto-curso,[\s\S]*animation: none/);
 });
+
+test('Historial y Reportes abren en el día del servidor, no en el reloj de la PC', async () => {
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  assert.match(app, /fechaHoraDelServidor\(pantalla\?\.momento\)/);
+  assert.match(app, /<Historial personal=\{estado\.personal\} ahora=\{ahoraServidor\} \/>/);
+  assert.match(app, /<Reportes ahora=\{ahoraServidor\} \/>/);
+});

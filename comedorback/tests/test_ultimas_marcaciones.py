@@ -45,7 +45,7 @@ CAMPOS_INTERVENCIONES = {
     "puede_identificar", "motivo_no_identificable", "identificable_hasta",
     "intervencion",
 }
-CAMPOS = CAMPOS_PREVIOS | {"origen", "clave_evento"} | CAMPOS_INTERVENCIONES
+CAMPOS = CAMPOS_PREVIOS | {"origen", "clave_evento", "metodo"} | CAMPOS_INTERVENCIONES
 ORIGENES = {"lectura_biometrica", "asistencia_manual", "racion_policia"}
 FORMA_CLAVE = re.compile(r"(lectura_biometrica|asistencia_manual):[1-9]\d*")
 

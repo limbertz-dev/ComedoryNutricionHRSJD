@@ -63,6 +63,7 @@ function horaDeMarcacion(fechaHora) {
 
 /** Orígenes de una fila de GET /pantalla/ultimas-marcaciones. */
 export const ORIGENES_MARCACION = ['lectura_biometrica', 'asistencia_manual', 'racion_policia'];
+export const METODOS_MARCACION = ['biometrico', 'manual', 'checklist', 'policia'];
 
 /**
  * Identidad de un evento persistido: "<origen>:<id>". El `id` numérico solo
@@ -182,6 +183,9 @@ function adaptarMarcacion(dato) {
       : MOTIVOS_LEGIBLES[dato.motivo] ?? (dato.motivo || 'Marcación rechazada'),
     motivo: dato.motivo ?? null,
     dispositivo: dato.dispositivo ?? null,
+    // Cómo se registró (lo declara la API): distingue el checklist de cocina
+    // del registro manual de la jefatura, que comparten origen.
+    metodo: METODOS_MARCACION.includes(dato.metodo) ? dato.metodo : null,
     hora: horaDeMarcacion(dato.fecha_hora),
     fechaHora: dato.fecha_hora ?? null,
     // Sin comida: el lector no llegó a resolver ningún turno para esa hora

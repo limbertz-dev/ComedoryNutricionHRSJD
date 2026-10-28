@@ -259,7 +259,9 @@ def test_checklist_sale_en_ultimas_marcaciones(cliente, cuentas):
         headers=cuentas["jefa"][1],
     ).json()
     assert any(
-        f["usuario_id"] == usuario_id and f["dispositivo"] == "checklist-cocina" for f in filas
+        f["usuario_id"] == usuario_id and f["dispositivo"] == "checklist-cocina"
+        and f["origen"] == "asistencia_manual" and f["metodo"] == "checklist"
+        for f in filas
     ), filas
 
 

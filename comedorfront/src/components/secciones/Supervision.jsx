@@ -60,7 +60,12 @@ function horaCorta(fecha) {
  * la API, nunca del texto del dispositivo.
  */
 export function esManual(marcacion) {
-  return marcacion.origen === 'asistencia_manual';
+  return marcacion.origen === 'asistencia_manual' && marcacion.metodo !== 'checklist';
+}
+
+/** Entregada por la cocinera en el checklist (sin lectura ni jefatura). */
+export function esChecklist(marcacion) {
+  return marcacion.origen === 'asistencia_manual' && marcacion.metodo === 'checklist';
 }
 
 /**
@@ -68,6 +73,7 @@ export function esManual(marcacion) {
  * el texto del dispositivo. Una lectura no prueba que el lector esté conectado.
  */
 export function metodoDeMarcacion(marcacion) {
+  if (esChecklist(marcacion)) return 'Checklist de cocina';
   return esManual(marcacion) ? 'Registro manual' : 'Lectura biométrica';
 }
 
@@ -571,6 +577,7 @@ export default function Supervision({
                           {m.valido ? 'Aceptada' : 'Rechazada'}
                         </Etiqueta>
                         {esManual(m) ? <Etiqueta tono="manual">Manual</Etiqueta> : null}
+                        {esChecklist(m) ? <Etiqueta tono="neutro">Checklist</Etiqueta> : null}
                         {entregadaPorCocina(m) ? <ResultadoFinalCocina marcacion={m} /> : null}
                       </span>
                     </td>

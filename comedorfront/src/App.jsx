@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import Boton from './components/ui/Boton.jsx';
 import Header from './components/layout/Header.jsx';
 import PanelSesionCocinera from './components/layout/PanelSesionCocinera.jsx';
@@ -30,7 +30,7 @@ import {
   usaDatosDelComedor,
 } from './permisos.js';
 import { escucharSesion } from './sesion.js';
-import { obtenerEstadoPantalla, obtenerPersonal } from './api.js';
+import { fechaHoraDelServidor, obtenerEstadoPantalla, obtenerPersonal } from './api.js';
 import { ENROLAMIENTO_QA_ACTIVO } from './config.js';
 
 import useConsultaApi from './hooks/useConsultaApi.js';
@@ -122,6 +122,11 @@ export function Panel({ rol, usuario = null, seccionInicial = undefined }) {
   const { datos: pantalla, cargando: cargandoEstado, error: errorEstado, recargar: recargarEstado } = useConsultaApi(consultaEstado);
 
   const turno = pantalla?.comida ?? (pantalla?.fuera_de_horario ? 'Sin servicio' : 'Consultando…');
+  /* El «hoy» de Historial y Reportes es el del servidor (hora de Tarija), no el
+     reloj de la PC: así todas las pantallas miran el mismo día. Sin estado
+     (sistemas o error) queda la fecha de la PC. */
+  const ahoraServidor = useMemo(() => fechaHoraDelServidor(pantalla?.momento), [pantalla?.momento]);
+  const esperaReloj = usaComedor && cargandoEstado && !pantalla;
 
   useEffect(() => {
     if (!usaComedor) return undefined;
@@ -228,10 +233,11 @@ export function Panel({ rol, usuario = null, seccionInicial = undefined }) {
           ) : null}
 
           {permitida && seccionActiva === 'historial'
-            ? <Historial personal={estado.personal} /> : null}
+            ? (esperaReloj ? <p role="status">Cargando…</p>
+              : <Historial personal={estado.personal} ahora={ahoraServidor} />) : null}
 
           {permitida && seccionActiva === 'reportes'
-            ? <Reportes /> : null}
+            ? (esperaReloj ? <p role="status">Cargando…</p> : <Reportes ahora={ahoraServidor} />) : null}
           {permitida && seccionActiva === 'admin'
             ? <Administracion usuarioActual={usuario} /> : null}
           {permitida && seccionActiva === 'reglas'

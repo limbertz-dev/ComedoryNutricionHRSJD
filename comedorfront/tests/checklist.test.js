@@ -188,3 +188,16 @@ test('Registrar policía: la confirmación pregunta antes de registrar', () => {
   assert.match(html, />Cancelar</);
   assert.match(html, />Sí, registrar policía</);
 });
+
+test('las entregas del checklist se muestran como «Checklist de cocina», no como registro manual', async () => {
+  const { esManual, esChecklist, metodoDeMarcacion } = await import('../src/components/secciones/Supervision.jsx');
+  const { etiquetaDeOrigen } = await import('../src/components/secciones/PantallaEnVivo.jsx');
+  const checklist = { origen: 'asistencia_manual', metodo: 'checklist' };
+  const manual = { origen: 'asistencia_manual', metodo: 'manual' };
+  assert.equal(esChecklist(checklist), true);
+  assert.equal(esManual(checklist), false);
+  assert.equal(metodoDeMarcacion(checklist), 'Checklist de cocina');
+  assert.equal(metodoDeMarcacion(manual), 'Registro manual');
+  assert.equal(etiquetaDeOrigen('asistencia_manual', 'checklist'), 'Checklist de cocina');
+  assert.equal(etiquetaDeOrigen('asistencia_manual', 'manual'), 'Registro manual');
+});

@@ -94,8 +94,8 @@ function FiltroComida({ activo, onCambiar }) {
 }
 
 /** Texto del origen de una marcación; null si no dejó fila persistida. */
-export function etiquetaDeOrigen(origen) {
-  if (origen === 'asistencia_manual') return 'Registro manual';
+export function etiquetaDeOrigen(origen, metodo = null) {
+  if (origen === 'asistencia_manual') return metodo === 'checklist' ? 'Checklist de cocina' : 'Registro manual';
   if (origen === 'lectura_biometrica') return 'Lectura biométrica';
   if (origen === 'racion_policia') return 'Policía';
   return null;
@@ -173,15 +173,19 @@ export function eventoDeFila(fila) {
     };
   }
   const manual = fila.origen === 'asistencia_manual';
+  const checklist = manual && fila.metodo === 'checklist';
   const sinIdentificar = esHuellaNoReconocida(fila);
   const motivo = fila.motivo ?? fila.decisionOriginal?.motivo ?? null;
   return {
     id: fila.clave,
     origen: fila.origen ?? null,
+    metodo: fila.metodo ?? null,
     valido: fila.valido,
     sinIdentificar,
-    titulo: manual && fila.valido ? 'Registro manual' : fila.titulo,
-    detalle: manual
+    titulo: manual && fila.valido ? (checklist ? 'Checklist de cocina' : 'Registro manual') : fila.titulo,
+    detalle: checklist
+      ? 'Ración entregada por cocina en el checklist'
+      : manual
       ? 'Ración registrada a mano desde Supervisión'
       : fila.valido
         ? 'Ración habilitada — comensal registrado'
@@ -548,7 +552,7 @@ export default function PantallaEnVivo({
     }
   }
 
-  const origenMostrado = etiquetaDeOrigen(eventoMostrado?.origen);
+  const origenMostrado = etiquetaDeOrigen(eventoMostrado?.origen, eventoMostrado?.metodo);
   const mostrarResultado = eventoMostrado !== null && lecturaAbiertaEfectiva === null && !registrandoHuella;
   const personaMostrada = eventoMostrado?.persona;
 
@@ -837,7 +841,8 @@ export default function PantallaEnVivo({
                       <span className="historial__sub">
                         {registro.persona.categoria}
                         {' · '}{registro.hora}
-                        {registro.origen === 'asistencia_manual' ? ' · Registro manual' : null}
+                        {registro.origen === 'asistencia_manual'
+                          ? ` · ${etiquetaDeOrigen(registro.origen, registro.metodo)}` : null}
                         {registro.origen === 'racion_policia' ? ' · Ración de policía' : null}
                         {identificadaPorCocina(registro)
                           ? ` · Identificada por cocina: ${registro.resultadoFinal.comensal.nombre ?? 'persona identificada'}`
