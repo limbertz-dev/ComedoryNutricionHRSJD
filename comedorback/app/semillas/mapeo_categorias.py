@@ -10,7 +10,9 @@ id es de la base de turnos y puede cambiar entre copias. Una categoría que no
 figura acá no se rechaza al marcar: su ración cae en "Sin clasificar" y queda
 visible en el informe.
 
-Enfermería no se mapea: está fuera del comedor (ver derecho.py).
+Enfermería no se mapea: está fuera del comedor (ver derecho.py). Administrativo
+tampoco: no come en el comedor y su columna está desactivada (migración
+f4c6e8a0b2d4).
 
 Idempotente: una categoría que ya tiene mapeo se omite, aunque apunte a otra
 columna. Cambiar un mapeo es una decisión, no una recarga.
@@ -32,7 +34,6 @@ MAPEO = [
     ("Manual", "servicio"),
     ("Mantenimiento", "servicio"),
     ("Camillero", "servicio"),
-    ("Administrativo", "administrativo"),
     ("Tecnicos", "tecnicos"),
     ("Internos-Bioquimica", "tecnicos"),
     ("Internos-Imagenologia", "tecnicos"),
