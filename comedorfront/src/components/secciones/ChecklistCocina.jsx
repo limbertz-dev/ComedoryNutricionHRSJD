@@ -4,7 +4,6 @@ import {
   desmarcarEnChecklist,
   desmarcarPoliciaEnChecklist,
   marcarEnChecklist,
-  marcarPoliciaEnChecklist,
   obtenerChecklist,
 } from '../../api.js';
 import {
@@ -18,6 +17,7 @@ import {
   serviciosDeChecklist,
 } from '../../checklist.js';
 import AppSelect from '../ui/AppSelect.jsx';
+import RegistrarPolicia from './RegistrarPolicia.jsx';
 import Boton from '../ui/Boton.jsx';
 import { IconoAlerta, IconoBuscar, IconoCheck, IconoEscudo, IconoRecargar } from '../ui/Iconos.jsx';
 import './Supervision.css';
@@ -129,41 +129,28 @@ export default function ChecklistCocina({
     }
   }
 
-  async function entregarPolicia(policia) {
-    if (enCurso.has(policia.clave)) return;
-    ocupar(policia.clave, true);
-    try {
-      const respuesta = await marcarPoliciaEnChecklist(policia.policiaId);
-      setAviso(respuesta.valido
-        ? { tipo: 'exito', texto: `Ración entregada a ${policia.nombre}.` }
-        : { tipo: 'error', texto: respuesta.detalle || 'No se registró la ración del policía.' });
-    } catch (causa) {
-      const detalle = causa instanceof ErrorApi ? (causa.datos?.detail ?? causa.message) : causa.message;
-      setAviso({ tipo: 'error', texto: detalle });
-    } finally {
-      ocupar(policia.clave, false);
-      await cargar();
-    }
+  async function policiaRegistrado(respuesta) {
+    setAviso(respuesta.valido
+      ? { tipo: 'exito', texto: 'Ración de policía registrada.' }
+      : { tipo: 'error', texto: respuesta.detalle || 'No se registró la ración del policía.' });
+    await cargar();
   }
 
   async function deshacerPolicia(policia) {
-    if (enCurso.has(policia.clave) || !policia.racionId) return;
-    ocupar(policia.clave, true);
+    const clave = `policia:${policia.id}`;
+    if (enCurso.has(clave)) return;
+    ocupar(clave, true);
     try {
-      await desmarcarPoliciaEnChecklist(policia.racionId);
-      setAviso({ tipo: 'info', texto: `Se deshizo la entrega a ${policia.nombre}.` });
+      await desmarcarPoliciaEnChecklist(policia.id);
+      setAviso({ tipo: 'info', texto: 'Se deshizo una ración de policía.' });
     } catch (causa) {
       const detalle = causa instanceof ErrorApi ? (causa.datos?.detail ?? causa.message) : causa.message;
       setAviso({ tipo: 'error', texto: detalle });
     } finally {
-      ocupar(policia.clave, false);
+      ocupar(clave, false);
       await cargar();
     }
   }
-
-  const policiasServidas = policias.filter((p) => p.servida).length;
-  // Con búsqueda o filtro de servicio se busca personal: los policías se ocultan.
-  const verPolicias = policias.length > 0 && !busqueda && servicio === 'todos';
 
   const porcentaje = conteo.total ? Math.round((conteo.entregadas / conteo.total) * 100) : 0;
 
@@ -211,7 +198,7 @@ export default function ChecklistCocina({
             </div>
             <div className="checklist__cifra checklist__cifra--policias">
               <dt>Policías</dt>
-              <dd>{policiasServidas}</dd>
+              <dd>{policias.length}</dd>
             </div>
           </dl>
           <div className="checklist__progreso" role="progressbar" aria-valuemin={0} aria-valuemax={100}
@@ -277,6 +264,7 @@ export default function ChecklistCocina({
             <Boton variante="secundario" tamano="sm" icono={<IconoRecargar tamano={16} />} onClick={cargar}>
               Actualizar
             </Boton>
+            <RegistrarPolicia onRegistrado={policiaRegistrado} />
           </div>
 
           {error ? <p className="checklist__aviso checklist__aviso--error" role="alert">{error}</p> : null}
@@ -287,59 +275,38 @@ export default function ChecklistCocina({
           ) : null}
         </div>
 
-        {verPolicias ? (
+        {policias.length > 0 && !busqueda && servicio === 'todos' ? (
           <section className="checklist__policias" aria-label={`Policías en ${datos.comida}`}>
             <h3 className="checklist__policias-titulo">
               <IconoEscudo tamano={18} />
-              Policías
-              <span className="checklist__chip-cuenta">{policiasServidas} de {policias.length}</span>
+              Policías registrados
+              <span className="checklist__chip-cuenta">{policias.length}</span>
             </h3>
             <ul className="checklist__lista">
-              {policias.map((policia) => {
-                const ocupada = enCurso.has(policia.clave);
-                return (
-                  <li key={policia.clave}
-                    className={`checklist__fila checklist__fila--policia${policia.servida ? ' checklist__fila--entregada' : ''}`}>
-                    <button
-                      type="button"
-                      className="checklist__marca"
-                      role="checkbox"
-                      aria-checked={policia.servida}
-                      aria-label={policia.servida ? `${policia.nombre}: ración entregada` : `Entregar ración a ${policia.nombre}`}
-                      disabled={policia.servida || ocupada || !policia.policiaId}
-                      onClick={() => entregarPolicia(policia)}
-                    >
-                      <span className="checklist__casilla" aria-hidden="true">
-                        {policia.servida ? <IconoCheck tamano={18} /> : <IconoEscudo tamano={18} />}
-                      </span>
-                      <span className="checklist__persona">
-                        <span className="checklist__nombre">{policia.nombre}</span>
-                        <span className="checklist__meta">Policía · columna Policías</span>
-                      </span>
-                      {policia.servida ? null : (
-                        <span className="checklist__cta" aria-hidden="true">
-                          {ocupada ? 'Registrando…' : 'Entregar'}
-                        </span>
-                      )}
-                    </button>
-                    {policia.servida ? (
-                      <div className="checklist__estado">
-                        <span className="checklist__sello">
-                          <IconoCheck tamano={13} />
-                          {policia.origen === 'checklist' ? 'Checklist' : 'Huella'} · {horaDeEntrega(policia.fechaHora)}
-                        </span>
-                        {policia.anulable ? (
-                          <Boton variante="secundario" tamano="sm" disabled={ocupada}
-                            onClick={() => deshacerPolicia(policia)}
-                            tooltip="Solo si se marcó por error; vale hasta que termine esta comida">
-                            Deshacer
-                          </Boton>
-                        ) : null}
-                      </div>
+              {policias.map((policia) => (
+                <li key={policia.id} className="checklist__fila checklist__fila--entregada checklist__fila--policia">
+                  <div className="checklist__marca">
+                    <span className="checklist__casilla" aria-hidden="true"><IconoEscudo tamano={18} /></span>
+                    <span className="checklist__persona">
+                      <span className="checklist__nombre">{policia.nombre}</span>
+                      <span className="checklist__meta">Columna Policías · sin nombre</span>
+                    </span>
+                  </div>
+                  <div className="checklist__estado">
+                    <span className="checklist__sello">
+                      <IconoCheck tamano={13} />
+                      {policia.origen === 'checklist' ? 'Checklist' : 'Huella'} · {horaDeEntrega(policia.fechaHora)}
+                    </span>
+                    {policia.anulable ? (
+                      <Boton variante="secundario" tamano="sm" disabled={enCurso.has(`policia:${policia.id}`)}
+                        onClick={() => deshacerPolicia(policia)}
+                        tooltip="Solo si se registró por error; vale hasta que termine esta comida">
+                        Deshacer
+                      </Boton>
                     ) : null}
-                  </li>
-                );
-              })}
+                  </div>
+                </li>
+              ))}
             </ul>
           </section>
         ) : null}
@@ -399,6 +366,7 @@ export default function ChecklistCocina({
             })}
           </ul>
         )}
+
       </>
     );
   }

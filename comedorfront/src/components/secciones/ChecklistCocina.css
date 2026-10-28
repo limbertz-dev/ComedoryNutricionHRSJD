@@ -389,7 +389,7 @@
   font-weight: 800;
 }
 
-.checklist__fila--policia .checklist__marca:disabled {
+.checklist__fila--policia .checklist__marca {
   cursor: default;
 }
 

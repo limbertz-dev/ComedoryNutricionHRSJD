@@ -1538,27 +1538,16 @@ function adaptarPersonaChecklist(p) {
   };
 }
 
-/**
- * Un policía de la comida en curso, validado: por número (pendiente o
- * servido) o una ración sin número (huella o nombre), siempre servida.
- */
+/** Una ración de policía de la comida en curso, validada. */
 function adaptarPoliciaChecklist(p) {
-  const conNumero = p?.policia_id != null;
-  if (typeof p?.nombre !== 'string' || typeof p.servida !== 'boolean'
-    || (conNumero && (!Number.isSafeInteger(p.policia_id) || p.policia_id <= 0))
-    || (p.racion_id != null && (!Number.isSafeInteger(p.racion_id) || p.racion_id <= 0))
-    || (p.servida && p.racion_id == null) || (!conNumero && !p.servida)) {
+  if (!Number.isSafeInteger(p?.racion_id) || p.racion_id <= 0 || typeof p.nombre !== 'string') {
     throw new Error('La API devolvió un checklist inválido.');
   }
   return {
-    clave: conNumero ? `policia:${p.policia_id}` : `racion:${p.racion_id}`,
-    policiaId: conNumero ? p.policia_id : null,
-    numero: Number.isSafeInteger(p.numero) ? p.numero : null,
+    id: p.racion_id,
     nombre: p.nombre,
-    servida: p.servida,
-    racionId: p.racion_id ?? null,
     fechaHora: p.fecha_hora ?? null,
-    origen: p.servida ? (p.origen === 'checklist' ? 'checklist' : 'huella') : null,
+    origen: p.origen === 'checklist' ? 'checklist' : 'huella',
     anulable: p.anulable === true,
   };
 }
@@ -1585,52 +1574,14 @@ export async function obtenerChecklist({ signal } = {}) {
 }
 
 /**
- * POST /asistencias/checklist/policias (solo cocinera): entrega la ración al
- * policía por número. Solo con una comida en curso y una por comida; un
- * rechazo llega como { valido: false, motivo } (duplicado, fuera_horario).
+ * POST /asistencias/checklist/policias (solo cocinera, desde el checklist o
+ * Control Biométrico): una ración de policía, sin identidad. Vía libre, solo
+ * con una comida en curso; un rechazo llega como { valido: false, motivo }.
  */
-export async function marcarPoliciaEnChecklist(policiaId, { signal } = {}) {
-  if (!Number.isInteger(policiaId) || policiaId <= 0) throw new Error('Policía inválido.');
-  const dato = await solicitarApi('/asistencias/checklist/policias', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ policia_id: policiaId }),
-    signal,
-  });
+export async function registrarPoliciaEnChecklist({ signal } = {}) {
+  const dato = await solicitarApi('/asistencias/checklist/policias', { method: 'POST', signal });
   if (typeof dato?.valido !== 'boolean') throw new Error('La API devolvió una respuesta inválida.');
   return dato;
-}
-
-/** Un policía por número de la jefatura, validado. */
-function adaptarPoliciaNumerado(p) {
-  if (!Number.isSafeInteger(p?.id) || p.id <= 0 || !Number.isSafeInteger(p.numero)
-    || typeof p.nombre !== 'string' || typeof p.activo !== 'boolean') {
-    throw new Error('La API devolvió un policía inválido.');
-  }
-  return { id: p.id, numero: p.numero, nombre: p.nombre, activo: p.activo };
-}
-
-/** GET /policias (jefatura): todos los policías por número, activos y de baja. */
-export async function obtenerPolicias({ signal } = {}) {
-  const datos = await solicitarApi('/policias', { signal });
-  if (!Array.isArray(datos)) throw new Error('La API devolvió una lista de policías inválida.');
-  return datos.map(adaptarPoliciaNumerado);
-}
-
-/** POST /policias (jefatura): da de alta el siguiente número. */
-export async function crearPolicia({ signal } = {}) {
-  return adaptarPoliciaNumerado(await solicitarApi('/policias', { method: 'POST', signal }));
-}
-
-/** PATCH /policias/{id} (jefatura): baja lógica o reactivación; sus raciones quedan. */
-export async function cambiarEstadoPolicia(policiaId, activo, { signal } = {}) {
-  if (!Number.isInteger(policiaId) || policiaId <= 0) throw new Error('Policía inválido.');
-  return adaptarPoliciaNumerado(await solicitarApi(`/policias/${policiaId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ activo: activo === true }),
-    signal,
-  }));
 }
 
 /** DELETE /asistencias/checklist/policias/{id}: solo la marca propia, con la comida abierta. */

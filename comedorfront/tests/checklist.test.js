@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  cambiarEstadoPolicia, crearPolicia, desmarcarEnChecklist, desmarcarPoliciaEnChecklist,
-  marcarEnChecklist, marcarPoliciaEnChecklist, obtenerChecklist, obtenerPolicias,
+  desmarcarEnChecklist, desmarcarPoliciaEnChecklist, marcarEnChecklist, obtenerChecklist,
+  registrarPoliciaEnChecklist,
 } from '../src/api.js';
 import {
   avisoDeMarca,
@@ -17,6 +17,7 @@ import {
   serviciosDeChecklist,
 } from '../src/checklist.js';
 import ChecklistCocina from '../src/components/secciones/ChecklistCocina.jsx';
+import RegistrarPolicia from '../src/components/secciones/RegistrarPolicia.jsx';
 
 const PERSONAS = [
   { id: 1, nombre: 'Zoila Pérez', servicio: 'LABORATORIO', servida: false },
@@ -132,78 +133,58 @@ test('Deshacer aparece sin temporizador y solo en las marcas propias', () => {
   assert.doesNotMatch(html, /Deshacer ·|\d:\d\d<\/span><\/button>/);
 });
 
-test('contrato: policías por número en el checklist (lista, entregar y deshacer)', async () => {
+test('contrato: policías del checklist (lista, registro sin identidad y deshacer)', async () => {
   await conFetch([
     { status: 200, json: {
       momento: '2026-10-19T12:30:00', fuera_de_horario: false, comida_id: 2, comida: 'Almuerzo',
       fecha_comida: '2026-10-19', personas: [],
-      policias: [
-        { policia_id: 1, numero: 1, nombre: 'Policía 1', servida: true, racion_id: 5,
-          fecha_hora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true },
-        { policia_id: 2, numero: 2, nombre: 'Policía 2', servida: false },
-        { racion_id: 7, nombre: 'Juan Pérez', servida: true, fecha_hora: '2026-10-19T12:12:00', origen: 'huella' },
-      ],
+      policias: [{ racion_id: 5, nombre: 'Policía', fecha_hora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true }],
     } },
-    { status: 200, json: { valido: true, policia_id: 2, nombre: 'Policía 2', detalle: 'ok', racion_id: 6 } },
-    { status: 200, json: { racion_id: 6, nombre: 'Policía 2', anulada_en: '2026-10-19T12:31:00' } },
+    { status: 200, json: { valido: true, nombre: 'Policía', detalle: 'ok', racion_id: 6 } },
+    { status: 200, json: { racion_id: 6, nombre: null, anulada_en: '2026-10-19T12:31:00' } },
   ], async (llamadas) => {
     const lista = await obtenerChecklist();
     assert.deepEqual(lista.policias[0], {
-      clave: 'policia:1', policiaId: 1, numero: 1, nombre: 'Policía 1', servida: true, racionId: 5,
-      fechaHora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true,
+      id: 5, nombre: 'Policía', fechaHora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true,
     });
-    assert.equal(lista.policias[1].servida, false);
-    assert.equal(lista.policias[1].origen, null);
-    assert.equal(lista.policias[2].clave, 'racion:7');
-    const r = await marcarPoliciaEnChecklist(2);
+    const r = await registrarPoliciaEnChecklist();
     assert.equal(r.valido, true);
+    assert.equal(llamadas[1].metodo, 'POST');
     assert.match(llamadas[1].url, /\/asistencias\/checklist\/policias$/);
-    assert.deepEqual(JSON.parse(llamadas[1].cuerpo), { policia_id: 2 });
+    assert.equal(llamadas[1].cuerpo, undefined, 'sin nombre: no hay cuerpo');
     await desmarcarPoliciaEnChecklist(6);
     assert.equal(llamadas[2].metodo, 'DELETE');
     assert.match(llamadas[2].url, /\/asistencias\/checklist\/policias\/6$/);
   });
-  await assert.rejects(marcarPoliciaEnChecklist(0), /Policía inválido/);
 });
 
-test('contrato: alta y baja de policías por número (jefatura)', async () => {
-  await conFetch([
-    { status: 200, json: [{ id: 1, numero: 1, nombre: 'Policía 1', activo: true }] },
-    { status: 201, json: { id: 2, numero: 2, nombre: 'Policía 2', activo: true } },
-    { status: 200, json: { id: 1, numero: 1, nombre: 'Policía 1', activo: false } },
-  ], async (llamadas) => {
-    assert.deepEqual(await obtenerPolicias(), [{ id: 1, numero: 1, nombre: 'Policía 1', activo: true }]);
-    assert.equal((await crearPolicia()).numero, 2);
-    assert.equal(llamadas[1].metodo, 'POST');
-    assert.match(llamadas[1].url, /\/policias$/);
-    assert.equal((await cambiarEstadoPolicia(1, false)).activo, false);
-    assert.equal(llamadas[2].metodo, 'PATCH');
-    assert.deepEqual(JSON.parse(llamadas[2].cuerpo), { activo: false });
-  });
-});
-
-test('policías en el checklist: pendiente con Entregar, entregado con Deshacer, sin campo de nombre', () => {
+test('Registrar policía: botón con confirmación, sin campo de nombre, y lista de la comida', () => {
   const datos = {
     momento: '2026-10-19T12:30:00', fueraDeHorario: false, comidaId: 2, comida: 'Almuerzo',
     fechaComida: '2026-10-19',
     personas: [{ id: 1, nombre: 'Zoila', servida: false }],
     policias: [
-      { clave: 'policia:1', policiaId: 1, numero: 1, nombre: 'Policía 1', servida: true, racionId: 5,
-        fechaHora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true },
-      { clave: 'policia:2', policiaId: 2, numero: 2, nombre: 'Policía 2', servida: false, racionId: null,
-        fechaHora: null, origen: null, anulable: false },
-      { clave: 'racion:7', policiaId: null, numero: null, nombre: 'Policía', servida: true, racionId: 7,
-        fechaHora: '2026-10-19T12:12:00', origen: 'huella', anulable: false },
+      { id: 5, nombre: 'Policía', fechaHora: '2026-10-19T12:10:00', origen: 'checklist', anulable: true },
+      { id: 6, nombre: 'Policía', fechaHora: '2026-10-19T12:12:00', origen: 'huella', anulable: false },
     ],
   };
   const html = renderToStaticMarkup(h(ChecklistCocina, { datosIniciales: datos }));
+  assert.match(html, />Registrar policía</);
   assert.doesNotMatch(html, /Nuevo policía|Nombre completo/);
-  assert.match(html, /aria-label="Policías en Almuerzo"/);
-  assert.match(html, /2 de 3/);
-  assert.match(html, /aria-label="Entregar ración a Policía 2"/);
+  assert.equal(html.match(/<input/g).length, 1, 'solo el buscador');
+  assert.match(html, /Policías registrados/);
   assert.match(html, /Checklist · 12:10/);
   assert.match(html, /Huella · 12:12/);
   // Solo la ración propia del checklist ofrece Deshacer.
   assert.equal(html.match(/>Deshacer</g)?.length, 1);
-  assert.equal(html.match(/<input/g).length, 1, 'solo el buscador');
+  // La lista de policías va antes que el personal.
+  assert.ok(html.indexOf('Policías registrados') < html.indexOf('Zoila'));
+});
+
+test('Registrar policía: la confirmación pregunta antes de registrar', () => {
+  const html = renderToStaticMarkup(h(RegistrarPolicia, { abiertoInicial: true }));
+  assert.match(html, /role="dialog"/);
+  assert.match(html, /¿Desea registrar un policía\?/);
+  assert.match(html, />Cancelar</);
+  assert.match(html, />Sí, registrar policía</);
 });
