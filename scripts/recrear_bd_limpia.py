@@ -12,8 +12,9 @@ Pasos, todos contra la base de DB_NAME (comedorback/.env):
   3. alembic upgrade head: las 8 tablas (6 del comedor + usuarios_sistema e
      intentos_login), las columnas del formulario y las 9 vistas v_*.
   4. Verificación: están las 8 tablas y las 9 vistas, y cada vista responde.
-  5. Semilla: python -m app.semillas (horarios, coeficientes, mapeo). La
-     cuenta de sistemas NO se crea acá: python -m app.semillas.admin aparte.
+  5. Semilla: python -m app.semillas (horarios, coeficientes, mapeo y las
+     cuentas iniciales root, jefa y cocinera, con clave nombre+2026 que se
+     cambia en el primer ingreso).
 
 Idempotente: correrlo dos veces deja la base igual. DESTRUCTIVO para
 DB_NAME: borra todo lo que tenga, incluidas las asistencias y las cuentas de
