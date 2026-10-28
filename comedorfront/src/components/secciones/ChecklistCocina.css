@@ -127,6 +127,8 @@
   margin: 0 -4px;
   padding: var(--e-2) 4px var(--e-3);
   background: var(--c-fondo);
+  /* Tapa el margen superior del contenedor: la lista no se asoma por encima. */
+  box-shadow: 0 -32px 0 var(--c-fondo);
 }
 
 .checklist__chip-cuenta {
@@ -147,8 +149,11 @@
   color: #ffffff;
 }
 
-.checklist__servicio {
-  min-width: 220px;
+/* Ancho fijo: a pantalla de PC la barra entra en un solo renglón. */
+.app-select.checklist__servicio {
+  flex: 0 1 240px;
+  width: 240px;
+  min-width: 180px;
 }
 
 /* ---------- Avisos ---------- */
