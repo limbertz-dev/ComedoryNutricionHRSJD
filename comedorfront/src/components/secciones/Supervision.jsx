@@ -443,7 +443,7 @@ export default function Supervision({
                 </span>
                 <span
                   className="supervision__pestana-cifra supervision__pestana-cifra--policia"
-                  data-tooltip="Policías (aparte del cupo del personal)"
+                  data-tooltip="Policías: suman al total de raciones"
                 >
                   <IconoEscudo tamano={14} />
                   <span className="solo-lectores">Policías: </span>
@@ -752,7 +752,7 @@ function ResumenPestana({ resumen, dia }) {
             <IconoEscudo tamano={16} /> Policías
           </dt>
           <dd>{resumen.policias}</dd>
-          <small>Aparte del cupo del personal</small>
+          <small>{`Total con policías: ${resumen.servidas + resumen.policias} raciones`}</small>
         </div>
       </dl>
     </section>

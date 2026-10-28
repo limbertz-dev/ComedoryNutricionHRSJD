@@ -34,11 +34,12 @@ Secciones del sidebar (`src/navegacion.js`):
    permitidas; lo decide el servidor) y marca la entrega con
    `POST /asistencias/checklist` (`metodo='checklist'`, mismas reglas que la
    huella). Solo la misma cocinera deshace su marca, mientras la comida siga
-   abierta y sin temporizador (`DELETE /asistencias/checklist/{id}`). «Nuevo
-   policía» registra por nombre una ración de policía sin huella (vía libre, solo
-   en horario, columna Policías: `POST /asistencias/checklist/policias`); los
-   policías de la comida (checklist y huella) se listan aparte. El panel flotante
-   cambia entre el checklist y Control Biométrico.
+   abierta y sin temporizador (`DELETE /asistencias/checklist/{id}`). Los
+   policías no tienen identidad: «Registrar policía» pide confirmación y suma
+   una ración a la columna Policías (vía libre, solo en horario:
+   `POST /asistencias/checklist/policias`, sin cuerpo); los de la comida se listan
+   antes del personal, con Deshacer para los propios. El panel flotante cambia
+   entre el checklist y Control Biométrico.
 1. **Control Biométrico** — marcaciones en vivo, solo para la cocinera, en
    pantalla completa sin sidebar ni header. Las lecturas las registra el
    lector autorizado; el navegador nunca declara una marcación biométrica.
@@ -48,6 +49,7 @@ Secciones del sidebar (`src/navegacion.js`):
    `Idempotency-Key` (`src/identificacion.js`), sin nota ni motivo. La huella
    de un policía (vía libre, sin persona del padrón) llega como origen
    `racion_policia` y se muestra como «Policía registrado», con check.
+   El mismo «Registrar policía» con confirmación está en la barra superior.
 2. **Supervisión del comedor** — tabla en vivo para la jefa: pestañas
    por comida (estado, aceptadas, rechazos, manuales), resumen de la pestaña
    con su período y las marcaciones del día (hasta 1000) con filtros por resultado
@@ -56,7 +58,7 @@ Secciones del sidebar (`src/navegacion.js`):
    cocinera; aquí se ve su resultado final y, al pie, la consulta de
    intervenciones de cocina (`GET /intervenciones-cocina`), sin aprobaciones.
    Las raciones de policía van en su propio apartado «Policías», fuera de la
-   tabla del personal; no aparecen en el Historial.
+   tabla del personal, y suman al total de raciones; no aparecen en el Historial.
    Solo lectura: ningún control registra, autoriza ni modifica raciones.
 3. **Resumen** — cupo del turno, raciones del día por categoría y lecturas del
    lector, cada conteo con su período (`GET /pantalla/estado`, `src/resumen.js`).

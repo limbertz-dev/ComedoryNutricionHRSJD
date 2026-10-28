@@ -252,6 +252,27 @@
   background: var(--c-superficie-2);
 }
 
+/* «Registrar policía» de cocina, con su aviso al lado. */
+.escenario__policia {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+  margin-left: auto;
+}
+
+.escenario__policia-aviso {
+  font-size: var(--t-sm);
+  font-weight: 700;
+}
+
+.escenario__policia-aviso--exito {
+  color: var(--c-acento-oscuro);
+}
+
+.escenario__policia-aviso--error {
+  color: var(--c-error);
+}
+
 .escenario__lector {
   display: inline-flex;
   align-items: center;

@@ -151,10 +151,6 @@ class SolicitudChecklist(BaseModel):
     usuario_id: int = Field(gt=0, description="users.id de quien recibe la ración.")
 
 
-class SolicitudPoliciaChecklist(BaseModel):
-    nombre: str = Field(max_length=200, description="Nombre del policía, escrito por cocina.")
-
-
 class RespuestaPoliciaChecklist(BaseModel):
     valido: bool
     motivo: str | None = Field(default=None, description="fuera_horario | sin_columna_policias")
