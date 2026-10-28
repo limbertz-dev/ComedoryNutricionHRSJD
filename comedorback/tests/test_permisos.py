@@ -41,6 +41,9 @@ MATRIZ = [
     ("GET", "/lector/vinculos", None, JEFATURA),
     ("POST", "/lector/vinculos", {"identificador": "1", "usuario_id": 1}, JEFATURA),
     ("DELETE", "/lector/vinculos/1", None, JEFATURA),
+    # Policías por número: jefatura; la cocinera solo los marca en el checklist.
+    ("GET", "/policias", None, JEFATURA),
+    ("PATCH", "/policias/1", {"activo": False}, JEFATURA),
 ]
 
 # Lo único que responde sin token de acceso.

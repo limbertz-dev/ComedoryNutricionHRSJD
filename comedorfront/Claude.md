@@ -34,11 +34,12 @@ Secciones del sidebar (`src/navegacion.js`):
    permitidas; lo decide el servidor) y marca la entrega con
    `POST /asistencias/checklist` (`metodo='checklist'`, mismas reglas que la
    huella). Solo la misma cocinera deshace su marca, mientras la comida siga
-   abierta y sin temporizador (`DELETE /asistencias/checklist/{id}`). «Nuevo
-   policía» registra por nombre una ración de policía sin huella (vía libre, solo
-   en horario, columna Policías: `POST /asistencias/checklist/policias`); los
-   policías de la comida (checklist y huella) se listan aparte. El panel flotante
-   cambia entre el checklist y Control Biométrico.
+   abierta y sin temporizador (`DELETE /asistencias/checklist/{id}`). Los
+   policías van por número (Policía 1, 2, ...; los da de alta y de baja la
+   jefatura en Supervisión con `GET|POST|PATCH /policias`): la cocinera los
+   marca como al personal, una ración por comida, y Deshacer los devuelve a
+   pendiente (`POST /asistencias/checklist/policias` con `policia_id`). El panel
+   flotante cambia entre el checklist y Control Biométrico.
 1. **Control Biométrico** — marcaciones en vivo, solo para la cocinera, en
    pantalla completa sin sidebar ni header. Las lecturas las registra el
    lector autorizado; el navegador nunca declara una marcación biométrica.
@@ -56,7 +57,8 @@ Secciones del sidebar (`src/navegacion.js`):
    cocinera; aquí se ve su resultado final y, al pie, la consulta de
    intervenciones de cocina (`GET /intervenciones-cocina`), sin aprobaciones.
    Las raciones de policía van en su propio apartado «Policías», fuera de la
-   tabla del personal; no aparecen en el Historial.
+   tabla del personal; no aparecen en el Historial. Debajo, «Policías del
+   comedor»: alta del siguiente número y baja o reactivación (no toca raciones).
    Solo lectura: ningún control registra, autoriza ni modifica raciones.
 3. **Resumen** — cupo del turno, raciones del día por categoría y lecturas del
    lector, cada conteo con su período (`GET /pantalla/estado`, `src/resumen.js`).
