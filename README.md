@@ -8,8 +8,8 @@ Sistema de Comedor y Nutrición Hospitalaria, módulo Personal / Comensales: con
 
 ## Desarrollo
 
-Los cambios revisados se integran en `develop`. La publicacion requiere
-autorizacion explicita y no forma parte del arranque local.
+- `main`: la versión entregada al hospital.
+- `develop`: donde se integran los cambios antes de pasar a `main`.
 
 ## Puesta en marcha
 
@@ -23,14 +23,17 @@ Todo en PowerShell.
 
    Completar `DB_PASSWORD`, `DB_NAME` y `DB_NAME_TURNOS`. Fuera de `desarrollo`, `AUTH_JWT_SECRETO` es obligatorio (32+ caracteres).
 
-1. **Base propia** (en `comedorback/`): `.venv\Scripts\python -m alembic upgrade head` y `.venv\Scripts\python -m app.semillas` (horarios, coeficientes y mapeo de categorías).
+1. **Base propia** (en `comedorback/`): `.venv\Scripts\python -m alembic upgrade head` y `.venv\Scripts\python -m app.semillas` (horarios, coeficientes, mapeo de categorías y cuentas iniciales).
 
-2. **Cuentas**: se dan de alta con clave temporal, que se muestra una sola vez y se cambia en el primer ingreso:
+2. **Cuentas iniciales**: la semilla crea tres cuentas. La clave inicial es el nombre de usuario + 2026 y el sistema obliga a cambiarla en el primer ingreso:
 
-   ```powershell
-   .venv\Scripts\python -m app.semillas.admin --username jefa --rol jefa
-   .venv\Scripts\python -m app.semillas.admin --username cocinera --rol cocinera
-   ```
+   | Usuario | Clave inicial | Rol |
+   |---|---|---|
+   | `root` | `root2026` | Sistemas (administración de cuentas) |
+   | `jefa` | `jefa2026` | Jefa de nutrición |
+   | `cocinera` | `cocinera2026` | Cocinera |
+
+   Más cuentas se crean desde **Cuentas** en la aplicación. Para dar una clave temporal nueva a una cuenta: `.venv\Scripts\python -m app.semillas.admin --username jefa --resetear`.
 
 3. **API**: `.venv\Scripts\python -m uvicorn app.main:app --port 8000`. `GET /salud` informa el entorno, las dos bases y la revisión de alembic.
 

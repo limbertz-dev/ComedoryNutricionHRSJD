@@ -121,7 +121,7 @@ no entiende y se administran a mano en su migración.
 La corre la receta; a mano, después de `alembic upgrade head`:
 
 ```powershell
-python -m app.semillas     # las tres, idempotentes
+python -m app.semillas     # las cuatro, idempotentes
 ```
 
 | Semilla | Qué carga |
@@ -129,6 +129,7 @@ python -m app.semillas     # las tres, idempotentes
 | `app.semillas.horarios` | Franjas horarias de cada comida (**provisionales**, solo el punto de partida): desde R2 se cambian desde «Reglas del sistema» |
 | `app.semillas.coeficientes` | Coeficientes de ración del formulario (0,15 · 0,50 · 0,05 · 0,30) |
 | `app.semillas.mapeo_categorias` | Categoría del hospital → columna del formulario. Decisión del hospital, a confirmar |
+| `app.semillas.cuentas_iniciales` | Cuentas `root` (sistemas), `jefa` y `cocinera`, con clave inicial nombre + 2026 que se cambia en el primer ingreso. Una cuenta que ya existe no se toca |
 
 Las columnas del formulario van en migración porque son datos 100 % propios e
 impresos en el papel. Horarios, coeficientes y mapeo van en semilla porque
@@ -209,20 +210,21 @@ Generar el secreto: `python -c "import secrets; print(secrets.token_urlsafe(48))
 En desarrollo, sin secreto se usa uno efímero y las sesiones se pierden cada
 vez que la API se reinicia.
 
-### Primera cuenta
+### Cuentas iniciales
 
-Después de `alembic upgrade head`, desde `comedorback/`:
+`python -m app.semillas` crea `root` (sistemas), `jefa` y `cocinera` con clave
+inicial `root2026`, `jefa2026` y `cocinera2026`. Son temporales: en el primer
+ingreso el sistema pide cambiarlas, así que una clave conocida no queda en uso.
+
+Para otras cuentas o para resetear una clave, desde `comedorback/`:
 
 ```powershell
-python -m app.semillas.admin                                 # 'admin', rol sistemas
-python -m app.semillas.admin --username jefa --rol jefa      # otras cuentas
-python -m app.semillas.admin --username jefa --resetear      # clave temporal nueva
+python -m app.semillas.admin --username cocinera2 --rol cocinera   # otra cuenta
+python -m app.semillas.admin --username jefa --resetear            # clave temporal nueva
 ```
 
-Imprime una clave temporal **una sola vez**: en el primer ingreso se pide
-cambiarla. Es idempotente, y `--resetear` también reactiva la cuenta y cierra
-sus sesiones. No va dentro de `python -m app.semillas` para que la clave no
-se pierda en la salida de la receta de recreación.
+`admin` imprime una clave temporal aleatoria **una sola vez**. Es idempotente, y
+`--resetear` también reactiva la cuenta y cierra sus sesiones.
 
 ## Endpoints
 

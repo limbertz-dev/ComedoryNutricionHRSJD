@@ -25,12 +25,12 @@ Copy-Item docker\compose.env.example .env  # solo si todavía no existe
 docker compose up -d --build
 docker compose ps
 docker compose exec front nginx -t
-docker compose exec api python -m app.semillas.admin --username jefa --rol jefa
 ```
 
-La primera cuenta recibe una clave temporal, que se muestra una vez y se cambia
-en el primer ingreso. Nunca copiar el archivo de ejemplo encima de un `.env`
-que ya tenga configuración.
+Al arrancar, la API crea las cuentas iniciales `root`, `jefa` y `cocinera`, con
+clave `root2026`, `jefa2026` y `cocinera2026`; el sistema pide cambiarlas en el
+primer ingreso. Nunca copiar el archivo de ejemplo encima de un `.env` que ya
+tenga configuración.
 
 | Servicio | Dirección |
 |---|---|
