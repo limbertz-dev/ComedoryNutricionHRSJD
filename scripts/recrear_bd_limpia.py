@@ -9,9 +9,9 @@ Pasos, todos contra la base de DB_NAME (comedorback/.env):
      y la base de turnos tiene que existir (las vistas la leen).
   2. DROP DATABASE IF EXISTS + CREATE DATABASE (utf8mb4_unicode_ci, la
      collation de las tablas del módulo de turnos).
-  3. alembic upgrade head: las 8 tablas (6 del comedor + usuarios_sistema e
-     intentos_login), las columnas del formulario y las 9 vistas v_*.
-  4. Verificación: están las 8 tablas y las 9 vistas, y cada vista responde.
+  3. alembic upgrade head: las 16 tablas propias, las columnas del
+     formulario y las 9 vistas v_*.
+  4. Verificación: están las 16 tablas y las 9 vistas, y cada vista responde.
   5. Semilla: python -m app.semillas (horarios, coeficientes, mapeo y las
      cuentas iniciales root, jefa y cocinera, con clave nombre+2026 que se
      cambia en el primer ingreso).
