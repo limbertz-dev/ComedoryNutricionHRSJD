@@ -100,8 +100,8 @@ export default function HuellasRegistradas({ version = 0, consultar = obtenerReg
                   {!policia && !fila.comensal.disponible ? <span>Ficha no disponible en el padrón actual</span> : null}</td>
                 <td><strong>{fila.comensal.categoria || 'Sin categoría'}</strong>
                   <span>{policia ? 'Fuera del padrón · vía libre' : fila.comensal.servicio || 'Sin servicio'}</span></td>
-                <td><strong>{fila.cuenta.nombre || fila.cuenta.usuario || (fila.cuenta.id ? `Cuenta ${fila.cuenta.id}` : 'Laboratorio QA')}</strong>
-                  <span>{fila.cuenta.usuario || (fila.cuenta.id ? 'Cuenta no disponible' : 'Alta de prueba')}</span></td>
+                <td><strong>{fila.cuenta.nombre || fila.cuenta.usuario || (fila.cuenta.id ? `Cuenta ${fila.cuenta.id}` : 'Sin cuenta')}</strong>
+                  <span>{fila.cuenta.usuario || (fila.cuenta.id ? 'Cuenta no disponible' : 'Registro sin cuenta')}</span></td>
                 <td>{policia
                   ? <Etiqueta tono={fila.activo === false ? 'neutro' : 'acento'}>{fila.activo === false ? 'Policía · baja' : 'Policía'}</Etiqueta>
                   : <Etiqueta tono="acento">Vinculada</Etiqueta>}</td>

@@ -386,7 +386,7 @@ export async function obtenerPersonasEnrolamiento({ signal } = {}) {
   return personas.map(p => ({ ...p, servicio: p.servicio ?? 'Sin servicio' }));
 }
 
-/** Registro de vinculos de huella: consulta de la jefa en el laboratorio. */
+/** Registro de vinculos de huella: consulta de la jefa. */
 export async function obtenerRegistrosHuellas({ busqueda = '', limite = 50, desplazamiento = 0, fecha = null, signal } = {}) {
   if (typeof busqueda !== 'string' || busqueda.trim().length > 100
     || (fecha !== null && !FECHA_API.test(fecha))
