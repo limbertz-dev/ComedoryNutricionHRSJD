@@ -107,6 +107,7 @@ La cadena empieza en `4b5a9ed9330e` (nueva base) y hoy termina en
 
 | `ca83b39b791c` | Horarios inmediatos: `horarios_comida.vigente_desde/hasta` y `lecturas_biometricas.fecha_hora` pasan a `DATETIME(6)`; tabla `cerrojos`. Se niega a perder horas o microsegundos al bajar |
 | `e1a7c3b9d5f2` | Intervenciones de cocina: tabla `intervenciones_lectura` (solo inserciones) y `UNIQUE(asistencias.lectura_id)`. La subida se detiene, sin tocar nada, si ya hay una lectura con dos asistencias; la bajada se niega a borrar auditoría |
+| `b9d1f3a5c7e8` | Internos y Residentes con columna propia, como en el rol de turnos: Internos · Residentes · Policías · Médicos · Técnicos · Sin clasificar. Todo Internos-* va a Internos; las raciones ya servidas no se reclasifican |
 
 Reemplaza a la cadena vieja `fa64a5d4e912 → … → f6a7b8c9d0e1`, que asumía las
 tablas heredadas copiadas en la misma base y le agregaba columnas a `comidas`.
@@ -128,7 +129,7 @@ python -m app.semillas     # las tres, idempotentes
 |---|---|
 | `app.semillas.horarios` | Franjas horarias de cada comida (**provisionales**, solo el punto de partida): desde R2 se cambian desde «Reglas del sistema» |
 | `app.semillas.coeficientes` | Coeficientes de ración del formulario (0,15 · 0,50 · 0,05 · 0,30) |
-| `app.semillas.mapeo_categorias` | Categoría del hospital → columna del formulario. Decisión del hospital, a confirmar |
+| `app.semillas.mapeo_categorias` | Categoría del hospital → columna del formulario (Internos-* → Internos, Residentes, Medicos → Médicos, Tecnicos → Técnicos) |
 
 Las columnas del formulario van en migración porque son datos 100 % propios e
 impresos en el papel. Horarios, coeficientes y mapeo van en semilla porque
