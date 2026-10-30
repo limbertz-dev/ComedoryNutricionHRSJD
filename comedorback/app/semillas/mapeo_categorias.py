@@ -1,9 +1,9 @@
 """Carga qué columna del formulario le toca a cada categoría del hospital.
 
-Es una decisión del hospital, no un dato fijo. Los valores de abajo son el
-mapeo que tenía cargado la base de desarrollo al 2026-09-24; hay que
-confirmarlos con la jefatura, sobre todo internos y residentes, que no tienen
-columna propia en el formulario de papel.
+Es una decisión del hospital, no un dato fijo. Desde el 2026-10-29 internos
+y residentes tienen columna propia, como en el rol de turnos del personal de
+salud (migración b9d1f3a5c7e8): todo interno, de cualquier carrera, va a
+Internos.
 
 Se resuelve por NOMBRE de categoría a través de v_categorias, no por id: el
 id es de la base de turnos y puede cambiar entre copias. Una categoría que no
@@ -28,14 +28,14 @@ from app.modelos.comedor import CategoriaReporte, CategoriaReporteMap
 from app.modelos.heredados import Categoria
 
 MAPEO = [
+    ("Internos", "internos"),
+    ("Internos-Medicina", "internos"),
+    ("Internos-Bioquimica", "internos"),
+    ("Internos-Imagenologia", "internos"),
+    ("Internos-Fisioterapia", "internos"),
+    ("Residentes", "residentes"),
     ("Medicos", "medico"),
-    ("Internos", "medico"),
-    ("Residentes", "medico"),
-    ("Internos-Medicina", "medico"),
     ("Tecnicos", "tecnicos"),
-    ("Internos-Bioquimica", "tecnicos"),
-    ("Internos-Imagenologia", "tecnicos"),
-    ("Internos-Fisioterapia", "tecnicos"),
 ]
 
 
